@@ -1,0 +1,87 @@
+[package]
+name = "aitrack"
+version = "0.3.9-beta"
+edition = "2021"
+# File::try_lock (the single-instance lock) needs Rust 1.89
+rust-version = "1.89"
+description = "Small native window that tracks Claude plan usage"
+publish = false
+license = "GPL-3.0-or-later"
+build = "build.rs"
+
+[lib]
+name = "aitrack"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aitrack"
+path = "src/main.rs"
+
+[features]
+default = ["gui"]
+gui = ["dep:eframe"]
+# Test hooks: env overrides for the endpoint URLs and the Grok program, plain-http mock servers.
+# Never on in real builds; switched on for `cargo test` by the self dev-dependency below.
+test-hooks = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+eframe = { version = "0.31", optional = true, default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+ruzstd = "0.9.1"
+png = "0.18"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["UI_Notifications", "Data_Xml_Dom", "Foundation", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_Foundation"] }
+winreg = "0.55"
+
+# Native macOS notifications (UNUserNotificationCenter), used only from inside the .app bundle.
+# objc2 0.6 / objc2-foundation 0.3 are already in the lock file through eframe's dependencies.
+# The window placement needs NSScreen from the older objc2 0.5 family that eframe/winit also use
+# (MIT, no new crates): objc2-foundation 0.2 is renamed so both versions can be named here.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSError", "NSBundle"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNNotification", "UNNotificationContent", "UNNotificationSound", "UNNotificationRequest", "UNNotificationTrigger", "UNUserNotificationCenter", "UNError"] }
+block2 = "0.6"
+objc2-app-kit = { version = "0.2.2", default-features = false, features = ["std", "NSScreen"] }
+objc2-foundation-02 = { package = "objc2-foundation", version = "0.2.2", default-features = false, features = ["std", "NSThread", "NSArray", "NSGeometry"] }
+
+# Lean debug builds: the many integration-test binaries each link the whole app, so debug info is
+# the main thing that fills the disk. Line tables keep file:line in panics and backtraces; the
+# dependencies get no debug info at all. (Release is unchanged.)
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.test]
+debug = "line-tables-only"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+# panic = "abort" and strip: a panic in a release build ends the process with no dialog and no stack
+# (the window is a Windows-subsystem app). Do not add `expect()` / `unwrap()` / indexing on any path
+# that parses files, JSON or network data; return an error or skip the item instead.
+panic = "abort"
+
+[build-dependencies]
+embed-resource = "3"
+
+[dev-dependencies]
+aitrack = { path = ".", default-features = false, features = ["test-hooks"] }
+
+[[example]]
+name = "make_toast_icons"
+required-features = ["gui"]
+
+[[example]]
+name = "render"
+required-features = ["gui"]

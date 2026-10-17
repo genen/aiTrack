@@ -1,0 +1,16 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform Condition="'$(InstallerPlatform)' == ''">x64</InstallerPlatform>
+    <OutputName>aiTrack</OutputName>
+    <DebugSymbols>false</DebugSymbols>
+    <!-- All-users Start menu and desktop shortcuts use per-user folder names with HKCU key paths. ICE38, ICE43 and
+         ICE57 disagree about HKLM versus HKCU for that case (same as the Afterglow installer). -->
+    <SuppressIces>ICE38;ICE43;ICE57</SuppressIces>
+    <DefineConstants>Version=$(ProductVersion);UpgradeCode=$(UpgradeCode);ExePath=$(ExePath);IconPath=$(IconPath);LicenseRtf=$(LicenseRtf);LicenseTxt=$(LicenseTxt);ReadmePath=$(ReadmePath)</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,279 @@
+name: Build and release macOS app
+
+# Apple Silicon (arm64) only. Pull requests build, check and test only, always ad-hoc signed (codesign -s -).
+# Push and manual runs use the Apple signing secrets when they exist (see docs/MAC-SIGNING.md): Developer ID
+# signed + notarized + stapled. Without them the build is ad-hoc signed and the release text says so.
+# The secrets are passed only to the steps that need them, and never on pull_request events.
+# A release is published when a v<version> tag is pushed (v0.3.1-beta, v1.0.0), or when the workflow is run by
+# hand with a tag. A hand run builds the chosen branch and the release is created on that commit if it does not
+# exist. <version> must be exactly the version in Cargo.toml. A -beta version is a pre-release.
+# The release is shared with the Windows workflow (release-msi.yml): whichever runs first creates it, the other
+# adds its files.
+on:
+  push:
+    tags: ['v*.*.*-*', 'v*.*.*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to publish, for example v0.3.1-beta. It must match the version in Cargo.toml. Leave blank to build and test without publishing.
+        required: false
+        type: string
+      replace:
+        description: Replace the files if the release already has them.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One run at a time per tag or branch. A release run is never cancelled part way.
+concurrency:
+  group: release-macos-${{ inputs.tag || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: macos-14
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+      channel: ${{ steps.version.outputs.channel }}
+      mode: ${{ steps.mode.outputs.mode }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # the build number in the app (aitrack --version) is the commit count
+          fetch-depth: 0
+
+      - name: Read the version
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml | head -n 1)
+          if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::No valid version found in Cargo.toml (got '$version')."
+            exit 1
+          fi
+          tag=""
+          if [ "$REF_TYPE" = "tag" ]; then tag="$REF_NAME"
+          elif [ -n "${INPUT_TAG// /}" ]; then tag=$(printf '%s' "$INPUT_TAG" | tr -d '[:space:]'); fi
+          publish=false
+          if [ -n "$tag" ]; then
+            publish=true
+            if [ "$tag" != "v$version" ]; then
+              echo "::error::Tag $tag does not match the version in Cargo.toml. Tag the commit as v$version, or change the version in Cargo.toml first."
+              exit 1
+            fi
+          fi
+          channel=stable
+          if printf '%s\n' "$version" | grep -Eq '(^|[.-])beta($|[.-])'; then channel=beta; fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "publish=$publish"
+            echo "channel=$channel"
+          } >> "$GITHUB_OUTPUT"
+          echo "Version $version ($channel). Publish: $publish."
+
+      - name: Set up Rust
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy --target aarch64-apple-darwin
+          rustup default stable-aarch64-apple-darwin
+          rustc --version
+          minor=$(rustc --version | sed -n 's/^rustc 1\.\([0-9]*\)\..*/\1/p')
+          if [ -z "$minor" ] || [ "$minor" -lt 89 ]; then
+            echo "::error::Rust 1.89 or newer is needed (rust-version in Cargo.toml), found: $(rustc --version)"
+            exit 1
+          fi
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        env:
+          AITRACK_NO_SPAWN: "1"  # tests never start real programs (Safari, osascript banners)
+        run: cargo test
+
+      - name: Build the release binary
+        run: cargo build --release
+
+      - name: Check the release binary
+        run: |
+          set -euo pipefail
+          file target/release/aitrack
+          lipo -archs target/release/aitrack | grep -qx arm64
+          if grep -q 'test hooks' target/release/aitrack; then
+            echo "::error::aitrack was built with the test-hooks feature."
+            exit 1
+          fi
+
+      - name: Signing mode
+        id: mode
+        env:
+          APPLE_CERT_P12_BASE64: ${{ github.event_name != 'pull_request' && secrets.APPLE_CERT_P12_BASE64 || '' }}
+          APPLE_CERT_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.APPLE_CERT_PASSWORD || '' }}
+          APPLE_API_KEY_P8_BASE64: ${{ github.event_name != 'pull_request' && secrets.APPLE_API_KEY_P8_BASE64 || '' }}
+          APPLE_API_KEY_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_API_ISSUER_ID || '' }}
+          APPLE_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_ID || '' }}
+          APPLE_APP_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.APPLE_APP_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_TEAM_ID || '' }}
+        run: |
+          set -euo pipefail
+          mode=$(./scripts/sign-notarize-mac.sh --print-mode)
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          case "$mode" in
+            notarized-*) echo "macOS build mode: Developer ID signed + notarized ($mode)." ;;
+            signed) echo "macOS build mode: Developer ID signed, NOT notarized (no notary credentials)." ;;
+            *) echo "macOS build mode: ad-hoc signed (no signing secrets, or a pull request)." ;;
+          esac
+
+      - name: Build the app (sign and notarize when configured)
+        env:
+          APPLE_CERT_P12_BASE64: ${{ github.event_name != 'pull_request' && secrets.APPLE_CERT_P12_BASE64 || '' }}
+          APPLE_CERT_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.APPLE_CERT_PASSWORD || '' }}
+          APPLE_API_KEY_P8_BASE64: ${{ github.event_name != 'pull_request' && secrets.APPLE_API_KEY_P8_BASE64 || '' }}
+          APPLE_API_KEY_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_API_ISSUER_ID || '' }}
+          APPLE_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_ID || '' }}
+          APPLE_APP_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.APPLE_APP_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_TEAM_ID || '' }}
+        run: ./scripts/make-app.sh
+
+      - name: Make README.pdf (never committed)
+        run: ./scripts/readme-pdf-mac.sh
+
+      - name: Build the dmg and the zip (sign and notarize when configured)
+        env:
+          APPLE_CERT_P12_BASE64: ${{ github.event_name != 'pull_request' && secrets.APPLE_CERT_P12_BASE64 || '' }}
+          APPLE_CERT_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.APPLE_CERT_PASSWORD || '' }}
+          APPLE_API_KEY_P8_BASE64: ${{ github.event_name != 'pull_request' && secrets.APPLE_API_KEY_P8_BASE64 || '' }}
+          APPLE_API_KEY_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_API_ISSUER_ID || '' }}
+          APPLE_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_ID || '' }}
+          APPLE_APP_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.APPLE_APP_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_TEAM_ID || '' }}
+        run: ./scripts/make-dmg.sh
+
+      - name: Check the dmg and the zip carry README.md, README.pdf, LICENSE and docs/img
+        run: |
+          set -euo pipefail
+          ./scripts/mac-contents-check.sh dmg "dist/aiTrack-${{ steps.version.outputs.version }}-macos-arm64.dmg"
+          ./scripts/mac-contents-check.sh zip "dist/aiTrack-${{ steps.version.outputs.version }}-macos-arm64.zip"
+
+      - name: Keep the dmg
+        uses: actions/upload-artifact@v7
+        with:
+          name: aiTrack-${{ steps.version.outputs.version }}-macos-arm64-dmg
+          path: dist/aiTrack-${{ steps.version.outputs.version }}-macos-arm64.dmg
+          if-no-files-found: error
+
+      - name: Keep the zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: aiTrack-${{ steps.version.outputs.version }}-macos-arm64-zip
+          path: dist/aiTrack-${{ steps.version.outputs.version }}-macos-arm64.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Get the dmg
+        uses: actions/download-artifact@v8
+        with:
+          name: aiTrack-${{ needs.build.outputs.version }}-macos-arm64-dmg
+
+      - name: Get the zip
+        uses: actions/download-artifact@v8
+        with:
+          name: aiTrack-${{ needs.build.outputs.version }}-macos-arm64-zip
+
+      - name: Publish on the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+          CHANNEL: ${{ needs.build.outputs.channel }}
+          MODE: ${{ needs.build.outputs.mode }}
+          REPLACE: ${{ inputs.replace || false }}
+        run: |
+          set -euo pipefail
+          dmg="aiTrack-${VERSION}-macos-arm64.dmg"
+          zip="aiTrack-${VERSION}-macos-arm64.zip"
+          title="aiTrack ${VERSION}"
+          if [ "$CHANNEL" = "beta" ]; then kind="--prerelease"; first="${title} (pre-release)"; else kind="--latest"; first="${title}"; fi
+          for f in "$dmg" "$zip"; do
+            test -s "$f" || { echo "::error::$f was not downloaded from the build."; exit 1; }
+          done
+
+          case "$MODE" in
+            notarized-*) trust="These builds are signed with a Developer ID certificate and notarized by Apple, so they open normally: open the dmg and drag aiTrack to Applications." ;;
+            signed) trust="These builds are signed with a Developer ID certificate but not notarized, so macOS may still ask you to approve the app once: open the dmg, drag aiTrack to Applications, then right-click it and choose Open (or System Settings > Privacy & Security > Open Anyway)." ;;
+            *) trust="These builds are ad-hoc signed, not notarised, so macOS asks you to approve the app once: open the dmg, drag aiTrack to Applications, then right-click it and choose Open (or System Settings > Privacy & Security > Open Anyway)." ;;
+          esac
+          {
+            echo "macOS 12 or newer, Apple Silicon (M1 and later) only."
+            echo "$trust"
+            echo
+            echo "macOS SHA256:"
+            echo '```'
+            sha256sum "$dmg" "$zip"
+            echo '```'
+          } > mac-notes.md
+
+          # The tag has to point at the commit this run built.
+          if commit=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha 2>/dev/null) && [ "$commit" != "$GITHUB_SHA" ]; then
+            echo "::error::Tag $TAG points at $commit, but this run built $GITHUB_SHA."
+            exit 1
+          fi
+
+          # The Windows workflow makes the same release. If it is not there yet, create it; if the other
+          # workflow creates it first (create fails), fall through and add to it.
+          if ! gh release view "$TAG" --json tagName > /dev/null 2>&1; then
+            { echo "${first}"; echo; cat mac-notes.md; } > notes.md
+            if gh release create "$TAG" "$dmg" "$zip" --target "$GITHUB_SHA" --title "$title" --notes-file notes.md "$kind"; then
+              exit 0
+            fi
+            echo "Release creation failed, probably the Windows run created it first. Adding to it."
+            gh release view "$TAG" --json tagName > /dev/null
+          fi
+
+          # The release exists: never overwrite a file unless the run asked for it.
+          existing=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+          for f in "$dmg" "$zip"; do
+            if printf '%s\n' "$existing" | grep -Fxq "$f"; then
+              if [ "$REPLACE" != "true" ]; then
+                echo "::error::$TAG already has $f. Run the workflow by hand with Replace checked to overwrite it."
+                exit 1
+              fi
+            fi
+          done
+          gh release upload "$TAG" "$dmg" "$zip" --clobber
+
+          # Add the macOS notes to the existing text, once (the Windows run appends its section the same way).
+          body=$(gh release view "$TAG" --json body --jq .body)
+          if ! printf '%s\n' "$body" | grep -Fq "macOS SHA256:"; then
+            { printf '%s\n\n' "$body"; cat mac-notes.md; } > notes.md
+            gh release edit "$TAG" --notes-file notes.md
+          fi

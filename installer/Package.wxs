@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- aiTrack setup (WiX Toolset v6, 64-bit, all users).
+
+     Modelled on the Afterglow installer: WixUI_InstallDir (licence page, folder page, a "Run after install?"
+     box on the last page), HKCU key paths for the Start menu and desktop shortcuts, a major upgrade that
+     refuses downgrades. Built by scripts/installer.ps1; the values come in as preprocessor variables:
+       Version      four-part product version, for example 0.1.4.0 (from Cargo.toml)
+       UpgradeCode  fixed GUID of this product (hard-coded in installer.ps1, never change it)
+       ExePath      target\release\aitrack.exe
+       IconPath     assets\icon\aitrack.ico
+       LicenseRtf   installer\License.rtf (the licence page)
+       LicenseTxt   LICENSE (installed next to the exe)
+       ReadmePath   README.md (installed next to the exe)
+     Install scope: all users (per machine, Program Files, administrator prompt). A "just me" choice is not
+     offered; see the README ("Build the installer") for why, and for the portable zip that needs no admin. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="aiTrack" Manufacturer="aiTrack" Version="$(var.Version)"
+           UpgradeCode="$(var.UpgradeCode)" Scope="perMachine" Compressed="yes">
+    <SummaryInformation Description="aiTrack: Claude and Grok plan usage tracker" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of aiTrack is already installed. Remove it first if you want to install an older version." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="aitrack.ico" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="aitrack.ico" />
+    <Property Id="ARPCOMMENTS" Value="Claude and Grok plan usage tracker" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/genen/aiTrack" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+
+    <!-- The last page of setup offers "Run after install?", ticked by default. WixShellExec starts the app through
+         the shell as the user who ran setup. Silent installs (/qn) show no UI, so they never launch it. -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Run after install?" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <CustomAction Id="LaunchAiTrack" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixShellExec" Impersonate="yes" Return="ignore" />
+    <UI>
+      <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+      <!-- Set the target when Finish is clicked, so it uses the folder the user chose. -->
+      <Publish Dialog="ExitDialog" Control="Finish" Property="WixShellExecTarget" Value="[INSTALLFOLDER]aitrack.exe" Order="1" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchAiTrack" Order="2" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
+    </UI>
+
+    <!-- "Start with Windows" (Settings > General) writes the value aiTrack under
+         HKCU\Software\Microsoft\Windows\CurrentVersion\Run (src/startup.rs). Uninstalling removes it for the user
+         who runs the uninstall; other users of the PC keep their own value until they turn the setting off.
+         This is not run during an upgrade. reg.exe runs as that user (Impersonate="yes"), so HKCU is theirs.
+         The user's data in %USERPROFILE%\.aitrack is never touched. -->
+    <CustomAction Id="RemoveStartWithWindows" Directory="SystemFolder"
+                  ExeCommand="[SystemFolder]reg.exe delete &quot;HKCU\Software\Microsoft\Windows\CurrentVersion\Run&quot; /v aiTrack /f"
+                  Execute="deferred" Impersonate="yes" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="RemoveStartWithWindows" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="aiTrack">
+        <Component Id="MainFiles" Guid="41A1C1D9-C833-4A6E-A10F-BB4CEAB834B7">
+          <File Id="AiTrackExe" Name="aitrack.exe" Source="$(var.ExePath)" KeyPath="yes" />
+          <File Id="LicenseTxt" Name="LICENSE" Source="$(var.LicenseTxt)" />
+          <File Id="ReadmeMd" Name="README.md" Source="$(var.ReadmePath)" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="A92F62E4-4A08-48F7-886F-3BD894196946">
+        <Shortcut Id="StartMenuAiTrack" Name="aiTrack" Description="Claude and Grok plan usage tracker"
+                  Target="[INSTALLFOLDER]aitrack.exe" WorkingDirectory="INSTALLFOLDER" Icon="aitrack.ico" />
+        <RegistryValue Root="HKCU" Key="Software\aiTrack" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="4752F9F0-9466-4DB8-AC20-191C80BBA75C">
+        <Shortcut Id="DesktopAiTrack" Name="aiTrack" Description="Claude and Grok plan usage tracker"
+                  Target="[INSTALLFOLDER]aitrack.exe" WorkingDirectory="INSTALLFOLDER" Icon="aitrack.ico" />
+        <RegistryValue Root="HKCU" Key="Software\aiTrack" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+  </Package>
+</Wix>
