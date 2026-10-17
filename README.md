@@ -627,6 +627,13 @@ aiTrack only **reads** the folders of Claude and Grok. It never changes them.
 Nothing else is sent. There is no account, no analytics and no crash reporting. Sign-in tokens go only to those
 two hosts above, over HTTPS, and are never written to any file or log by aiTrack.
 
+### License, notices and policies
+
+aiTrack is free software under the GNU General Public License v3.0 or later ([LICENSE](LICENSE)). The open-source
+crates it is built from are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). A short privacy statement is in
+[PRIVACY.md](PRIVACY.md) and the code signing policy (Windows signing is planned, not yet in place) is in
+[CODE-SIGNING-POLICY.md](CODE-SIGNING-POLICY.md).
+
 ## 13. Troubleshooting
 
 **The Claude bars show dashes and "No current data".**

@@ -3,6 +3,13 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.3.10-beta] - 2026-10-17
+
+### Added
+- `THIRD-PARTY-NOTICES.md` (all 373 crates with version, license and source; regenerate with
+  `python3 scripts/gen-third-party.py`), `PRIVACY.md` and `CODE-SIGNING-POLICY.md`, linked from the README
+  (section 12). Preparation for making the repository public. Documentation only; no code changes.
+
 ## [0.3.9-beta] - 2026-10-17
 
 ### Fixed
