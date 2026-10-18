@@ -3,6 +3,12 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.3.21-beta] - 2026-10-18
+
+### Changed
+- README: pictures of the Grok Bot weekly pane and of the weekly blocks on the Stats page, with a note that the Stats page counts only finished weekly windows while the detail pane also counts the window in progress.
+- The Linux release notes now list the real `.deb` file name.
+
 ## [0.3.20-beta] - 2026-10-18
 
 ### Changed
