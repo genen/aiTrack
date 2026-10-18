@@ -3,8 +3,8 @@
 aiTrack is a small window for **Windows**, **macOS** and **Linux** that shows how much of your **Claude** and **Grok** plan
 limits you have used. It stays on top of your other windows, updates by itself, and warns you with a normal system
 notification before a limit runs out. The Mac version is for Apple silicon. Linux (new) is a first release for Ubuntu
-that has not yet been run on a real desktop by the maintainer (see [section 15](#15-known-limits-and-roadmap)). Where
-this guide names Windows, Mac or Linux, it applies to that system only.
+that the maintainer has tested on a real desktop (see [section 15](#15-known-limits-and-roadmap) for what is still
+unverified). Where this guide names Windows, Mac or Linux, it applies to that system only.
 
 ![aiTrack in the dark theme](docs/img/home-dark.png)
 ![aiTrack in the light theme](docs/img/home-light.png)
@@ -60,8 +60,8 @@ when that tool is installed.
 > fallback is not yet tested on the owner's PC.
 
 Release status: 0.3.0 is the first official release, tested on Windows (0.2.0 was an earlier test release). The Mac
-version has been checked on one Apple silicon Mac. Linux (new) has not yet been run on a real desktop by the
-maintainer. You can download an installer, a portable zip, a Mac disk image or a Linux `.deb` (see
+version has been checked on one Apple silicon Mac. Linux (new) has been tested by the
+maintainer on a real Ubuntu desktop. You can download an installer, a portable zip, a Mac disk image or a Linux `.deb` (see
 [section 3](#3-install-and-run)) or build it from source. aiTrack is free software under the GNU General Public
 License, version 3 or later (see `LICENSE`).
 
@@ -796,9 +796,9 @@ before them, for example `cargo run --release -- --sources`.
 Limits you should know about:
 
 - **Windows is the most tested system.** The Mac version (Apple silicon, latest macOS) has been checked on one Mac.
-  **Linux (new)** is a first release (Ubuntu 22.04 and newer, x86_64, `.deb`) that has not yet been run on a real
-  desktop by the maintainer: window placement, notifications, Start at login, badge launching and the Claude cache
-  layout on Linux are built from documentation and tests with fakes, not verified. Native Wayland has no
+  **Linux (new)** is a first release (Ubuntu 22.04 and newer, x86_64, `.deb`) that the maintainer has tested on a real
+  Ubuntu desktop. Other distributions, other desktops and other display setups are not verified, and the details of
+  what was checked are not itemised here yet. Native Wayland has no
   always-on-top and no remembered position (XWayland is the default).
 - **The downloads are not code-signed yet.** Windows shows "Unknown publisher" (see section 3). The Mac app is not
   signed with a developer identity or notarized, so macOS asks you to approve it once.
