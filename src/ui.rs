@@ -82,7 +82,7 @@ pub struct AitrackUi {
     pub row_rects: Vec<(VendorId, Kind, Rect)>,
     /// Screen rect of each vendor badge from the last frame (for tests / the render tool).
     pub badge_rects: Vec<(VendorId, Rect)>,
-    /// The Claude badge launches the desktop app (Windows only by default).
+    /// The Claude badge launches the desktop app (Windows, macOS and Linux by default).
     pub launch_enabled: bool,
     /// What "Open help" does (the default opens [`crate::launch::HELP_URL`]; tests inject a fake).
     pub help_opener: Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
@@ -176,7 +176,7 @@ impl AitrackUi {
             mock: None,
             row_rects: vec![],
             badge_rects: vec![],
-            launch_enabled: cfg!(any(windows, target_os = "macos")),
+            launch_enabled: cfg!(any(windows, target_os = "macos", target_os = "linux")),
             variant_rects: vec![],
             theme_rects: vec![],
             theme_sent: Some(first.theme),

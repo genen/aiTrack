@@ -195,6 +195,14 @@ pub fn launch_claude_async_with(
                 .map(PathBuf::from);
             let tried = if cfg!(target_os = "macos") {
                 launch_claude_mac(spawner.as_ref())
+            } else if cfg!(target_os = "linux") {
+                let home = crate::sources::Env::from_process().home;
+                let dirs = xdg_data_dirs(
+                    home.as_deref(),
+                    std::env::var_os("XDG_DATA_HOME").as_deref(),
+                    std::env::var_os("XDG_DATA_DIRS").as_deref(),
+                );
+                launch_claude_linux(&dirs, spawner.as_ref())
             } else {
                 launch_claude(local.as_deref(), spawner.as_ref())
             };
@@ -230,7 +238,7 @@ pub fn spawning_disabled_for(value: Option<&std::ffi::OsStr>) -> bool {
 }
 
 /// The real spawner: Win32 `ShellExecuteW` and `std::process` on Windows, `/usr/bin/open` and
-/// `std::process` on macOS, an error elsewhere. On Windows and macOS every method refuses when
+/// `std::process` on macOS, `xdg-open` and `std::process` on Linux. On every platform each method refuses when
 /// [`NO_SPAWN_ENV`] is set.
 pub struct SystemSpawner;
 
@@ -366,13 +374,254 @@ impl Spawner for SystemSpawner {
 
 #[cfg(not(any(windows, target_os = "macos")))]
 impl Spawner for SystemSpawner {
-    fn open_uri(&self, _uri: &str) -> Result<(), String> {
-        Err("launching the Claude desktop app is only supported on Windows and macOS".into())
+    /// `xdg-open <uri>`; a non-zero exit within the grace period means no handler.
+    fn open_uri(&self, uri: &str) -> Result<(), String> {
+        self.run(Path::new(XDG_OPEN_PROGRAM), &[uri.to_owned()])
     }
 
-    fn run(&self, _program: &Path, _args: &[String]) -> Result<(), String> {
-        Err("launching the Claude desktop app is only supported on Windows and macOS".into())
+    /// Starts the program detached (own process group, no stdio, no shell) and returns without
+    /// waiting for it, except for a short grace period: a program that exits non-zero inside it
+    /// (`xdg-open` without a handler, `gio launch` of a broken entry) counts as a failure. A
+    /// reaper thread collects the exit status so no zombie is left.
+    fn run(&self, program: &Path, args: &[String]) -> Result<(), String> {
+        use std::os::unix::process::CommandExt;
+        if spawning_disabled() {
+            return Err(SPAWN_DISABLED.into());
+        }
+        let mut child = std::process::Command::new(program)
+            .args(args)
+            .process_group(0)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        let deadline = std::time::Instant::now() + LINUX_GRACE;
+        loop {
+            match child.try_wait() {
+                Ok(Some(st)) if st.success() => return Ok(()),
+                Ok(Some(st)) => return Err(format!("exited with {st}")),
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                Ok(None) => {
+                    // still running: it started; reap it in the background
+                    let _ = std::thread::Builder::new()
+                        .name("aitrack-reap".into())
+                        .spawn(move || {
+                            let _ = child.wait();
+                        });
+                    return Ok(());
+                }
+                Err(e) => return Err(e.to_string()),
+            }
+        }
     }
+}
+
+// ---------------------------------------------------------------- Linux
+
+/// `xdg-open`, looked up on PATH.
+pub const XDG_OPEN_PROGRAM: &str = "xdg-open";
+/// The program the Claude desktop `.deb` installs (code.claude.com/docs/en/desktop-linux).
+pub const CLAUDE_LINUX_COMMAND: &str = "claude-desktop";
+/// How long a spawned program may run before it counts as started (Linux).
+#[allow(dead_code)]
+const LINUX_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// Folders that hold `applications/*.desktop` entries: `$XDG_DATA_HOME` (default
+/// `~/.local/share`), then each of `$XDG_DATA_DIRS` (default `/usr/local/share:/usr/share`), then
+/// the Flatpak and Snap export folders.
+pub fn xdg_data_dirs(
+    home: Option<&Path>,
+    data_home: Option<&std::ffi::OsStr>,
+    data_dirs: Option<&std::ffi::OsStr>,
+) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = Vec::new();
+    match data_home.filter(|d| !d.is_empty()) {
+        Some(d) => v.push(PathBuf::from(d)),
+        None => v.extend(home.map(|h| h.join(".local").join("share"))),
+    }
+    match data_dirs.filter(|d| !d.is_empty()) {
+        Some(d) => v.extend(std::env::split_paths(d)),
+        None => {
+            v.push(PathBuf::from("/usr/local/share"));
+            v.push(PathBuf::from("/usr/share"));
+        }
+    }
+    v.push(PathBuf::from("/var/lib/flatpak/exports/share"));
+    v.extend(home.map(|h| h.join(".local/share/flatpak/exports/share")));
+    v.push(PathBuf::from("/var/lib/snapd/desktop"));
+    let mut seen = Vec::new();
+    v.retain(|d| {
+        let new = !seen.contains(d);
+        seen.push(d.clone());
+        new
+    });
+    v
+}
+
+/// `claude*.desktop` files in `<dir>/applications` for each of `data_dirs`, in folder order, each
+/// folder sorted by name.
+pub fn find_claude_desktop_files(data_dirs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for d in data_dirs {
+        let mut names: Vec<String> = std::fs::read_dir(d.join("applications"))
+            .map(|rd| {
+                rd.filter_map(Result::ok)
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| {
+                        let l = n.to_ascii_lowercase();
+                        l.starts_with("claude") && l.ends_with(".desktop")
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        out.extend(names.into_iter().map(|n| d.join("applications").join(n)));
+    }
+    out
+}
+
+/// Linux: 1. `xdg-open claude://`, 2. `claude-desktop`, 3. each `claude*.desktop` entry found in
+/// `data_dirs` with `gio launch <file>`, then `gtk-launch <id>`. Stops at the first that works.
+pub fn launch_claude_linux(data_dirs: &[PathBuf], spawner: &dyn Spawner) -> Vec<Attempt> {
+    let mut tried = Vec::new();
+    let mut push = |method: String, r: Result<(), String>| -> bool {
+        let ok = r.is_ok();
+        tried.push(Attempt {
+            method,
+            ok,
+            detail: r.err(),
+        });
+        ok
+    };
+    if push(
+        format!("xdg-open {PROTOCOL_URI}"),
+        spawner.open_uri(PROTOCOL_URI),
+    ) {
+        return tried;
+    }
+    if push(
+        CLAUDE_LINUX_COMMAND.into(),
+        spawner.run(Path::new(CLAUDE_LINUX_COMMAND), &[]),
+    ) {
+        return tried;
+    }
+    for f in find_claude_desktop_files(data_dirs) {
+        let file = f.to_string_lossy().into_owned();
+        if push(
+            format!("gio launch {file}"),
+            spawner.run(Path::new("gio"), &["launch".into(), file]),
+        ) {
+            return tried;
+        }
+        if let Some(id) = f.file_stem().map(|s| s.to_string_lossy().into_owned()) {
+            if push(
+                format!("gtk-launch {id}"),
+                spawner.run(Path::new("gtk-launch"), std::slice::from_ref(&id)),
+            ) {
+                return tried;
+            }
+        }
+    }
+    if tried.iter().all(|a| !a.ok) {
+        tried.push(Attempt {
+            method: "Claude desktop".into(),
+            ok: false,
+            detail: Some(
+                "not installed? no claude:// handler, no claude-desktop, no claude*.desktop entry"
+                    .into(),
+            ),
+        });
+    }
+    tried
+}
+
+/// Terminal emulators tried after `$TERMINAL`, with the argument that precedes the command.
+pub const LINUX_TERMINALS: &[(&str, &str)] = &[
+    ("x-terminal-emulator", "-e"),
+    ("gnome-terminal", "--"),
+    ("konsole", "-e"),
+    ("xterm", "-e"),
+];
+
+/// Terminal emulators found on `path_var`, in discovery order (`$TERMINAL` first, with `-e`), as
+/// full path plus the argument that precedes the command. Duplicates are dropped.
+pub fn linux_terminals(
+    terminal_env: Option<&std::ffi::OsStr>,
+    path_var: Option<&std::ffi::OsStr>,
+) -> Vec<(PathBuf, &'static str)> {
+    let find = |name: &std::ffi::OsStr| -> Option<PathBuf> {
+        let p = PathBuf::from(name);
+        if p.components().count() > 1 {
+            return p.is_file().then_some(p);
+        }
+        path_var
+            .into_iter()
+            .flat_map(std::env::split_paths)
+            .map(|d| d.join(name))
+            .find(|c| c.is_file())
+    };
+    let mut out: Vec<(PathBuf, &'static str)> = Vec::new();
+    let mut add = |p: Option<PathBuf>, flag: &'static str| {
+        if let Some(p) = p {
+            if !out.iter().any(|(q, _)| *q == p) {
+                out.push((p, flag));
+            }
+        }
+    };
+    if let Some(t) = terminal_env.filter(|t| !t.is_empty()) {
+        // the exec flag of an arbitrary $TERMINAL is a guess (-e works for most)
+        let flag = match PathBuf::from(t).file_name().and_then(|n| n.to_str()) {
+            Some("gnome-terminal") => "--",
+            _ => "-e",
+        };
+        add(find(t), flag);
+    }
+    for (name, flag) in LINUX_TERMINALS {
+        add(find(std::ffi::OsStr::new(name)), flag);
+    }
+    out
+}
+
+/// Linux: the Grok CLI in a terminal window. Tries each terminal of `terminals` in order and stops
+/// at the first that starts. Nothing is typed into the CLI.
+pub fn launch_grok_linux(
+    cli: Option<&Path>,
+    terminals: &[(PathBuf, &'static str)],
+    spawner: &dyn Spawner,
+) -> Vec<Attempt> {
+    let fail = |detail: &str| {
+        vec![Attempt {
+            method: "grok CLI in a terminal".into(),
+            ok: false,
+            detail: Some(detail.into()),
+        }]
+    };
+    let Some(cli) = cli else {
+        return fail("the Grok CLI was not found (~/.grok/bin, ~/.local/bin, PATH)");
+    };
+    if terminals.is_empty() {
+        return fail("no terminal emulator found ($TERMINAL, x-terminal-emulator, gnome-terminal, konsole, xterm)");
+    }
+    let mut tried = Vec::new();
+    for (term, flag) in terminals {
+        let r = spawner.run(
+            term,
+            &[(*flag).to_owned(), cli.to_string_lossy().into_owned()],
+        );
+        let ok = r.is_ok();
+        tried.push(Attempt {
+            method: format!("grok CLI in {} {flag}", term.display()),
+            ok,
+            detail: r.err(),
+        });
+        if ok {
+            break;
+        }
+    }
+    tried
 }
 
 // ---------------------------------------------------------------- macOS
@@ -697,6 +946,18 @@ pub fn launch_grok_async(log: PathBuf, done: impl FnOnce(bool) + Send + 'static)
                 let cli = crate::grok_cli::find_cli_here(&env);
                 let tried =
                     launch_grok_mac(&dirs, env.home.as_deref(), cli.as_deref(), &SystemSpawner);
+                let line = log_text(&tried).replace("claude desktop launch", "grok launch");
+                append_log(&log, &line);
+                done(succeeded(&tried));
+                return;
+            }
+            if cfg!(target_os = "linux") {
+                let terms = linux_terminals(
+                    std::env::var_os("TERMINAL").as_deref(),
+                    std::env::var_os("PATH").as_deref(),
+                );
+                let cli = crate::grok_cli::find_cli_here(&env);
+                let tried = launch_grok_linux(cli.as_deref(), &terms, &SystemSpawner);
                 let line = log_text(&tried).replace("claude desktop launch", "grok launch");
                 append_log(&log, &line);
                 done(succeeded(&tried));
