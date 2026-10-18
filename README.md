@@ -518,6 +518,9 @@ The Stats page lists, for each weekly meter including Grok Bot weekly, the windo
   Claude) *A full session*, which says how much of the week one full session costs, once there is enough data.
   When the Grok Bot app is tracked and has stored readings, a separate **Grok Bot weekly** block follows
   **Grok weekly** with the same rows (weekly only), from its own history file.
+  The Stats page counts only finished weekly windows (*Windows seen*), while the detail pane that opens when you click a
+  weekly bar also counts the window in progress. A meter can therefore show "not enough complete windows" here and one
+  window with its peak in the pane.
 
 Costs are estimates at API list prices (USD per million tokens). The price list is downloaded from GitHub about
 once a day, with a built-in table as a fallback. They are not what your plan charges. The view rescans every five
