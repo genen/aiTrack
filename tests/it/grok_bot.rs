@@ -413,9 +413,20 @@ fn the_history_gets_changes_and_a_heartbeat_but_no_identifiers() {
     tracker.refresh(now() + Duration::minutes(1));
     assert_eq!(tracker.version(), v0);
     assert_eq!(JsonlStore::new(&hist).read().len(), 1);
-    // unchanged for 15 minutes: one heartbeat record
+    // the same cached reading, much later: not appended again
     tracker.refresh(now() + Duration::minutes(15));
-    assert_eq!(JsonlStore::new(&hist).read().len(), 2);
+    tracker.refresh(now() + Duration::hours(5));
+    assert_eq!(JsonlStore::new(&hist).read().len(), 1);
+    // the app wrote a newer reading with the same percentage: one record, stamped with its read time
+    let read2 = now() + Duration::minutes(10);
+    f.put(
+        ACCOUNT,
+        &cache_json(50.0, resets(), read2, read2 + Duration::hours(2)),
+    );
+    tracker.refresh(now() + Duration::minutes(15));
+    let rows = JsonlStore::new(&hist).read();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1]["ts"], read2.to_rfc3339());
     // a changed percentage is recorded at once
     f.fresh(51.0);
     tracker.refresh(now() + Duration::minutes(16));
@@ -443,7 +454,7 @@ fn old_grok_history_stays_readable_and_the_bot_file_is_separate() {
         "weekly":{"pct":7.0,"resets_at":"2026-10-20T10:00:00+00:00"}});
     let r = aitrack::reading::Reading::from_value(&old);
     assert_eq!(r.weekly.unwrap().pct, 7.0);
-    let rec = grok_bot::record(&reading(59.0, 2), now());
+    let rec = grok_bot::record(&reading(59.0, 2));
     assert!(
         rec.get("weekly").is_none(),
         "no clash with the CLI's weekly field"
@@ -803,10 +814,7 @@ fn readings_are_read_once_and_refreshed_after_an_append() {
     let behind = JsonlStore::new(&hist);
     use aitrack::store::Store;
     behind
-        .append(&aitrack::grok_bot::record(
-            &tracker.latest().unwrap(),
-            now(),
-        ))
+        .append(&aitrack::grok_bot::record(&tracker.latest().unwrap()))
         .unwrap();
     assert!(std::sync::Arc::ptr_eq(
         &tracker.readings(),
@@ -885,4 +893,38 @@ fn with_only_the_grok_bot_app_the_cli_collector_stays_quiet() {
             .is_empty(),
         "no failed CLI poll is stored"
     );
+}
+
+#[test]
+fn an_old_reading_is_not_restamped_and_a_finished_week_is_not_appended() {
+    let f = Fx::new();
+    let hist = f.dir.join("usage-grok-bot.jsonl");
+    let tracker = BotTracker::new(f.env(), Box::new(JsonlStore::new(&hist)));
+    let read = now() - Duration::hours(30);
+    f.put(
+        ACCOUNT,
+        &cache_json(40.0, resets(), read, read + Duration::hours(2)),
+    );
+    tracker.refresh(now());
+    let rows = JsonlStore::new(&hist).read();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        chrono::DateTime::parse_from_rfc3339(rows[0]["ts"].as_str().unwrap())
+            .unwrap()
+            .with_timezone(&Utc),
+        read,
+        "stamped with the app's read time, not with now"
+    );
+    // days later the app was never opened: nothing new
+    tracker.refresh(now() + Duration::days(1));
+    assert_eq!(JsonlStore::new(&hist).read().len(), 1);
+    // the week has ended: the old percentage is not written into the new week
+    tracker.refresh(resets() + Duration::minutes(1));
+    tracker.refresh(resets() + Duration::days(3));
+    assert_eq!(JsonlStore::new(&hist).read().len(), 1);
+    // a fresh tracker (restart) for a finished week appends nothing either
+    let hist2 = f.dir.join("usage-grok-bot-2.jsonl");
+    let t2 = BotTracker::new(f.env(), Box::new(JsonlStore::new(&hist2)));
+    t2.refresh(resets() + Duration::days(3));
+    assert_eq!(JsonlStore::new(&hist2).read().len(), 0);
 }

@@ -21,7 +21,7 @@
 //!   are opened. The app's neighbouring `auth.json` and `sand-secrets.json` are never touched.
 //! * The app refreshes the file only while it is open, so the reading ages while it is closed.
 //!
-//! Readings are appended (when they change, or every [`SAVE_EVERY_MIN`] minutes) to
+//! Readings are appended (when the app has written a new reading, stamped with the app's own read time, and never for a week that has ended) to
 //! `usage-grok-bot.jsonl` next to the other history files, as records with the field `bot_weekly`.
 //! That file is a separate append-only history; the window shows the live file, and the Grok Bot
 //! row's detail pane charts this history.
@@ -29,7 +29,7 @@
 use crate::sources::{Env, Os};
 use crate::store::Store;
 use crate::util::iso;
-use chrono::{DateTime, Duration, TimeZone, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use serde_json::{json, Value};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -41,8 +41,6 @@ pub const SOURCE: &str = "grok-bot-cache";
 pub const NAME_SUFFIX: &str = ".weekly-usage.cache";
 /// A reading older than this is shown dimmed and without projections.
 pub const STALE_MIN: f64 = 60.0;
-/// Append an unchanged reading to the history at most this often.
-pub const SAVE_EVERY_MIN: i64 = 15;
 /// The cache file is about 310 bytes; anything much larger is not it.
 const MAX_FILE_BYTES: u64 = 64 * 1024;
 /// Look at no more directory entries than this.
@@ -333,7 +331,7 @@ pub struct BotTracker {
 
 #[derive(Debug, Clone, Copy)]
 struct Saved {
-    at: DateTime<Utc>,
+    read_at: DateTime<Utc>,
     pct: f64,
     resets_at: DateTime<Utc>,
 }
@@ -383,15 +381,18 @@ impl BotTracker {
     /// Read the file now. `now` stamps the history record.
     pub fn refresh(&self, now: DateTime<Utc>) {
         let new = read(&self.env);
-        {
+        let changed = {
             let mut l = self.latest.lock().unwrap_or_else(|e| e.into_inner());
-            if *l != new {
-                *l = new;
-                self.version.fetch_add(1, Ordering::SeqCst);
-            }
-        }
+            let changed = *l != new;
+            *l = new;
+            changed
+        };
         if let Some(r) = new {
             self.save(&r, now);
+        }
+        // after the save, so a window that rebuilds on the new version sees the new history
+        if changed {
+            self.version.fetch_add(1, Ordering::SeqCst);
         }
     }
 
@@ -414,18 +415,18 @@ impl BotTracker {
         let due = match *saved {
             None => true,
             Some(s) => {
-                (s.pct - r.pct).abs() > 1e-9
-                    || s.resets_at != r.resets_at
-                    || now - s.at >= Duration::minutes(SAVE_EVERY_MIN)
+                (s.pct - r.pct).abs() > 1e-9 || s.resets_at != r.resets_at || s.read_at != r.read_at
             }
         };
-        if !due {
+        // The cache only changes while the app is open: a value that has not been re-read is not
+        // appended again, and a value from a finished week is not drawn into the new one.
+        if !due || r.period_ended(now) {
             return;
         }
-        if self.store.append(&record(r, now)).is_ok() {
+        if self.store.append(&record(r)).is_ok() {
             *self.cached.lock().unwrap_or_else(|e| e.into_inner()) = None;
             *saved = Some(Saved {
-                at: now,
+                read_at: r.read_at,
                 pct: r.pct,
                 resets_at: r.resets_at,
             });
@@ -434,10 +435,10 @@ impl BotTracker {
 }
 
 /// The stored form of one reading. No account identifier, no file name.
-pub fn record(r: &BotReading, now: DateTime<Utc>) -> Value {
+pub fn record(r: &BotReading) -> Value {
     let mut v = json!({
         "v": 1,
-        "ts": iso(now),
+        "ts": iso(r.read_at),
         "ok": true,
         "vendor": "grok",
         "source": SOURCE,
@@ -455,8 +456,9 @@ pub fn record(r: &BotReading, now: DateTime<Utc>) -> Value {
 
 fn saved_of(v: &Value) -> Option<Saved> {
     let b = v.get("bot_weekly")?;
+    let ts = |x: Option<&Value>| crate::util::parse_ts(x?.as_str()?);
     Some(Saved {
-        at: crate::util::parse_ts(v.get("ts")?.as_str()?)?,
+        read_at: ts(b.get("read_at")).or_else(|| ts(v.get("ts")))?,
         pct: b.get("pct")?.as_f64()?,
         resets_at: crate::util::parse_ts(b.get("resets_at")?.as_str()?)?,
     })

@@ -379,6 +379,19 @@ impl Spawner for SystemSpawner {
         self.run(Path::new(XDG_OPEN_PROGRAM), &[uri.to_owned()])
     }
 
+    fn capture(&self, program: &Path, args: &[String]) -> Result<String, String> {
+        if spawning_disabled() {
+            return Err(SPAWN_DISABLED.into());
+        }
+        let out = std::process::Command::new(program)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .map_err(|e| e.to_string())?;
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
     /// Starts the program detached (own process group, no stdio, no shell) and returns without
     /// waiting for it, except for a short grace period: a program that exits non-zero inside it
     /// (`xdg-open` without a handler, `gio launch` of a broken entry) counts as a failure. A
@@ -423,6 +436,8 @@ impl Spawner for SystemSpawner {
 
 /// `xdg-open`, looked up on PATH.
 pub const XDG_OPEN_PROGRAM: &str = "xdg-open";
+/// `xdg-mime`, used to ask which application handles `claude://`.
+pub const XDG_MIME_PROGRAM: &str = "xdg-mime";
 /// The program the Claude desktop `.deb` installs (code.claude.com/docs/en/desktop-linux).
 pub const CLAUDE_LINUX_COMMAND: &str = "claude-desktop";
 /// How long a spawned program may run before it counts as started (Linux).
@@ -518,7 +533,26 @@ pub fn launch_claude_linux(data_dirs: &[PathBuf], spawner: &dyn Spawner) -> Vec<
         });
         ok
     };
-    if push(
+    // A generic `xdg-open` (no desktop environment detected) passes an unknown scheme to $BROWSER
+    // and exits 0, so ask first whether anything is registered for claude://. If the question
+    // cannot be asked, try `xdg-open` as before.
+    let registered = spawner
+        .capture(
+            Path::new(XDG_MIME_PROGRAM),
+            &[
+                "query".into(),
+                "default".into(),
+                "x-scheme-handler/claude".into(),
+            ],
+        )
+        .map(|out| !out.trim().is_empty())
+        .unwrap_or(true);
+    if !registered {
+        push(
+            format!("xdg-open {PROTOCOL_URI}"),
+            Err("no claude:// handler is registered".into()),
+        );
+    } else if push(
         format!("xdg-open {PROTOCOL_URI}"),
         spawner.open_uri(PROTOCOL_URI),
     ) {

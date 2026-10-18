@@ -23,7 +23,7 @@ fn bot(pct: f64, read_min_ago: i64, resets_in_h: i64) -> BotReading {
 /// A stored history record (the real writer's format) taken `mins_ago` before `now()`.
 fn stored(mins_ago: i64, pct: f64, resets_in_h: i64) -> Reading {
     let r = bot(pct, mins_ago, resets_in_h);
-    Reading::from_value(&grok_bot::record(&r, r.read_at))
+    Reading::from_value(&grok_bot::record(&r))
 }
 
 #[test]
@@ -77,7 +77,7 @@ fn tracker_history_feeds_the_chart_without_an_account_id() {
     use aitrack::store::Store;
     for m in [30, 20, 10] {
         let r = bot(40.0 + m as f64 / 10.0, m, 40);
-        store.append(&grok_bot::record(&r, r.read_at)).unwrap();
+        store.append(&grok_bot::record(&r)).unwrap();
     }
     let t = grok_bot::BotTracker::new(
         Env::new(Os::Linux),

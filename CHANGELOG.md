@@ -3,6 +3,14 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.3.23-beta] - 2026-10-18
+
+### Fixed
+- Grok Bot history: a reading is saved once, stamped with the time the app wrote it, instead of again every 15 minutes with the current time; nothing is saved for a weekly period that has ended, so last week's percentage no longer appears in the new week's chart.
+- Linux: "Open Claude" asks which application handles `claude://` first and goes on to `claude-desktop` and the desktop entries when none is registered, instead of opening the link in a browser.
+- The Grok Bot chart rebuilds after the new reading is in the history, not before.
+- Release workflows: a hand-run with Replace checked now replaces the SHA256 section in the release notes with the new checksums, and the section is checked a second time after a short pause.
+
 ## [0.3.22-beta] - 2026-10-18
 
 ### Fixed
