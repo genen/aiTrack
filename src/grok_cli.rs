@@ -5,9 +5,12 @@
 //!
 //! The refresh never sends a prompt and never spends credits: the CLI is started with no
 //! arguments (test builds only: `AITRACK_GROK_REFRESH_ARGS`), no window (`CREATE_NO_WINDOW` on Windows),
-//! stdin/stdout/stderr on the null device, so it cannot read a user's console or type into it. It
+//! stdout/stderr on the null device and stdin on the null device (on Unix an open pipe that is never
+//! written to, because the CLI quits at once when its input is closed), so it cannot read a user's
+//! console or type into it. It
 //! is not started at all while another `grok` process is running. We wait until a newer billing
-//! line shows up in the log (or the timeout runs out) and then terminate the process (the whole
+//! line shows up in the log (or the timeout runs out), let it run [`REFRESH_GRACE`] longer and
+//! then terminate the process (the whole
 //! tree on Windows, where `grok` may be a `.cmd` shim around another program).
 
 use crate::grok::{log_path, read_snapshots, Snapshot};
@@ -22,6 +25,9 @@ use std::time::{Duration as StdDuration, Instant};
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// Offer the refresh when the newest Grok reading is older than this (minutes), or absent.
 pub const REFRESH_AFTER_MIN: f64 = 60.0;
+/// After the billing line shows up, let the CLI run this much longer (it refreshes its login after
+/// fetching billing) before it is ended.
+pub const REFRESH_GRACE: StdDuration = StdDuration::from_secs(5);
 /// How long to wait for the CLI to write a billing line.
 pub const REFRESH_TIMEOUT: StdDuration = StdDuration::from_secs(25);
 const POLL_EVERY: StdDuration = StdDuration::from_millis(200);
@@ -211,6 +217,8 @@ pub struct RefreshCfg {
     pub args: Vec<OsString>,
     pub log: PathBuf,
     pub timeout: StdDuration,
+    /// How long the CLI keeps running after the billing line appeared (see [`REFRESH_GRACE`]).
+    pub grace: StdDuration,
     pub poll_every: StdDuration,
 }
 
@@ -222,6 +230,7 @@ impl RefreshCfg {
             args: refresh_args(crate::endpoints::test_env(ENV_REFRESH_ARGS).as_deref()),
             log: log_path(env),
             timeout: REFRESH_TIMEOUT,
+            grace: REFRESH_GRACE,
             poll_every: POLL_EVERY,
         }
     }
@@ -262,6 +271,11 @@ pub fn refresh_tracked(
     let start = Instant::now();
     loop {
         if is_new() {
+            // give the CLI a moment to finish its login refresh; it may also end by itself
+            let until = Instant::now() + cfg.grace;
+            while Instant::now() < until && matches!(child.try_wait(), Ok(None)) {
+                std::thread::sleep(cfg.poll_every.min(until - Instant::now()));
+            }
             child.kill();
             return Ok(Outcome::Refreshed);
         }
@@ -296,6 +310,8 @@ pub struct SystemHost;
 
 struct RealChild {
     child: std::process::Child,
+    /// The open, silent input pipe (Unix); closed when the refresh ends.
+    stdin: Option<std::process::ChildStdin>,
 }
 
 impl Child for RealChild {
@@ -311,6 +327,7 @@ impl Child for RealChild {
     }
 
     fn kill(&mut self) {
+        self.stdin = None;
         // Unix: the child leads its own process group (see `command`), so the group ends with it.
         #[cfg(unix)]
         kill_group(self.child.id());
@@ -395,8 +412,14 @@ pub fn extended_path(existing: Option<&OsStr>, home: Option<&Path>) -> OsString 
 /// The command for a refresh run (also what the tests look at).
 pub fn command(program: &Path, args: &[OsString]) -> std::process::Command {
     let mut c = std::process::Command::new(program);
+    // Unix: the CLI ends at once when its input is closed, so it gets an open pipe that nothing is
+    // ever written to (held by `RealChild` until the refresh is over). Elsewhere: the null device.
+    #[cfg(unix)]
+    let stdin = std::process::Stdio::piped();
+    #[cfg(not(unix))]
+    let stdin = std::process::Stdio::null();
     c.args(args)
-        .stdin(std::process::Stdio::null())
+        .stdin(stdin)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     #[cfg(windows)]
@@ -426,10 +449,9 @@ impl Host for SystemHost {
     }
 
     fn spawn(&self, program: &Path, args: &[OsString]) -> Result<Box<dyn Child>, String> {
-        command(program, args)
-            .spawn()
-            .map(|child| Box::new(RealChild { child }) as Box<dyn Child>)
-            .map_err(|e| e.to_string())
+        let mut child = command(program, args).spawn().map_err(|e| e.to_string())?;
+        let stdin = child.stdin.take();
+        Ok(Box::new(RealChild { child, stdin }))
     }
 }
 

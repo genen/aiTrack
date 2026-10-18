@@ -387,6 +387,7 @@ fn cfg(h: &Home, timeout_ms: u64) -> RefreshCfg {
         args: vec![],
         log: grok::log_path(&h.env),
         timeout: StdDuration::from_millis(timeout_ms),
+        grace: StdDuration::ZERO,
         poll_every: StdDuration::from_millis(5),
     }
 }
@@ -476,6 +477,7 @@ fn the_real_host_starts_a_fake_cli_and_terminates_it_after_the_line_appears() {
         args: vec![],
         log,
         timeout: StdDuration::from_secs(10),
+        grace: StdDuration::ZERO,
         poll_every: StdDuration::from_millis(20),
     };
     let t0 = Instant::now();
@@ -506,6 +508,7 @@ fn the_real_host_kills_a_fake_cli_that_never_writes_anything() {
         args: vec![],
         log: grok::log_path(&h.env),
         timeout: StdDuration::from_millis(300),
+        grace: StdDuration::ZERO,
         poll_every: StdDuration::from_millis(20),
     };
     let t0 = Instant::now();
@@ -1149,4 +1152,49 @@ fn ending_a_refresh_ends_the_wrappers_children_too() {
         .map(|s| !s.contains(") Z"))
         .unwrap_or(false);
     assert!(!alive, "the wrapper's child survived the kill");
+}
+
+#[test]
+fn the_process_runs_for_the_grace_period_after_the_line_appears() {
+    let h = home();
+    let mut host = FakeHost::new(grok::log_path(&h.env));
+    host.write_after = Some(1);
+    let mut c = cfg(&h, 5000);
+    c.grace = StdDuration::from_millis(300);
+    let t0 = Instant::now();
+    assert_eq!(
+        grok_cli::refresh(&c, &host),
+        Ok(grok_cli::Outcome::Refreshed)
+    );
+    assert!(
+        t0.elapsed() >= StdDuration::from_millis(300),
+        "{:?}",
+        t0.elapsed()
+    );
+    assert_eq!(host.killed.load(Ordering::SeqCst), 1);
+    assert_eq!(grok_cli::REFRESH_GRACE, StdDuration::from_secs(5));
+}
+
+/// A program that quits when its input is closed stays alive while the refresh holds the pipe open.
+#[cfg(unix)]
+#[test]
+fn the_cli_gets_an_open_silent_input_on_unix() {
+    let host = grok_cli::SystemHost;
+    let args = vec![OsString::from("-c"), OsString::from("read line")];
+    let mut child = host.spawn(Path::new("/bin/sh"), &args).unwrap();
+    std::thread::sleep(StdDuration::from_millis(400));
+    assert_eq!(
+        child.try_wait(),
+        Ok(None),
+        "it must still be waiting for input"
+    );
+    child.kill();
+    let t0 = Instant::now();
+    while child.try_wait() == Ok(None) {
+        assert!(
+            t0.elapsed() < StdDuration::from_secs(5),
+            "kill did not end it"
+        );
+        std::thread::sleep(StdDuration::from_millis(20));
+    }
 }

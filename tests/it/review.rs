@@ -801,6 +801,7 @@ fn stopping_the_app_kills_the_hidden_grok_child_of_a_running_refresh() {
                 args: vec![],
                 log: log.clone(),
                 timeout: StdDuration::from_secs(30),
+                grace: StdDuration::ZERO,
                 poll_every: StdDuration::from_millis(20),
             };
             grok_cli::refresh_tracked(&cfg, &grok_cli::SystemHost, &s2).map(|_| None)

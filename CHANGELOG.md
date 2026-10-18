@@ -3,6 +3,15 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.3.14-beta] - 2026-10-18
+
+### Fixed
+- Refresh Grok now on a Mac: the Grok CLI quit at once when started with its input closed ("no new data, exit code 1").
+  On macOS and Linux it now gets an open input that is never written to, so it stays up and fetches billing. Windows is
+  unchanged.
+- After the billing line appears the CLI now runs 5 seconds longer before it is ended, so it can finish refreshing its
+  login.
+
 ## [0.3.13-beta] - 2026-10-18
 
 ### Added
