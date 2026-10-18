@@ -806,6 +806,33 @@ impl App {
         }
     }
 
+    /// Version of the history behind a chart (`bot`: the Grok Bot's own weekly history).
+    pub fn chart_version(&self, vendor: crate::vendor::VendorId, bot: bool) -> u64 {
+        if bot {
+            return self.bot_tracker().map_or(0, |b| b.version());
+        }
+        self.history_for(vendor).version()
+    }
+
+    /// Run `f` over the readings a chart draws: the vendor's history, or with `bot` the Grok Bot's
+    /// own weekly history (`usage-grok-bot.jsonl`). `None` while that history is still loading.
+    pub fn chart_readings<R>(
+        &self,
+        vendor: crate::vendor::VendorId,
+        bot: bool,
+        f: impl FnOnce(&[crate::reading::Reading]) -> R,
+    ) -> Option<R> {
+        if bot {
+            let rs = self.bot_tracker()?.readings();
+            return Some(f(&rs));
+        }
+        self.history_for(vendor).try_with_readings(f)
+    }
+
+    fn bot_tracker(&self) -> Option<Arc<crate::grok_bot::BotTracker>> {
+        self.grok.as_ref().and_then(|g| g.bot.get().cloned())
+    }
+
     /// Current view state. Never blocks on I/O: while the history is loading it returns a
     /// "loading" state; otherwise the analysis is reused unless the data changed or is a few
     /// seconds old. Settings and collector status are always live.

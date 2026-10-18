@@ -66,9 +66,13 @@ struct ChartCache {
     version: u64,
     vendor: VendorId,
     kind: Kind,
+    /// Drawn from the Grok Bot's own history.
+    bot: bool,
     range: Range,
     at: Instant,
     data: ChartData,
+    /// Nothing at all is stored for this chart ("No history yet").
+    none_stored: bool,
 }
 
 pub struct AitrackUi {
@@ -76,6 +80,11 @@ pub struct AitrackUi {
     pub screen: Screen,
     /// The row whose detail pane is open (one at a time).
     pub expanded: Option<(VendorId, Kind)>,
+    /// The Grok Bot weekly row's detail pane is open (it shares the Grok block with the Grok
+    /// rows, so it is tracked apart from `expanded`; at most one of the two is set).
+    pub bot_expanded: bool,
+    /// Where the Grok Bot row was drawn last frame (tests and the render tool click it).
+    pub bot_row_rect: Option<Rect>,
     /// Draw these vendors instead of the real data (screenshots of the multi-vendor look).
     pub mock: Option<Vec<Vendor>>,
     /// Screen rect of each vendor row from the last frame (used by `examples/render` to hover).
@@ -127,7 +136,7 @@ pub struct AitrackUi {
     /// The user picked a range: the automatic default never changes it again.
     range_user: bool,
     /// Which vendor / kind the automatic default was last worked out for, and when.
-    default_range_at: Option<(VendorId, Kind, Instant)>,
+    default_range_at: Option<(VendorId, Kind, bool, Instant)>,
     custom: String,
     custom_local: String,
     test_result: Option<String>,
@@ -173,6 +182,8 @@ impl AitrackUi {
             app,
             screen: Screen::Home,
             expanded: None,
+            bot_expanded: false,
+            bot_row_rect: None,
             mock: None,
             row_rects: vec![],
             badge_rects: vec![],
@@ -671,6 +682,14 @@ impl AitrackUi {
         {
             self.expanded = None;
         }
+        if self.bot_expanded
+            && !home
+                .vendors
+                .iter()
+                .any(|v| v.rows.iter().any(|r| r.secondary))
+        {
+            self.bot_expanded = false;
+        }
         let top = ui.cursor().top();
         let out = egui::ScrollArea::vertical()
             .auto_shrink([false, true])
@@ -692,6 +711,7 @@ impl AitrackUi {
         ui.spacing_mut().item_spacing.y = 0.0;
         let mut stack: Option<Rect> = None;
         self.row_rects.clear();
+        self.bot_row_rect = None;
         self.badge_rects.clear();
         self.refresh_rect = None;
         for (i, vv) in home.vendors.iter().enumerate() {
@@ -735,12 +755,23 @@ impl AitrackUi {
                         50.0
                     };
                     for row in &vv.rows {
-                        let open = !row.secondary && self.expanded == Some((vv.id, row.kind));
+                        let open = if row.secondary {
+                            self.bot_expanded
+                        } else {
+                            self.expanded == Some((vv.id, row.kind))
+                        };
                         let resp = row_widget(ui, pal, row, vv.id, open, value_w, strip_x);
-                        if !row.secondary {
+                        if row.secondary {
+                            self.bot_row_rect = Some(resp.rect);
+                            if resp.clicked() {
+                                self.bot_expanded = !open;
+                                self.expanded = None;
+                            }
+                        } else {
                             self.row_rects.push((vv.id, row.kind, resp.rect));
                             if resp.clicked() {
                                 self.expanded = if open { None } else { Some((vv.id, row.kind)) };
+                                self.bot_expanded = false;
                             }
                         }
                         resp.on_hover_ui(|ui| tooltip(ui, pal, row));
@@ -748,7 +779,15 @@ impl AitrackUi {
                     if vv.id == VendorId::Grok {
                         self.grok_refresh_line(ui, pal, st);
                     }
-                    if let Some((id, kind)) = self.expanded.filter(|(id, _)| *id == vv.id) {
+                    if let Some(b) = vendors
+                        .iter()
+                        .find(|v| v.id == vv.id)
+                        .and_then(|v| v.bot.as_ref())
+                        .filter(|_| self.bot_expanded)
+                    {
+                        let d = view::build_bot_detail(b, remaining, Utc::now());
+                        self.detail(ui, pal, &d);
+                    } else if let Some((id, kind)) = self.expanded.filter(|(id, _)| *id == vv.id) {
                         if let Some(v) = vendors.iter().find(|v| v.id == id) {
                             let d = view::build_detail(v, kind, remaining);
                             self.detail(ui, pal, &d);
@@ -893,7 +932,7 @@ impl AitrackUi {
         }
         if let Some(kind) = d.chart {
             ui.add_space(2.0);
-            self.history(ui, pal, d.vendor, kind, pal.vendor(d.vendor));
+            self.history(ui, pal, d.vendor, kind, d.bot, pal.vendor(d.vendor));
         }
         ui.add_space(2.0);
         for pair in d.rows.chunks(2) {
@@ -916,22 +955,22 @@ impl AitrackUi {
         pal: &Palette,
         vendor: VendorId,
         kind: Kind,
+        bot: bool,
         color: Color32,
     ) {
         // until the user picks a range, open with the shortest one that shows all the data
         if !self.range_user
-            && self.default_range_at.is_none_or(|(v, k, at)| {
-                v != vendor || k != kind || at.elapsed() > Duration::from_secs(30)
+            && self.default_range_at.is_none_or(|(v, k, b, at)| {
+                v != vendor || k != kind || b != bot || at.elapsed() > Duration::from_secs(30)
             })
         {
             let now = Utc::now();
             let r = self
                 .app
-                .history_for(vendor)
-                .try_with_readings(|rs| view::default_range(rs, kind, now));
+                .chart_readings(vendor, bot, |rs| view::default_range(rs, kind, now));
             if let Some(r) = r {
                 self.range = r;
-                self.default_range_at = Some((vendor, kind, Instant::now()));
+                self.default_range_at = Some((vendor, kind, bot, Instant::now()));
             }
         }
         ui.horizontal(|ui| {
@@ -957,31 +996,40 @@ impl AitrackUi {
                 }
             });
         });
-        let history = self.app.history_for(vendor).clone();
-        let version = history.version();
+        let version = self.app.chart_version(vendor, bot);
         let stale = self.chart.as_ref().is_none_or(|c| {
             c.version != version
                 || c.vendor != vendor
                 || c.kind != kind
+                || c.bot != bot
                 || c.range != self.range
                 || c.at.elapsed() > Duration::from_secs(30)
         });
         if stale {
             let (range, now) = (self.range, Utc::now());
-            if let Some(data) = history.try_with_readings(|r| view::chart_data(r, kind, range, now))
-            {
+            let made = self.app.chart_readings(vendor, bot, |r| {
+                (view::chart_data(r, kind, range, now), r.is_empty())
+            });
+            if let Some((data, none_stored)) = made {
                 self.chart = Some(ChartCache {
                     version,
                     vendor,
                     kind,
+                    bot,
                     range,
                     at: Instant::now(),
                     data,
+                    none_stored,
                 });
             }
         }
         let data = self.chart.as_ref().map(|c| &c.data);
-        history_chart(ui, pal, data, color, self.range);
+        let empty = if bot && self.chart.as_ref().is_some_and(|c| c.none_stored) {
+            "No history yet"
+        } else {
+            "No readings in this range"
+        };
+        history_chart(ui, pal, data, color, self.range, empty);
     }
 
     // ------------------------------------------------------------ settings
@@ -2703,17 +2751,8 @@ fn row_widget(
     value_w: f32,
     strip_x: f32,
 ) -> Response {
-    let sense = if row.secondary {
-        Sense::hover()
-    } else {
-        Sense::click()
-    };
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), sense);
-    let resp = if row.secondary {
-        resp
-    } else {
-        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
-    };
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
     let p = ui.painter();
     if resp.hovered() || open {
         p.rect_filled(
@@ -2862,6 +2901,7 @@ fn history_chart(
     data: Option<&ChartData>,
     color: Color32,
     range: Range,
+    empty: &str,
 ) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 96.0), Sense::hover());
     let p = ui.painter_at(rect.expand(1.0));
@@ -2923,7 +2963,7 @@ fn history_chart(
         p.text(
             rect.center(),
             Align2::CENTER_CENTER,
-            "No readings in this range",
+            empty,
             prop(12.0),
             pal.muted,
         );
