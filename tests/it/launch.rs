@@ -597,7 +597,7 @@ fn linux_grok_messages_when_cli_or_terminal_is_missing() {
 #[test]
 fn linux_grok_bot_entry_binary_then_cli_order() {
     let t = TempDir::new();
-    let apps = t.join("share/applications");
+    let apps = t.join("share").join("applications");
     std::fs::create_dir_all(&apps).unwrap();
     std::fs::write(apps.join("grok-bot.desktop"), "").unwrap();
     std::fs::write(apps.join("other.desktop"), "").unwrap();
