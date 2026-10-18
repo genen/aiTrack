@@ -465,8 +465,12 @@ mod view {
         assert!(!alert_sounds_tip_for(true).contains("Windows"));
         assert_eq!(
             start_at_login_label(),
-            start_at_login_label_for(cfg!(target_os = "macos"))
+            start_at_login_label_for(cfg!(any(target_os = "macos", target_os = "linux")))
         );
+        if cfg!(target_os = "linux") {
+            assert_eq!(alert_sounds_tip(), ALERT_SOUNDS_TIP_LINUX);
+            assert!(!alert_sounds_tip().contains("Windows"));
+        }
     }
 
     #[test]

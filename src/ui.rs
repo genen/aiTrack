@@ -1929,9 +1929,16 @@ pub fn alert_sounds_tip_for(mac: bool) -> &'static str {
     }
 }
 
+/// The same on Linux (GNOME plays its own sound; there is no per-app sound).
+pub const ALERT_SOUNDS_TIP_LINUX: &str = "GNOME plays its own notification sound; there is no per-app sound. Turn it off under Settings > Sound > System Sounds or Do Not Disturb.";
+
 /// The Alert sounds hover text for this platform.
 pub fn alert_sounds_tip() -> &'static str {
-    alert_sounds_tip_for(cfg!(target_os = "macos"))
+    if cfg!(target_os = "linux") {
+        ALERT_SOUNDS_TIP_LINUX
+    } else {
+        alert_sounds_tip_for(cfg!(target_os = "macos"))
+    }
 }
 
 /// Label of the launch-at-sign-in row for `mac` or Windows.
@@ -1945,7 +1952,11 @@ pub fn start_at_login_label_for(mac: bool) -> &'static str {
 
 /// Label of the launch-at-sign-in row on this platform.
 pub fn start_at_login_label() -> &'static str {
-    start_at_login_label_for(cfg!(target_os = "macos"))
+    if cfg!(target_os = "linux") {
+        "Start at login"
+    } else {
+        start_at_login_label_for(cfg!(target_os = "macos"))
+    }
 }
 
 /// Widest a settings tooltip gets: it wraps inside the 310 pt window instead of running off it.

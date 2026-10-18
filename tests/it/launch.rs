@@ -390,3 +390,78 @@ fn spawning_is_disabled_when_the_variable_is_set_to_anything() {
     assert!(spawning_disabled_for(Some(OsStr::new("1"))));
     assert!(spawning_disabled_for(Some(OsStr::new(""))));
 }
+
+// ---------------------------------------------------------------- start at login (Linux autostart)
+
+#[test]
+fn the_autostart_folder_follows_xdg_config_home_when_absolute() {
+    use aitrack::startup;
+    use std::ffi::OsStr;
+    let home = Path::new("/home/me");
+    assert_eq!(
+        startup::autostart_file(None, home),
+        Path::new("/home/me/.config/autostart/aitrack.desktop")
+    );
+    assert_eq!(
+        startup::autostart_file(Some(OsStr::new("/x/cfg")), home),
+        Path::new("/x/cfg/autostart/aitrack.desktop")
+    );
+    for bad in ["", "rel/cfg"] {
+        assert_eq!(
+            startup::autostart_dir(Some(OsStr::new(bad)), home),
+            Path::new("/home/me/.config/autostart")
+        );
+    }
+}
+
+#[test]
+fn the_desktop_entry_has_the_required_keys_and_quotes_the_exec() {
+    use aitrack::startup;
+    let t = startup::desktop_entry(Path::new("/opt/aiTrack/aitrack"));
+    for line in [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=aiTrack",
+        "Exec=/opt/aiTrack/aitrack",
+        "Icon=aitrack",
+        "Terminal=false",
+        "X-GNOME-Autostart-enabled=true",
+    ] {
+        assert!(t.lines().any(|l| l == line), "missing {line}");
+    }
+    assert!(t.starts_with("[Desktop Entry]\n"));
+    assert_eq!(startup::desktop_exec_quote("/a b/c"), "\"/a b/c\"");
+    assert_eq!(startup::desktop_exec_quote("/100%/x"), "/100%%/x");
+    // quote, dollar, backtick and backslash: escaped for the Exec level, then for the file level
+    assert_eq!(startup::desktop_exec_quote("/a\"b"), "\"/a\\\\\"b\"");
+    assert_eq!(startup::desktop_exec_quote("/a$b"), "\"/a\\\\$b\"");
+    assert_eq!(startup::desktop_exec_quote("/a\\b"), "\"/a\\\\\\\\b\"");
+    // a line break cannot start a new key
+    let e = startup::desktop_entry(Path::new("/a\nb c"));
+    assert_eq!(e.lines().count(), 8);
+}
+
+#[test]
+fn the_autostart_file_is_written_found_and_removed_under_explicit_dirs() {
+    use aitrack::startup;
+    let t = TempDir::new();
+    let xdg = t.path().join("cfg");
+    assert!(!startup::autostart_is_enabled(
+        Some(xdg.as_os_str()),
+        t.path()
+    ));
+    startup::autostart_enable(Some(xdg.as_os_str()), t.path(), Path::new("/x y/aitrack")).unwrap();
+    assert!(startup::autostart_is_enabled(
+        Some(xdg.as_os_str()),
+        t.path()
+    ));
+    assert!(!startup::autostart_is_enabled(None, t.path()));
+    let text = std::fs::read_to_string(xdg.join("autostart/aitrack.desktop")).unwrap();
+    assert!(text.contains("Exec=\"/x y/aitrack\"\n"));
+    startup::autostart_disable(Some(xdg.as_os_str()), t.path()).unwrap();
+    assert!(!startup::autostart_is_enabled(
+        Some(xdg.as_os_str()),
+        t.path()
+    ));
+    startup::autostart_disable(Some(xdg.as_os_str()), t.path()).unwrap();
+}
