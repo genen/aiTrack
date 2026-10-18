@@ -3,6 +3,11 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.3.19-beta] - 2026-10-18
+
+### Changed
+- README: Linux has now been tested by the maintainer on a real Ubuntu desktop; the "not yet run" wording is removed.
+
 ## [0.3.18-beta] - 2026-10-18
 
 ### Added
