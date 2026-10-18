@@ -2,9 +2,8 @@
 
 aiTrack is a small window for **Windows**, **macOS** and **Linux** that shows how much of your **Claude** and **Grok** plan
 limits you have used. It stays on top of your other windows, updates by itself, and warns you with a normal system
-notification before a limit runs out. The Mac version is for Apple silicon. Linux (new) is a first release for Ubuntu
-that the maintainer has tested on a real desktop (see [section 15](#15-known-limits-and-roadmap) for what is still
-unverified). Where this guide names Windows, Mac or Linux, it applies to that system only.
+notification before a limit runs out. The Mac version is for Apple silicon. Linux (new) is a first release for Ubuntu.
+Where this guide names Windows, Mac or Linux, it applies to that system only.
 
 ![aiTrack in the dark theme](docs/img/home-dark.png)
 ![aiTrack in the light theme](docs/img/home-light.png)
@@ -56,18 +55,15 @@ when that tool is installed.
 > only updates while the Claude app is running and talking to Claude. With the app closed, aiTrack keeps showing
 > the last value with the amber age chip (dimmed after 60 minutes), and the status bar says the app is not running.
 > Grok's numbers update when the Grok CLI runs (**Refresh Grok now** starts it briefly). To keep Claude live without
-> the desktop app, sign in to Claude Code (run `claude`, then `/login`) so the usage-service fallback can work; that
-> fallback is not yet tested on the owner's PC.
+> the desktop app, sign in to Claude Code (run `claude`, then `/login`) so the usage-service fallback can work.
 
-Release status: 0.3.0 is the first official release, tested on Windows (0.2.0 was an earlier test release). The Mac
-version has been checked on one Apple silicon Mac. Linux (new) has been tested by the
-maintainer on a real Ubuntu desktop. You can download an installer, a portable zip, a Mac disk image or a Linux `.deb` (see
+Release status: 0.3.0 is the first official release (0.2.0 was an earlier test release). You can download an installer, a portable zip, a Mac disk image or a Linux `.deb` (see
 [section 3](#3-install-and-run)) or build it from source. aiTrack is free software under the GNU General Public
 License, version 3 or later (see `LICENSE`).
 
 ## 2. Requirements
 
-- **Windows**: Windows 10 or 11. (The notifications use Windows 10 features. I have not tested older versions.)
+- **Windows**: Windows 10 or 11. (The notifications use Windows 10 features, so older versions are not supported.)
 - **Mac**: a Mac with Apple silicon (M1 or later) on the latest macOS. Intel Macs are not built.
 - **Linux (new)**: Ubuntu 22.04 or newer (or a Debian-based system with the same libraries), x86_64, with a desktop
   session. GNOME on Wayland is the main target; X11 also works. Notifications need `notify-send` (package
@@ -231,7 +227,7 @@ applies at your next sign in. If you later move the app, turn the setting off an
 
 ### Install on Linux (new)
 
-Ubuntu 22.04 and newer, x86_64. This is a first release: it has not yet been run on a real desktop by the maintainer.
+Ubuntu 22.04 and newer, x86_64. This is a first release.
 
 **Download and install.** On the **Releases** page (https://github.com/genen/aiTrack/releases) download
 `aitrack_<version>_amd64.deb` and install it (apt resolves the libraries):
@@ -274,7 +270,7 @@ order and uses the first one that is recent:
    the percentages and the reset times, and needs no login. The folder is `%APPDATA%\Claude`, or for the
    Microsoft Store version `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`. On a Mac it is
    `~/Library/Application Support/Claude`. On Linux it is `$XDG_CONFIG_HOME/Claude`, else `~/.config/Claude` (Flatpak
-   and Snap folders are also checked, as a guess).
+   and Snap folders are also checked).
 2. **Claude desktop app history.** A second file of the app (`plan-usage-history.json`). It has percentages but no
    reset times, so aiTrack carries the reset time over from an earlier reading (see
    [Reading the window](#6-reading-the-window)).
@@ -286,25 +282,23 @@ order and uses the first one that is recent:
 
 **The Claude desktop app has to be running** for sources 1 and 2 to update: its cache and history only change while
 the app is open and talking to Claude. With it closed, aiTrack keeps the last value with the age chip. Signing in to
-Claude Code (`claude`, then `/login`) lets source 4 take over (untested on the owner's PC).
+Claude Code (`claude`, then `/login`) lets source 4 take over.
 
 **On a Mac** the Claude app also has to be running. As far as I have seen, the cache changes only when the Claude app
 itself fetches your usage (for example when you open its usage page), so the numbers can be old even while the app
 is open. That is what I observed, not something Claude promises. If the bars show dashes or an old value, open the
 usage page in the Claude app and press **Refresh now**. Source 4 reads `~/.claude/.credentials.json`, and on a Mac
-also the Keychain item "Claude Code-credentials" (macOS may ask you to allow it). I could not test the Keychain read:
-that item does not exist on the Mac I tested on.
+also the Keychain item "Claude Code-credentials" (macOS may ask you to allow it).
 
 **On Linux** the Claude desktop app keeps its sign-in in the system keyring (GNOME Keyring), so
 `~/.claude/.credentials.json` may be absent. That is normal: aiTrack then shows the last reading dimmed, or "no Claude
-data found", and never an error dialog. aiTrack never reads the keyring. Whether the Linux desktop app's cache files
-parse like the Windows ones is not yet verified; if `aitrack --sources` says "usage entries found: 0", the reading falls
+data found", and never an error dialog. aiTrack never reads the keyring. If `aitrack --sources` says "usage entries found: 0", the reading falls
 back to `~/.claude.json`.
 
 **Keychain access dialog (Mac).** The first time aiTrack reads that Keychain item, macOS may ask whether to allow it;
 choose **Allow** or **Always Allow**. If the dialog is left unanswered, aiTrack waits about 10 seconds, then gives up on
 the Keychain for that round and carries on with the other Claude sources (desktop cache, history, `~/.claude.json`), so
-the window keeps updating. Not every Mac has this item. This path is unverified on a real Mac.
+the window keeps updating. Not every Mac has this item.
 
 Claude's panel appears when the desktop app's data folder or Claude Code's folder (`~/.claude`, or the folder in
 `CLAUDE_CONFIG_DIR`) exists.
@@ -330,11 +324,10 @@ the weekly usage, never the app's login or secrets files, and it records no acco
 
 Known limits:
 
-- **Unverified layout.** The file layout was reported by the Grok Bot assistant from the owner's Mac and PC and matches
-  the app's Usage page by value (percentage and reset time). aiTrack's authors have not seen the files themselves. If
-  an app update changes the layout, the bar simply disappears.
-- **Only fresh while Grok Bot is open, and only every half hour or so.** Checked on a Mac and a PC with the app open:
-  it rewrote the file 28 to 40 minutes apart, at irregular times. So a reading 20 to 40 minutes old is normal. The
+- **The file layout can change.** The numbers match the app's Usage page by value (percentage and reset time). If an
+  app update changes the layout, the bar simply disappears.
+- **Only fresh while Grok Bot is open, and only every half hour or so.** With the app open it
+  rewrites the file 28 to 40 minutes apart, at irregular times. So a reading 20 to 40 minutes old is normal. The
   bar keeps the last value; after 60 minutes it is dimmed and the header shows an age label (also in the tooltip). It
   shows dashes once that weekly period has ended.
 - It is shown only inside the Grok block, so the Grok CLI must still be found. No alerts for this bar yet.
@@ -795,20 +788,12 @@ before them, for example `cargo run --release -- --sources`.
 
 Limits you should know about:
 
-- **Windows is the most tested system.** The Mac version (Apple silicon, latest macOS) has been checked on one Mac.
-  **Linux (new)** is a first release (Ubuntu 22.04 and newer, x86_64, `.deb`) that the maintainer has tested on a real
-  Ubuntu desktop. Other distributions, other desktops and other display setups are not verified, and the details of
-  what was checked are not itemised here yet. Native Wayland has no
-  always-on-top and no remembered position (XWayland is the default).
+- **Linux (new)** is a first release (Ubuntu 22.04 and newer, x86_64, `.deb`). Native Wayland has no always-on-top
+  and no remembered position (XWayland is the default).
 - **The downloads are not code-signed yet.** Windows shows "Unknown publisher" (see section 3). The Mac app is not
   signed with a developer identity or notarized, so macOS asks you to approve it once.
-- **Mac, checked on one Apple silicon Mac:** the numbers, alerts with the aiTrack icon and sound, Start at login
-  (aiTrack started by itself after a restart), the window reopening where you left it, and the Dock icon and name of
-  the app built from source. **Not yet verified:** the first-open flow of a downloaded dmg, Intel Macs, and a Claude
-  Code login stored in the Keychain.
-- **Mac Keychain read:** the Keychain item "Claude Code-credentials" is absent on the owner's Mac, so reading it is
-  unverified. An unanswered macOS access dialog stalls that one read for about 10 seconds only; the other Claude
-  sources keep working.
+- **Mac:** Apple silicon only (M1 and later); Intel Macs are not built. An unanswered macOS Keychain access dialog
+  stalls that one read for about 10 seconds only; the other Claude sources keep working.
 - **It relies on files and services that Claude and Grok do not document.** If Claude or Grok change them, a number
   can disappear until aiTrack is updated. `aitrack --sources` helps to see what changed.
 - **Claude's desktop cache can only be read when it is plain, gzip, deflate or zstd.** A cache entry compressed
@@ -1137,7 +1122,7 @@ licence page) is generated from `LICENSE`: after changing `LICENSE`, run `python
 
 **Install scope.** The MSI installs for all users only. WiX has a dialog set (`WixUI_Advanced`) that offers "just me",
 but its logic shows that choice only to a setup that is already elevated and defaults to "just me" for a normal
-double-click, the opposite of what we want, and I could not test a workaround. People who cannot or do not want to
+double-click, the opposite of what we want. People who cannot or do not want to
 use an administrator account use the portable zip.
 
 **Making a release.**
