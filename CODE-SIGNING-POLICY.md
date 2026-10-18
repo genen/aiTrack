@@ -28,6 +28,9 @@ The macOS app is signed with an Apple Developer ID and notarized by Apple.
 - **Approvers** (who approve each signing request): the project owner (genen), currently the only maintainer. Every
   release is approved by the project owner before it is started.
 
+The maintainer's GitHub account is protected with two-factor authentication, and the same will apply to the SignPath
+account once it exists.
+
 ## Privacy
 
 See [PRIVACY.md](PRIVACY.md): aiTrack does not transfer any information to other networked systems except the three
