@@ -8,7 +8,6 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 ### Fixed
 - Grok Bot history: a reading is saved once, stamped with the time the app wrote it, instead of again every 15 minutes with the current time; nothing is saved for a weekly period that has ended, so last week's percentage no longer appears in the new week's chart.
 - Linux: "Open Claude" asks which application handles `claude://` first and goes on to `claude-desktop` and the desktop entries when none is registered, instead of opening the link in a browser.
-- Linux and macOS: a Grok CLI that already ended on its own during the refresh is no longer sent a kill signal.
 - The Grok Bot chart rebuilds after the new reading is in the history, not before.
 - Release workflows: a hand-run with Replace checked now replaces the SHA256 section in the release notes with the new checksums, and the section is checked a second time after a short pause.
 

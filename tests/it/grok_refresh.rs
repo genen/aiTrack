@@ -1154,50 +1154,6 @@ fn ending_a_refresh_ends_the_wrappers_children_too() {
     assert!(!alive, "the wrapper's child survived the kill");
 }
 
-#[cfg(unix)]
-#[test]
-fn a_child_that_already_ended_is_not_signalled() {
-    use std::os::unix::fs::PermissionsExt;
-    let t = TempDir::new();
-    let pidfile = t.join("bystander.pid");
-    let script = t.join("grok");
-    // the leader ends at once and leaves a process of its group behind
-    std::fs::write(
-        &script,
-        format!(
-            "#!/bin/sh\nsleep 300 &\necho $! > '{}'\n",
-            pidfile.display()
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let mut child = grok_cli::SystemHost.spawn(&script, &[]).unwrap();
-    let start = Instant::now();
-    while !matches!(child.try_wait(), Ok(Some(_))) && start.elapsed() < StdDuration::from_secs(5) {
-        std::thread::sleep(StdDuration::from_millis(20));
-    }
-    assert!(matches!(child.try_wait(), Ok(Some(_))), "the script ended");
-    let pid = std::fs::read_to_string(&pidfile)
-        .unwrap()
-        .trim()
-        .to_string();
-    let alive = |pid: &str| {
-        std::process::Command::new("kill")
-            .args(["-0", pid])
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
-    };
-    child.kill();
-    std::thread::sleep(StdDuration::from_millis(200));
-    let survived = alive(&pid);
-    let _ = std::process::Command::new("kill")
-        .args(["-KILL", &pid])
-        .status();
-    assert!(survived, "no signal was sent for a pid that had ended");
-}
-
 #[test]
 fn the_process_runs_for_the_grace_period_after_the_line_appears() {
     let h = home();

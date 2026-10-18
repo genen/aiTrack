@@ -329,12 +329,6 @@ impl Child for RealChild {
     fn kill(&mut self) {
         self.stdin = None;
         // Unix: the child leads its own process group (see `command`), so the group ends with it.
-        // A child that already ended has been reaped and its pid may belong to someone else now:
-        // nothing is signalled then.
-        #[cfg(unix)]
-        if !matches!(self.child.try_wait(), Ok(None)) {
-            return;
-        }
         #[cfg(unix)]
         kill_group(self.child.id());
         #[cfg(windows)]
