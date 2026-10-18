@@ -3,6 +3,18 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.3.18-beta] - 2026-10-18
+
+### Added
+- Linux: the Grok Bot app is supported (weekly meter read from `~/.config/Grok Bot/sand-client-persistence`); the Grok block shows when only the app is installed. Clicking the Grok badge opens Grok Bot first, then the CLI in a terminal. `aitrack --sources` lists the Grok Bot folder.
+- Linux: the display backend is shown as chosen and as running (`aitrack --sources`, Settings > About "Display", notify.log), with a warning when they differ.
+- Linux: the X display is checked by a real connect (XWayland probe, about 1 s of retries); a second launch says which pid is running and since when; a window start-up failure prints a hint (`AITRACK_WAYLAND=native`).
+- SignPath preparation: roles and MFA in the code-signing policy, `docs/signpath-after-approval.md`, links in the release notes of the three release workflows.
+
+### Fixed
+- The `.deb` file name in the Linux release notes.
+- Windows and macOS behaviour is unchanged.
+
 ## [0.3.17-beta] - 2026-10-18
 
 ### Added

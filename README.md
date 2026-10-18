@@ -249,6 +249,11 @@ native Wayland has no "always on top" and lets an app neither read nor set its o
 is not available (use the title-bar menu, Alt+Space on GNOME, per session). Under XWayland, text can look slightly soft
 with fractional display scaling.
 
+**Display backend and Grok Bot.** See which backend is in use with `aitrack --sources` (line "display backend: ...") or
+Settings > About > Display. If the window does not open, try `AITRACK_WAYLAND=native aitrack`. A second launch says
+which aiTrack is already running. Grok Bot on Linux is read from `~/.config/Grok Bot/sand-client-persistence`
+(file layout assumed to match Windows/macOS; `aitrack --sources` shows what was found).
+
 **Start at login.** In Settings > General, turn on **Start at login**. aiTrack writes
 `~/.config/autostart/aitrack.desktop` (or under `$XDG_CONFIG_HOME`). If you later move the program, turn the setting off
 and on again.

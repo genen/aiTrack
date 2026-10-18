@@ -605,7 +605,8 @@ fn linux_grok_bot_entry_binary_then_cli_order() {
     let bin = Path::new("/opt/Grok Bot/grok-bot");
     let terms = vec![(PathBuf::from("/t/a"), "-e")];
     let cli = Path::new("/h/.grok/bin/grok");
-    let entry = format!("{}/share/applications/grok-bot.desktop", t.path().display());
+    // built with join, like the code under test, so the separators match on Windows too
+    let entry = apps.join("grok-bot.desktop").display().to_string();
 
     // 1. the desktop entry works: nothing else is tried
     let fake = Fake::default();
