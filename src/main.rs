@@ -169,6 +169,15 @@ fn main() {
     }
     if cli.sources {
         println!("{}", aitrack::buildinfo::line());
+        #[cfg(target_os = "linux")]
+        {
+            let d = aitrack::placement::current_decision();
+            println!(
+                "{} [{}]",
+                aitrack::placement::backend_line(d.choice, None),
+                d.why
+            );
+        }
         print!(
             "{}",
             aitrack::sources::diagnose(&aitrack::sources::Env::from_process(), chrono::Utc::now())
@@ -223,7 +232,14 @@ fn open_window(data: PathBuf) {
         Acquire::AlreadyRunning { pid } => {
             // a second window is never opened: show the running one instead
             if !instance::raise_existing_window(pid) {
-                eprintln!("{}", instance::running_text(pid));
+                let since = instance::started_at(&instance::lock_path()).map(|t| {
+                    chrono::DateTime::<chrono::Local>::from(t)
+                        .format("%Y-%m-%d %H:%M")
+                        .to_string()
+                });
+                let text = instance::running_text_since(pid, since.as_deref());
+                eprintln!("{text}");
+                aitrack::alerts::log_line(&format!("instance: {text}"));
             }
             return;
         }
@@ -232,6 +248,9 @@ fn open_window(data: PathBuf) {
             None
         }
     };
+    // Linux: pick X11 (XWayland) or native Wayland now, before any thread starts
+    #[cfg(target_os = "linux")]
+    let chosen = aitrack::ui::prepare_display();
     let settings = Arc::new(Settings::load_default());
     // Grok readings go to their own file next to the Claude one
     let grok_file = data.with_file_name("usage-grok.jsonl");
@@ -267,6 +286,8 @@ fn open_window(data: PathBuf) {
     if let Err(e) = aitrack::ui::run(app) {
         attach_console();
         eprintln!("aitrack: window error: {e}");
+        #[cfg(target_os = "linux")]
+        eprintln!("aitrack: {}", aitrack::placement::failure_hint(chosen));
         drop(lock);
         std::process::exit(1);
     }

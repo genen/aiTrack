@@ -1458,6 +1458,12 @@ impl AitrackUi {
             crate::launch::CONTACT_EMAIL,
             |_| {},
         );
+        // Linux: which display backend the window runs on (empty elsewhere)
+        let backend = crate::placement::backend_report();
+        if !backend.is_empty() {
+            ui.add_space(4.0);
+            setting_row(ui, pal, "Display", &backend, |_| {});
+        }
         ui.add_space(4.0);
         let mut open_license = false;
         setting_row_ui(
@@ -1764,7 +1770,7 @@ pub fn run(app: Arc<App>) -> eframe::Result {
     // reopen where the window was left, when that place is still on a screen
     let saved = app.settings.get().window;
     #[cfg(target_os = "linux")]
-    let backend = linux_backend();
+    let backend = prepare_display();
     #[cfg(not(target_os = "linux"))]
     {
         let monitors = crate::placement::monitors();
@@ -1810,6 +1816,8 @@ pub fn run(app: Arc<App>) -> eframe::Result {
         crate::instance::WINDOW_TITLE,
         opts,
         Box::new(move |cc| {
+            #[cfg(target_os = "linux")]
+            report_actual_backend(cc, backend);
             Ok(Box::new(Window {
                 ui: AitrackUi::new(&cc.egui_ctx, app),
             }))
@@ -1817,37 +1825,59 @@ pub fn run(app: Arc<App>) -> eframe::Result {
     )
 }
 
-/// Linux: decide X11 (XWayland) or native Wayland from the environment, falling back to native
-/// Wayland when the X display's socket is missing, and record what that allows (see `placement`).
 #[cfg(target_os = "linux")]
-fn linux_backend() -> crate::placement::BackendChoice {
-    use crate::placement::{choose_backend, x_socket_path, BackendChoice, DisplayEnv, PosMode};
-    let var = |k: &str| std::env::var(k).ok();
-    let (wd, st, d, aw) = (
-        var("WAYLAND_DISPLAY"),
-        var("XDG_SESSION_TYPE"),
-        var("DISPLAY"),
-        var("AITRACK_WAYLAND"),
-    );
-    let mut b = choose_backend(&DisplayEnv {
-        wayland_display: wd.as_deref(),
-        xdg_session_type: st.as_deref(),
-        display: d.as_deref(),
-        aitrack_wayland: aw.as_deref(),
-    });
-    if b == BackendChoice::XWayland {
-        if let Some(sock) = d.as_deref().and_then(x_socket_path) {
-            if !sock.exists() {
-                crate::alerts::log_line(
-                    "window: X display socket not found, using native Wayland (no always-on-top)",
-                );
-                b = BackendChoice::NativeWayland;
-            }
+static LINUX_BACKEND: std::sync::OnceLock<crate::placement::BackendChoice> =
+    std::sync::OnceLock::new();
+
+/// Linux: decide X11 (XWayland) or native Wayland, once, and export a found `DISPLAY`. Call it
+/// from `main` before any thread starts (it sets an environment variable); `run` calls it too, so
+/// the first call wins. Falls back to native Wayland when no X display answers.
+#[cfg(target_os = "linux")]
+pub fn prepare_display() -> crate::placement::BackendChoice {
+    use crate::placement::{backend_line, current_decision, set_backend_report, PosMode};
+    *LINUX_BACKEND.get_or_init(|| {
+        let dec = current_decision();
+        if let Some(d) = &dec.display {
+            std::env::set_var("DISPLAY", d);
         }
+        let line = backend_line(dec.choice, None);
+        crate::alerts::log_line(&format!("window: {line} [{}]", dec.why));
+        set_backend_report(line);
+        crate::placement::set_mode(PosMode::of(dec.choice));
+        dec.choice
+    })
+}
+
+/// Which backend the window really got, from its window handle.
+#[cfg(target_os = "linux")]
+fn actual_backend(
+    handle: Result<winit::raw_window_handle::RawWindowHandle, ()>,
+) -> crate::placement::ActualBackend {
+    use crate::placement::ActualBackend;
+    use winit::raw_window_handle::RawWindowHandle as H;
+    match handle {
+        Ok(H::Xlib(_)) | Ok(H::Xcb(_)) => ActualBackend::X11,
+        Ok(H::Wayland(_)) => ActualBackend::Wayland,
+        _ => ActualBackend::Unknown,
     }
-    crate::alerts::log_line(&format!("window: display backend {b:?}"));
-    crate::placement::set_mode(PosMode::of(b));
-    b
+}
+
+/// After the window exists: log and show what it runs on, warn when that is not what was chosen.
+#[cfg(target_os = "linux")]
+fn report_actual_backend(
+    cc: &eframe::CreationContext<'_>,
+    chosen: crate::placement::BackendChoice,
+) {
+    use crate::placement::{backend_line, backend_mismatch, set_backend_report};
+    use winit::raw_window_handle::HasWindowHandle;
+    let actual = actual_backend(cc.window_handle().map(|h| h.as_raw()).map_err(|_| ()));
+    let line = backend_line(chosen, Some(actual));
+    crate::alerts::log_line(&format!("window: {line}"));
+    if let Some(w) = backend_mismatch(chosen, actual) {
+        crate::alerts::log_line(&w);
+        eprintln!("aitrack: {w}");
+    }
+    set_backend_report(line);
 }
 
 struct Window {
@@ -3000,4 +3030,26 @@ fn history_chart(
         mono(10.0),
         pal.muted,
     );
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod backend_handle_tests {
+    use super::actual_backend;
+    use crate::placement::ActualBackend;
+    use std::num::NonZeroU32;
+    use std::ptr::NonNull;
+    use winit::raw_window_handle::{
+        RawWindowHandle as H, WaylandWindowHandle, XcbWindowHandle, XlibWindowHandle,
+    };
+
+    #[test]
+    fn handle_kind_maps_to_backend() {
+        let xl = H::Xlib(XlibWindowHandle::new(1));
+        let xc = H::Xcb(XcbWindowHandle::new(NonZeroU32::new(1).unwrap()));
+        let wl = H::Wayland(WaylandWindowHandle::new(NonNull::dangling()));
+        assert_eq!(actual_backend(Ok(xl)), ActualBackend::X11);
+        assert_eq!(actual_backend(Ok(xc)), ActualBackend::X11);
+        assert_eq!(actual_backend(Ok(wl)), ActualBackend::Wayland);
+        assert_eq!(actual_backend(Err(())), ActualBackend::Unknown);
+    }
 }
