@@ -326,6 +326,9 @@ pub struct BotTracker {
     saved: Mutex<Option<Saved>>,
     seeded: Mutex<bool>,
     version: AtomicU64,
+    /// The parsed history, read once and dropped when this tracker appends a record, so the
+    /// window thread does not re-read the growing file on every rebuild.
+    cached: Mutex<Option<std::sync::Arc<Vec<crate::reading::Reading>>>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -344,6 +347,7 @@ impl BotTracker {
             saved: Mutex::new(None),
             seeded: Mutex::new(false),
             version: AtomicU64::new(0),
+            cached: Mutex::new(None),
         }
     }
 
@@ -352,12 +356,24 @@ impl BotTracker {
         self.version.load(Ordering::SeqCst)
     }
 
-    /// The stored history as readings (the file is read afresh; for the Stats view).
-    pub fn readings(&self) -> Vec<crate::reading::Reading> {
+    /// The stored history as readings (for the Stats view and charts). The file is read once and
+    /// the result kept until this tracker appends a record (it is the only writer).
+    pub fn readings(&self) -> std::sync::Arc<Vec<crate::reading::Reading>> {
+        let mut c = self.cached.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(r) = c.as_ref() {
+            return r.clone();
+        }
         let mut out = Vec::new();
         self.store
             .read_each(&mut |v| out.push(crate::reading::Reading::from_value(&v)));
-        out
+        let r = std::sync::Arc::new(out);
+        *c = Some(r.clone());
+        r
+    }
+
+    /// Linux with the Grok Bot app but no Grok CLI folder: the CLI collector has nothing to read.
+    pub fn cli_absent(&self) -> bool {
+        !crate::grok::grok_home(&self.env).is_dir() && linux_app_present(&self.env)
     }
 
     pub fn latest(&self) -> Option<BotReading> {
@@ -407,6 +423,7 @@ impl BotTracker {
             return;
         }
         if self.store.append(&record(r, now)).is_ok() {
+            *self.cached.lock().unwrap_or_else(|e| e.into_inner()) = None;
             *saved = Some(Saved {
                 at: now,
                 pct: r.pct,

@@ -569,8 +569,11 @@ pub fn linux_place(saved: &WindowPos, mode: PosMode) -> Result<LinuxPlace, Disca
             }
             let sane = (TRUST_X.0..=TRUST_X.1).contains(&saved.x)
                 && (TRUST_Y.0..=TRUST_Y.1).contains(&saved.y);
+            // exactly (0, 0) is what native Wayland stores (`sample_for`, `WidthOnly`): it means
+            // "no position", not a window in the corner, so it is never applied under X11
+            let wayland_stand_in = saved.x == 0.0 && saved.y == 0.0;
             Ok(LinuxPlace {
-                pos: sane.then_some((saved.x as f32, saved.y as f32)),
+                pos: (sane && !wayland_stand_in).then_some((saved.x as f32, saved.y as f32)),
                 width,
             })
         }
@@ -1011,6 +1014,17 @@ mod linux_tests {
             linux_place(&saved(f64::NAN, 1.0, None), PosMode::Trust),
             Err(Discard::Sentinel)
         );
+    }
+
+    #[test]
+    fn the_wayland_stand_in_origin_is_not_applied_under_x11() {
+        for mode in [PosMode::Trust, PosMode::Full] {
+            let r = linux_place(&saved(0.0, 0.0, Some(300.0)), mode).unwrap();
+            assert_eq!(r.pos, None, "{mode:?}");
+            assert_eq!(r.width, 300.0);
+            let r = linux_place(&saved(0.0, 40.0, Some(300.0)), mode).unwrap();
+            assert_eq!(r.pos, Some((0.0, 40.0)), "{mode:?}");
+        }
     }
 
     #[test]

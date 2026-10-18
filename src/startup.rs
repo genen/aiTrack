@@ -149,6 +149,16 @@ pub fn autostart_is_enabled(xdg_config_home: Option<&OsStr>, home: &Path) -> boo
     autostart_file(xdg_config_home, home).is_file()
 }
 
+/// `current_exe()` on Linux reads `/proc/self/exe`, which ends in " (deleted)" when the file was
+/// replaced while the program runs (a `.deb` upgrade). The autostart entry wants the plain path,
+/// which now holds the new version.
+pub fn without_deleted_suffix(exe: PathBuf) -> PathBuf {
+    match exe.to_str().and_then(|s| s.strip_suffix(" (deleted)")) {
+        Some(plain) => PathBuf::from(plain),
+        None => exe,
+    }
+}
+
 /// Write the autostart file for `exe`. It applies at the next login.
 pub fn autostart_enable(
     xdg_config_home: Option<&OsStr>,
@@ -213,6 +223,7 @@ pub fn set_startup(enabled: bool) -> Result<(), String> {
     let xdg = std::env::var_os("XDG_CONFIG_HOME");
     if enabled {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe = without_deleted_suffix(exe);
         autostart_enable(xdg.as_deref(), &home, &exe)
     } else {
         autostart_disable(xdg.as_deref(), &home)

@@ -102,20 +102,53 @@ impl Notifier for LinuxNotifier {
             crate::alerts::log_line(&why);
             crate::alerts::LogNotifier.notify(n)
         };
-        match std::process::Command::new("notify-send")
+        use std::io::Read;
+        use std::process::Stdio;
+        let mut child = match std::process::Command::new("notify-send")
             .args(notify_send_args(n))
-            .output()
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
         {
-            Ok(out) if out.status.success() => Ok(()),
-            Ok(out) => fallback(format!(
-                "notify-send failed ({}): {}",
-                out.status,
-                String::from_utf8_lossy(&out.stderr).trim()
-            )),
-            Err(e) => fallback(format!("notify-send could not start: {e}")),
-        }
+            Ok(c) => c,
+            Err(e) => return fallback(format!("notify-send could not start: {e}")),
+        };
+        // notify-send can hang for ~25 s when the notification daemon is missing or stuck, so
+        // neither the window nor the poll thread waits for it: a short-lived thread reaps it (and
+        // kills it after NOTIFY_SEND_TIMEOUT) and writes a failure to the log.
+        let n = n.clone();
+        std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            let why = loop {
+                match child.try_wait() {
+                    Ok(Some(st)) if st.success() => return,
+                    Ok(Some(st)) => {
+                        let mut err = String::new();
+                        if let Some(mut e) = child.stderr.take() {
+                            let _ = e.read_to_string(&mut err);
+                        }
+                        break format!("notify-send failed ({st}): {}", err.trim());
+                    }
+                    Ok(None) if started.elapsed() >= NOTIFY_SEND_TIMEOUT => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break "notify-send timed out (no notification service?)".to_string();
+                    }
+                    Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
+                    Err(e) => break format!("notify-send wait failed: {e}"),
+                }
+            };
+            crate::alerts::log_line(&why);
+            let _ = crate::alerts::LogNotifier.notify(&n);
+        });
+        Ok(())
     }
 }
+
+/// How long the background reaper lets `notify-send` run before killing it.
+#[cfg(not(any(windows, target_os = "macos")))]
+const NOTIFY_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The system sound of a warning, limit or predictive banner on macOS (a short built-in one).
 pub const MAC_REMINDER_SOUND: &str = "Glass";

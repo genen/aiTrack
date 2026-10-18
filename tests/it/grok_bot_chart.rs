@@ -73,17 +73,16 @@ fn tracker_history_feeds_the_chart_without_an_account_id() {
     use aitrack::sources::{Env, Os};
     use aitrack::store::JsonlStore;
     let dir = crate::common::TempDir::new();
-    let t = grok_bot::BotTracker::new(
-        Env::new(Os::Linux),
-        Box::new(JsonlStore::new(dir.join("b.jsonl"))),
-    );
-    assert!(t.readings().is_empty(), "no history yet");
     let store = JsonlStore::new(dir.join("b.jsonl"));
     use aitrack::store::Store;
     for m in [30, 20, 10] {
         let r = bot(40.0 + m as f64 / 10.0, m, 40);
         store.append(&grok_bot::record(&r, r.read_at)).unwrap();
     }
+    let t = grok_bot::BotTracker::new(
+        Env::new(Os::Linux),
+        Box::new(JsonlStore::new(dir.join("b.jsonl"))),
+    );
     let rs = t.readings();
     assert_eq!(rs.len(), 3);
     let d = chart_data(&rs, Kind::Weekly, Range::Day, now());

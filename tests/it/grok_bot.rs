@@ -788,3 +788,101 @@ fn linux_sources_lists_the_folder_and_blob_count_only() {
     assert!(!text.contains("acct-secret-x") && !text.contains(".blob\n"));
     assert!(!text.contains(d.path().to_str().unwrap()), "no real paths");
 }
+
+#[test]
+fn readings_are_read_once_and_refreshed_after_an_append() {
+    let f = Fx::new();
+    let hist = f.dir.join("usage-grok-bot.jsonl");
+    let tracker = BotTracker::new(f.env(), Box::new(JsonlStore::new(&hist)));
+    assert!(tracker.readings().is_empty());
+    f.fresh(50.0);
+    tracker.refresh(now());
+    assert_eq!(tracker.readings().len(), 1, "own append drops the cache");
+    // a record written behind the tracker's back is not seen until its next append: the file is
+    // not re-read on every call
+    let behind = JsonlStore::new(&hist);
+    use aitrack::store::Store;
+    behind
+        .append(&aitrack::grok_bot::record(
+            &tracker.latest().unwrap(),
+            now(),
+        ))
+        .unwrap();
+    assert!(std::sync::Arc::ptr_eq(
+        &tracker.readings(),
+        &tracker.readings()
+    ));
+    assert_eq!(tracker.readings().len(), 1);
+    f.fresh(51.0);
+    tracker.refresh(now() + Duration::minutes(1));
+    assert_eq!(tracker.readings().len(), 3);
+}
+
+#[test]
+fn with_only_the_grok_bot_app_the_cli_collector_stays_quiet() {
+    use aitrack::app::App;
+    use aitrack::grok::{self, GrokLog};
+    use aitrack::live::Poller;
+    use aitrack::settings::Settings;
+    use std::sync::Arc;
+
+    let dir = TempDir::new();
+    let mut env = Env::new(Os::Linux);
+    env.home = Some(dir.join("home"));
+    env.xdg_config_home = Some(dir.join("xdg"));
+    env.claude_config_dir = Some(dir.join("cfg"));
+    env.grok_home = Some(dir.join("no-grok-cli"));
+    env.grok_bot_dir = Some(dir.join("persist"));
+    std::fs::create_dir_all(dir.join("persist")).unwrap();
+    let t0 = Utc::now();
+    let read = t0 - Duration::minutes(4);
+    std::fs::write(
+        dir.join("persist").join(blob_name(&key_name(ACCOUNT))),
+        cache_json(
+            33.0,
+            t0 + Duration::days(2),
+            read,
+            read + Duration::hours(1),
+        ),
+    )
+    .unwrap();
+    let e2 = env.clone();
+    let app = App::new(
+        Box::new(JsonlStore::new(dir.join("usage.jsonl"))),
+        Arc::new(Settings::load(dir.join("s.json"))),
+        Poller::with_env(&env, "http://127.0.0.1:1/usage", None),
+    )
+    .with_grok_poller(
+        Box::new(JsonlStore::new(dir.join("usage-grok.jsonl"))),
+        Poller::with_chain_for(vec![Box::new(GrokLog { env: env.clone() })], "grok"),
+        Arc::new(move || grok::detected(&e2)),
+    )
+    .with_grok_bot(
+        Box::new(JsonlStore::new(dir.join("usage-grok-bot.jsonl"))),
+        env.clone(),
+    );
+    app.start();
+    let t = std::time::Instant::now();
+    loop {
+        let st = app.state();
+        if let Some(g) = st
+            .grok
+            .as_ref()
+            .filter(|g| g.bot.is_some() && g.collector.polls > 0)
+        {
+            assert_eq!(g.bot.unwrap().pct, 33.0);
+            assert!(g.collector.error.is_none(), "{:?}", g.collector.error);
+            break;
+        }
+        assert!(t.elapsed().as_secs() < 10, "timed out");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    app.stop();
+    app.join();
+    assert!(
+        JsonlStore::new(dir.join("usage-grok.jsonl"))
+            .read()
+            .is_empty(),
+        "no failed CLI poll is stored"
+    );
+}

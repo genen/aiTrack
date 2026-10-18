@@ -243,10 +243,21 @@ jobs:
 
           # Add the Windows notes to the existing text, once (marker: "Windows SHA256:"), keeping whatever
           # the macOS run wrote. A rerun leaves the text alone.
-          body=$(gh release view "$TAG" --json body --jq .body)
-          if ! printf '%s\n' "$body" | grep -Fq "Windows SHA256:"; then
+          # The three release workflows edit the same text (read, append, write), so an edit can
+          # overwrite a section another run added in between. Re-read after each write and add the
+          # section again until it is there (a concurrency group cannot do this: it keeps only one
+          # waiting run per group, and there are three workflows).
+          for attempt in 1 2 3 4 5 6; do
+            body=$(gh release view "$TAG" --json body --jq .body)
+            if printf '%s\n' "$body" | grep -Fq "Windows SHA256:"; then
+              break
+            fi
             { printf '%s\n\n' "$body"; cat win-notes.md; } > notes.md
             gh release edit "$TAG" --notes-file notes.md --title "$title"
-          else
-            gh release edit "$TAG" --title "$title"
+            sleep $((2 + RANDOM % 4))
+          done
+          if ! gh release view "$TAG" --json body --jq .body | grep -Fq "Windows SHA256:"; then
+            echo "::error::The Windows SHA256: section is missing from the release notes of $TAG."
+            exit 1
           fi
+          gh release edit "$TAG" --title "$title"

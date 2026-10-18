@@ -220,8 +220,20 @@ jobs:
           gh release upload "$TAG" "$deb" --clobber
 
           # Add the Linux notes to the existing text, once (the other runs append their sections the same way).
-          body=$(gh release view "$TAG" --json body --jq .body)
-          if ! printf '%s\n' "$body" | grep -Fq "Linux SHA256:"; then
+          # The three release workflows edit the same text (read, append, write), so an edit can
+          # overwrite a section another run added in between. Re-read after each write and add the
+          # section again until it is there (a concurrency group cannot do this: it keeps only one
+          # waiting run per group, and there are three workflows).
+          for attempt in 1 2 3 4 5 6; do
+            body=$(gh release view "$TAG" --json body --jq .body)
+            if printf '%s\n' "$body" | grep -Fq "Linux SHA256:"; then
+              break
+            fi
             { printf '%s\n\n' "$body"; cat linux-notes.md; } > notes.md
             gh release edit "$TAG" --notes-file notes.md
+            sleep $((2 + RANDOM % 4))
+          done
+          if ! gh release view "$TAG" --json body --jq .body | grep -Fq "Linux SHA256:"; then
+            echo "::error::The Linux SHA256: section is missing from the release notes of $TAG."
+            exit 1
           fi
