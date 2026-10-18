@@ -270,7 +270,7 @@ order and uses the first one that is recent:
    the percentages and the reset times, and needs no login. The folder is `%APPDATA%\Claude`, or for the
    Microsoft Store version `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`. On a Mac it is
    `~/Library/Application Support/Claude`. On Linux it is `$XDG_CONFIG_HOME/Claude`, else `~/.config/Claude` (Flatpak
-   and Snap folders are also checked, as a guess).
+   and Snap folders are also checked).
 2. **Claude desktop app history.** A second file of the app (`plan-usage-history.json`). It has percentages but no
    reset times, so aiTrack carries the reset time over from an earlier reading (see
    [Reading the window](#6-reading-the-window)).
@@ -1122,7 +1122,7 @@ licence page) is generated from `LICENSE`: after changing `LICENSE`, run `python
 
 **Install scope.** The MSI installs for all users only. WiX has a dialog set (`WixUI_Advanced`) that offers "just me",
 but its logic shows that choice only to a setup that is already elevated and defaults to "just me" for a normal
-double-click, the opposite of what we want, and I could not test a workaround. People who cannot or do not want to
+double-click, the opposite of what we want. People who cannot or do not want to
 use an administrator account use the portable zip.
 
 **Making a release.**
