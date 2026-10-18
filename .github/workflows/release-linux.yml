@@ -186,7 +186,7 @@ jobs:
             echo
             echo "Linux SHA256:"
             echo '```'
-            sha256sum "$deb"
+            sha256sum "$deb" | sed "s|  .*|  $asset|"
             echo '```'
           } > linux-notes.md
 

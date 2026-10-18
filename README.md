@@ -335,6 +335,10 @@ Known limits:
 - Click the Grok Bot bar to see its weekly history chart; the chart is drawn from the readings aiTrack saved while the
   Grok Bot app was open. Gaps (app closed) show as gaps in the line.
 
+![The Grok Bot weekly pane](docs/img/grok-bot-pane.png)
+
+Clicking the Grok Bot bar opens its weekly pane: the current value, when it resets, how old the reading is (dimmed with a note when it is more than 60 minutes old), a history chart with 24h, 7d, 30d and All, and the Windows, Avg peak, Max peak and Hit rate numbers.
+
 ## 5. Grok needs the Grok CLI
 
 aiTrack reads Grok usage from the folder of the Grok **command-line tool** (`~/.grok`, which is
@@ -491,6 +495,10 @@ Click the **Stats** button (the bars icon). It shows three cards and has a **Bac
 
 ![The Stats view](docs/img/stats.png)
 
+![Weekly blocks on the Stats view](docs/img/stats-grok-bot.png)
+
+The Stats page lists, for each weekly meter including Grok Bot weekly, the windows seen, peak average and max, hit rate, current window and when it resets.
+
 - **Today**: the cost and token count of today, from your local transcripts.
 - **Projects**: your projects ranked by cost, with tokens and a bar. Choose **7 days**, **30 days** or **All**.
   Claude Code projects come from `~/.claude/projects`. Grok projects come from `~/.grok/sessions` and
@@ -503,6 +511,9 @@ Click the **Stats** button (the bars icon). It shows three cards and has a **Bac
   Claude) *A full session*, which says how much of the week one full session costs, once there is enough data.
   When the Grok Bot app is tracked and has stored readings, a separate **Grok Bot weekly** block follows
   **Grok weekly** with the same rows (weekly only), from its own history file.
+  The Stats page counts only finished weekly windows (*Windows seen*), while the detail pane that opens when you click a
+  weekly bar also counts the window in progress. A meter can therefore show "not enough complete windows" here and one
+  window with its peak in the pane.
 
 Costs are estimates at API list prices (USD per million tokens). The price list is downloaded from GitHub about
 once a day, with a built-in table as a fallback. They are not what your plan charges. The view rescans every five
