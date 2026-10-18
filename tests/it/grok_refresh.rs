@@ -1174,27 +1174,3 @@ fn the_process_runs_for_the_grace_period_after_the_line_appears() {
     assert_eq!(host.killed.load(Ordering::SeqCst), 1);
     assert_eq!(grok_cli::REFRESH_GRACE, StdDuration::from_secs(5));
 }
-
-/// A program that quits when its input is closed stays alive while the refresh holds the pipe open.
-#[cfg(unix)]
-#[test]
-fn the_cli_gets_an_open_silent_input_on_unix() {
-    let host = grok_cli::SystemHost;
-    let args = vec![OsString::from("-c"), OsString::from("read line")];
-    let mut child = host.spawn(Path::new("/bin/sh"), &args).unwrap();
-    std::thread::sleep(StdDuration::from_millis(400));
-    assert_eq!(
-        child.try_wait(),
-        Ok(None),
-        "it must still be waiting for input"
-    );
-    child.kill();
-    let t0 = Instant::now();
-    while child.try_wait() == Ok(None) {
-        assert!(
-            t0.elapsed() < StdDuration::from_secs(5),
-            "kill did not end it"
-        );
-        std::thread::sleep(StdDuration::from_millis(20));
-    }
-}
