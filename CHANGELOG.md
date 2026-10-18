@@ -3,6 +3,12 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.3.17-beta] - 2026-10-18
+
+### Added
+- Grok Bot weekly pane now shows Windows, Avg peak, Max peak and Hit rate under the chart, from the Grok Bot's own saved readings.
+- Same numbers and labels as the Claude and Grok panes (all stored history); hidden until the Grok Bot has history.
+
 ## [0.3.16-beta] - 2026-10-18
 
 ### Added
