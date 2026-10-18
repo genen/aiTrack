@@ -3,6 +3,12 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.3.12-beta] - 2026-10-18
+
+### Fixed
+- Buttons and spacing were smaller in one of the light and dark themes: the larger spacing was only set for the theme
+  active at start-up. It is now set for both. A test compares the two themes.
+
 ## [0.3.11-beta] - 2026-10-18
 
 ### Changed

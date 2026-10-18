@@ -154,3 +154,15 @@ fn the_settings_control_changes_the_theme_live() {
     assert_eq!(w.app.settings.get().theme, ThemeChoice::System);
     assert_eq!(w.ctx.theme(), Theme::Light, "back to following the OS");
 }
+
+#[test]
+fn light_and_dark_share_the_same_spacing_so_buttons_are_the_same_size() {
+    let ctx = Context::default();
+    aitrack::theme::install(&ctx);
+    let spacing_of = |t: Theme| ctx.style_of(t).spacing.clone();
+    let dark = spacing_of(Theme::Dark);
+    let light = spacing_of(Theme::Light);
+    assert_eq!(dark.button_padding, light.button_padding);
+    assert_eq!(dark.item_spacing, light.item_spacing);
+    assert_eq!(light.button_padding, egui::vec2(10.0, 4.0));
+}

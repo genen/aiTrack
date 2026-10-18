@@ -289,7 +289,7 @@ pub fn install(ctx: &egui::Context) {
     ctx.set_visuals_of(Theme::Dark, visuals(&DARK));
     ctx.set_visuals_of(Theme::Light, visuals(&LIGHT));
     ctx.set_theme(egui::ThemePreference::System);
-    ctx.style_mut(|s| {
+    ctx.all_styles_mut(|s| {
         s.spacing.item_spacing = egui::vec2(8.0, 6.0);
         s.spacing.button_padding = egui::vec2(10.0, 4.0);
     });
