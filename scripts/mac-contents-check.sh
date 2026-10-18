@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Fails if a Mac zip or dmg does not carry the release extras next to the app: README.md, README.pdf, LICENSE and
-# docs/img/ (with at least one picture). It also fails if any of them was put INSIDE aiTrack.app (that would break
+# Fails if a Mac zip or dmg does not carry the release extras next to the app: README.md, README.pdf, LICENSE,
+# THIRD-PARTY-NOTICES.md and docs/img/ (with at least one picture). It also fails if any of them was put INSIDE aiTrack.app (that would break
 # the code signature). Lists the contents first. Used by make-dmg.sh and the release workflow.
 #
 #   scripts/mac-contents-check.sh zip FILE.zip     unzip -Z1 listing   (any Unix)
@@ -15,13 +15,18 @@ min_pdf="${AITRACK_MIN_PDF_BYTES:-20000}"
 check_names() {
   local names missing=0 f
   names="$(sed 's#^\./##')"
-  for f in README.md README.pdf LICENSE; do
+  for f in README.md README.pdf LICENSE THIRD-PARTY-NOTICES.md; do
     if ! printf '%s\n' "$names" | grep -Fxq "$f"; then echo "MISSING: $f" >&2; missing=1; fi
   done
   if ! printf '%s\n' "$names" | grep -Eq '^docs/img/.+[^/]$'; then echo "MISSING: docs/img/ (no pictures)" >&2; missing=1; fi
   if ! printf '%s\n' "$names" | grep -Eq '^aiTrack\.app/Contents/MacOS/aitrack$'; then echo "MISSING: aiTrack.app/Contents/MacOS/aitrack" >&2; missing=1; fi
-  if printf '%s\n' "$names" | grep -Eq '^aiTrack\.app/(.*/)?(README\.(md|pdf)|LICENSE)$'; then
+  if printf '%s\n' "$names" | grep -Eq '^aiTrack\.app/(.*/)?(README\.(md|pdf)|LICENSE|THIRD-PARTY-NOTICES\.md)$'; then
     echo "WRONG PLACE: release extras are inside aiTrack.app (breaks the signature)." >&2; missing=1
+  fi
+  # AppleDouble files (._name) are macOS metadata that must not be shipped (zip/ditto without --norsrc makes them)
+  if printf '%s\n' "$names" | grep -Eq '(^|/)\._[^/]*/?$'; then
+    echo "STRAY: AppleDouble '._*' entries found:" >&2
+    printf '%s\n' "$names" | grep -E '(^|/)\._[^/]*/?$' >&2; missing=1
   fi
   return $missing
 }
@@ -52,7 +57,7 @@ main() {
       echo "Contents of $(basename "$file"):"
       find "$mnt" -maxdepth 1 -mindepth 1 -exec ls -ld {} + | sed 's/^/  /'
       find "$mnt/docs" 2>/dev/null | sed 's/^/  /' || true
-      ( cd "$mnt" && find . \( -type f -o -type l \) -not -name '.*' | sed 's#^\./##' ) | check_names || rc=1
+      ( cd "$mnt" && find . \( -type f -o -type l \) -not -name .DS_Store -not -name .VolumeIcon.icns -not -path './.fseventsd/*' -not -path './.Trashes/*' -not -path './.Spotlight-V100/*' -not -path './.TemporaryItems/*' | sed 's#^\./##' ) | check_names || rc=1
       if [ -f "$mnt/README.pdf" ]; then
         check_pdf "$(wc -c < "$mnt/README.pdf" | tr -d ' ')" "$(head -c 5 "$mnt/README.pdf")" || rc=1
       fi

@@ -319,7 +319,7 @@ fn dmg_and_zip_scripts_add_the_extras_beside_the_app_and_check_them() {
     // order: dmg check after signing, zip made from a staging folder after the dmg
     let sign = dmg.find("sign-notarize-mac.sh\" dmg").unwrap();
     let check = dmg.find("mac-contents-check.sh\" dmg").unwrap();
-    let zip = dmg.find("ditto -c -k \"$zstage\"").unwrap();
+    let zip = dmg.find("ditto -c -k --norsrc \"$zstage\"").unwrap();
     assert!(sign < check && check < zip);
 }
 
@@ -395,6 +395,7 @@ fn contents_check_passes_a_complete_zip_and_names_what_is_missing() {
         "README.md",
         "README.pdf",
         "LICENSE",
+        "THIRD-PARTY-NOTICES.md",
         "docs/img/a.png",
     ];
     let tmp = std::env::temp_dir().join(format!("aitrack-zipcheck-{}", std::process::id()));
@@ -428,6 +429,16 @@ fn contents_check_passes_a_complete_zip_and_names_what_is_missing() {
     let out = run_zip_check(&zip);
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("WRONG PLACE"));
+
+    // AppleDouble entries ("._name") are refused
+    let dir = tmp.join("appledouble");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut stray = full.to_vec();
+    stray.push("._README.pdf");
+    let zip = fixture_zip(&dir, &stray).unwrap();
+    let out = run_zip_check(&zip);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("AppleDouble"));
 
     // a README.pdf that is too small is refused
     let out = Command::new("bash")

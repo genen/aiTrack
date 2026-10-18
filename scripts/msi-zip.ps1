@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Run scripts\installer.ps1 first. Output: dist\aiTrack-Setup-<version>-win-x64-msi.zip, holding the MSI
-  (the same bytes) beside LICENSE, README.md (with docs\img) and README.pdf (run scripts\readme-pdf.ps1 first). The zip is opened again and the MSI inside is compared with the original by SHA256.
+  (the same bytes) beside LICENSE, THIRD-PARTY-NOTICES.md, README.md (with docs\img) and README.pdf (run scripts\readme-pdf.ps1 first). The zip is opened again and the MSI inside is compared with the original by SHA256.
 #>
 param(
     [string]$OutDir = ''
@@ -31,7 +31,7 @@ try {
     if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 }
 if (-not (Test-Path $zip)) { throw "The zip was not written: $zip" }
-Assert-ZipHas -Zip $zip -Required @($msiName, 'LICENSE', 'README.md', 'README.pdf', 'docs/img/home-dark.png')
+Assert-ZipHas -Zip $zip -Required @($msiName, 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'README.md', 'README.pdf', 'docs/img/home-dark.png')
 
 # the MSI inside must be the same file as the bare one
 $check = Join-Path ([System.IO.Path]::GetTempPath()) ("aitrack-msizip-" + [guid]::NewGuid().ToString('N'))

@@ -11,6 +11,7 @@
        LicenseRtf   installer\License.rtf (the licence page)
        LicenseTxt   LICENSE (installed next to the exe)
        ReadmePath   README.md (installed next to the exe)
+       NoticesPath  THIRD-PARTY-NOTICES.md (installed next to the exe)
      Install scope: all users (per machine, Program Files, administrator prompt). A "just me" choice is not
      offered; see the README ("Build the installer") for why, and for the portable zip that needs no admin. -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
@@ -56,6 +57,7 @@
           <File Id="AiTrackExe" Name="aitrack.exe" Source="$(var.ExePath)" KeyPath="yes" />
           <File Id="LicenseTxt" Name="LICENSE" Source="$(var.LicenseTxt)" />
           <File Id="ReadmeMd" Name="README.md" Source="$(var.ReadmePath)" />
+          <File Id="ThirdPartyNotices" Name="THIRD-PARTY-NOTICES.md" Source="$(var.NoticesPath)" />
         </Component>
       </Directory>
     </StandardDirectory>

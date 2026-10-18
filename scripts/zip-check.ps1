@@ -17,12 +17,12 @@ function Assert-ZipHas {
     }
 }
 
-# Files that go next to the program in every zip: the licence text, the README (markdown, with its
+# Files that go next to the program in every zip: the licence text, the third-party notices, the README (markdown, with its
 # screenshots in docs\img so the pictures show) and the README as a PDF made by readme-pdf.ps1.
 function Copy-ReadmeFiles {
     param([string]$Root, [string]$OutDir, [string]$Stage)
     $pdf = Join-Path $OutDir 'README.pdf'
-    foreach ($f in @((Join-Path $Root 'LICENSE'), (Join-Path $Root 'README.md'), $pdf)) {
+    foreach ($f in @((Join-Path $Root 'LICENSE'), (Join-Path $Root 'THIRD-PARTY-NOTICES.md'), (Join-Path $Root 'README.md'), $pdf)) {
         if (-not (Test-Path $f)) { throw "$f was not found. Run scripts\readme-pdf.ps1 first (it makes README.pdf)." }
         Copy-Item $f $Stage
     }

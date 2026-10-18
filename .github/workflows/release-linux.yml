@@ -4,7 +4,7 @@ name: Build and release Linux deb
 # No secrets are used.
 # A release is published when a v<version> tag is pushed (v0.3.1-beta, v1.0.0), or when the workflow is run by
 # hand with a tag. A hand run builds the chosen branch and the release is created on that commit if it does not
-# exist. <version> must be exactly the version in Cargo.toml. A -beta version is a pre-release.
+# exist. <version> must be exactly the version in Cargo.toml. A -beta version is a pre-release; a plain version (v0.5.1) is a normal, latest release.
 # The release is shared with the Windows and macOS workflows: whichever runs first creates it, the other
 # adds its files.
 on:
@@ -137,7 +137,7 @@ jobs:
       - name: Build the deb
         run: ./scripts/make-linux-deb.sh
 
-      - name: Check the deb carries the binary, desktop file, README.md, README.pdf, LICENSE and docs/img
+      - name: Check the deb carries the binary, desktop file, README.md, README.pdf, LICENSE, THIRD-PARTY-NOTICES.md and docs/img
         run: |
           set -euo pipefail
           deb="dist/aitrack_$(echo "${{ steps.version.outputs.version }}" | sed 's/-/~/')_amd64.deb"
@@ -218,6 +218,15 @@ jobs:
             fi
           done
           gh release upload "$TAG" "$deb" --clobber
+
+          # All three workflows give a release the same status from the version: a -beta version stays a
+          # pre-release, a plain version (v0.5.1) is a normal release and the latest one. Whichever run created
+          # the release, this makes the status agree.
+          if [ "$CHANNEL" = "beta" ]; then
+            gh release edit "$TAG" --prerelease
+          else
+            gh release edit "$TAG" --prerelease=false --latest
+          fi
 
           # Add the Linux notes to the existing text, once (the other runs append their sections the same way).
           # The three release workflows edit the same text (read, append, write), so an edit can
