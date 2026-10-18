@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=aiTrack
+GenericName=AI usage meter
+Comment=Small always-on-top meter for Claude and Grok plan usage
+Exec=aitrack
+Icon=aitrack
+Terminal=false
+Categories=Utility;
+StartupWMClass=aitrack
