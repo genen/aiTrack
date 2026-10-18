@@ -1838,6 +1838,13 @@ pub fn prepare_display() -> crate::placement::BackendChoice {
     *LINUX_BACKEND.get_or_init(|| {
         let dec = current_decision();
         if let Some(d) = &dec.display {
+            // Invariant: `set_var` is only sound while no other thread can read the environment.
+            // `main` calls this before the settings, the app or any worker exists, so the process
+            // is still single-threaded here; keep it first, and do not start threads above it.
+            debug_assert!(
+                std::fs::read_dir("/proc/self/task").map_or(true, |d| d.count() == 1),
+                "prepare_display must run before any thread starts"
+            );
             std::env::set_var("DISPLAY", d);
         }
         let line = backend_line(dec.choice, None);

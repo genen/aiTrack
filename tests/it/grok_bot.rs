@@ -788,3 +788,32 @@ fn linux_sources_lists_the_folder_and_blob_count_only() {
     assert!(!text.contains("acct-secret-x") && !text.contains(".blob\n"));
     assert!(!text.contains(d.path().to_str().unwrap()), "no real paths");
 }
+
+#[test]
+fn readings_are_read_once_and_refreshed_after_an_append() {
+    let f = Fx::new();
+    let hist = f.dir.join("usage-grok-bot.jsonl");
+    let tracker = BotTracker::new(f.env(), Box::new(JsonlStore::new(&hist)));
+    assert!(tracker.readings().is_empty());
+    f.fresh(50.0);
+    tracker.refresh(now());
+    assert_eq!(tracker.readings().len(), 1, "own append drops the cache");
+    // a record written behind the tracker's back is not seen until its next append: the file is
+    // not re-read on every call
+    let behind = JsonlStore::new(&hist);
+    use aitrack::store::Store;
+    behind
+        .append(&aitrack::grok_bot::record(
+            &tracker.latest().unwrap(),
+            now(),
+        ))
+        .unwrap();
+    assert!(std::sync::Arc::ptr_eq(
+        &tracker.readings(),
+        &tracker.readings()
+    ));
+    assert_eq!(tracker.readings().len(), 1);
+    f.fresh(51.0);
+    tracker.refresh(now() + Duration::minutes(1));
+    assert_eq!(tracker.readings().len(), 3);
+}

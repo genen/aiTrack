@@ -641,3 +641,17 @@ fn linux_grok_bot_entry_binary_then_cli_order() {
     let tried = launch::launch_grok_linux_all(&dirs, Some(bin), Some(cli), &terms, &fake);
     assert!(!launch::succeeded(&tried));
 }
+
+#[test]
+fn the_deleted_suffix_of_a_replaced_executable_is_stripped() {
+    use aitrack::startup::without_deleted_suffix;
+    use std::path::PathBuf;
+    assert_eq!(
+        without_deleted_suffix(PathBuf::from("/usr/bin/aitrack (deleted)")),
+        PathBuf::from("/usr/bin/aitrack")
+    );
+    assert_eq!(
+        without_deleted_suffix(PathBuf::from("/opt/my apps/aitrack")),
+        PathBuf::from("/opt/my apps/aitrack")
+    );
+}
