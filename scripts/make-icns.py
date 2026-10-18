@@ -9,11 +9,12 @@ import struct
 import sys
 from pathlib import Path
 
-# chunk type -> PNG size in pixels (ic11..ic14 are the @2x variants of 32/64/128/256 points)
+# chunk type -> PNG size in pixels (ic10 is 1024 px = 512 points @2x; ic11..ic14 are the @2x variants of 32/64/128/256 points)
 CHUNKS = [
     ("ic07", 128),
     ("ic08", 256),
     ("ic09", 512),
+    ("ic10", 1024),
     ("ic11", 64),
     ("ic12", 128),
     ("ic13", 256),

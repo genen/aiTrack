@@ -12,3 +12,8 @@ window icon, the header logo and notifications.
 backgrounds (the white parts are navy). Extracted from the supplied artwork by unmixing the four artwork
 colours (white, orange, teal, ring blue-grey) from the navy background. Use these for the in-window header logo;
 keep the full rounded-square `aitrack.ico` for the executable and taskbar.
+
+## 1024 px source
+
+`aitrack-1024.png` is redrawn from geometry by `scripts/draw-icon.py` (same design, vector-sharp) and is the
+`ic10` chunk of `aitrack.icns`. The smaller PNGs and the `.ico` are still the original supplied artwork.

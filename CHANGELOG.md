@@ -3,6 +3,12 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.3.11-beta] - 2026-10-18
+
+### Changed
+- The app icon is redrawn from scratch at 1024 px (`assets/icon/aitrack-1024.png`, made by `scripts/draw-icon.py`)
+  and added to the macOS `.icns`, so the Dock icon is sharper on Retina screens. Windows and the in-app logo are unchanged.
+
 ## [0.3.10-beta] - 2026-10-17
 
 ### Added
