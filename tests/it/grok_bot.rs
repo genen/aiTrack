@@ -363,7 +363,10 @@ fn the_default_folder_is_macos_or_windows_and_the_override_works_everywhere() {
     assert!(grok_bot::persistence_dir(&win).is_none());
     let mut e = Env::new(Os::Linux);
     e.home = Some("/home/test".into());
-    assert!(grok_bot::persistence_dir(&e).is_none());
+    assert_eq!(
+        grok_bot::persistence_dir(&e).unwrap(),
+        Path::new("/home/test/.config/Grok Bot/sand-client-persistence")
+    );
     assert!(grok_bot::read(&e).is_none());
     let mut e = Env::new(Os::Windows);
     e.grok_bot_dir = Some("/x".into());
@@ -465,12 +468,17 @@ fn diagnostics_say_found_stale_or_missing_and_nothing_identifying() {
     e.grok_bot_dir = Some(f.dir.join("missing"));
     assert!(grok_bot::diagnose(&e, now()).contains("data folder is missing"));
     let lin = Env::new(Os::Linux);
-    assert!(grok_bot::diagnose(&lin, now()).contains("not available on this platform"));
+    assert!(grok_bot::diagnose(&lin, now()).contains("not available (no home folder"));
     f.put("acct-bad", "junk");
     for text in [
         grok_bot::diagnose(&f.env(), now()),
         aitrack::sources::diagnose(&f.env(), now()),
     ] {
+        // the Linux-only "checked:" line names the folder and counts `.blob` files (nothing else)
+        let text: String = text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("checked:"))
+            .collect();
         assert!(
             !text.contains(ACCOUNT) && !text.contains("acct-bad"),
             "{text}"
@@ -698,4 +706,85 @@ fn the_app_reads_the_cache_after_a_grok_poll_and_the_view_gets_the_row() {
         .read()
         .iter()
         .all(|r| r.get("bot_weekly").is_none()));
+}
+
+// ---------------------------------------------------------------- Linux (synthetic trees only)
+
+fn linux_env(root: &std::path::Path, xdg: bool) -> Env {
+    let mut e = Env::new(Os::Linux);
+    e.home = Some(root.join("home"));
+    e.xdg_config_home = xdg.then(|| root.join("xdg"));
+    e
+}
+
+#[test]
+fn linux_persistence_dir_follows_xdg_then_dot_config() {
+    let d = aitrack_tmp();
+    assert_eq!(
+        grok_bot::persistence_dir(&linux_env(d.path(), true)),
+        Some(d.join("xdg/Grok Bot/sand-client-persistence"))
+    );
+    assert_eq!(
+        grok_bot::persistence_dir(&linux_env(d.path(), false)),
+        Some(d.join("home/.config/Grok Bot/sand-client-persistence"))
+    );
+    assert_eq!(grok_bot::persistence_dir(&Env::new(Os::Linux)), None);
+    // the override still wins
+    let mut e = linux_env(d.path(), true);
+    e.grok_bot_dir = Some(d.join("elsewhere"));
+    assert_eq!(grok_bot::persistence_dir(&e), Some(d.join("elsewhere")));
+}
+
+fn aitrack_tmp() -> crate::common::TempDir {
+    crate::common::TempDir::new()
+}
+
+#[test]
+fn linux_reads_a_synthetic_cache_and_detects_grok_bot_only() {
+    let d = aitrack_tmp();
+    let e = linux_env(d.path(), false);
+    // nothing installed: no Grok block, no reading
+    assert!(!aitrack::grok::detected(&e));
+    assert!(!aitrack::detect::detect(&e).grok);
+    // the app's folder alone (no ~/.grok) is enough on Linux
+    let p = d.join("home/.config/Grok Bot/sand-client-persistence");
+    std::fs::create_dir_all(&p).unwrap();
+    assert!(!d.join("home/.grok").exists());
+    assert!(aitrack::grok::detected(&e));
+    assert!(aitrack::detect::detect(&e).grok);
+    let read = now() - Duration::minutes(2);
+    std::fs::write(
+        p.join(blob_name(&key_name(ACCOUNT))),
+        cache_json(42.5, resets(), read, read + Duration::hours(2)),
+    )
+    .unwrap();
+    let r = grok_bot::read(&e).expect("reading");
+    assert_eq!(r.pct, 42.5);
+    assert!(!r.stale(now()));
+    // the same tree on Windows or macOS does not make Grok "present"
+    for os in [Os::Windows, Os::Mac] {
+        let mut o = linux_env(d.path(), false);
+        o.os = os;
+        assert!(!aitrack::grok::detected(&o));
+    }
+}
+
+#[test]
+fn linux_sources_lists_the_folder_and_blob_count_only() {
+    let d = aitrack_tmp();
+    let e = linux_env(d.path(), true);
+    let text = grok_bot::diagnose(&e, now());
+    assert!(
+        text.contains("$XDG_CONFIG_HOME/Grok Bot: missing"),
+        "{text}"
+    );
+    let p = d.join("xdg/Grok Bot/sand-client-persistence");
+    std::fs::create_dir_all(&p).unwrap();
+    std::fs::write(p.join(blob_name(&key_name("acct-secret-x"))), "junk").unwrap();
+    std::fs::write(p.join("other.json"), "{}").unwrap();
+    let text = grok_bot::diagnose(&e, now());
+    assert!(text.contains("Grok Bot: exists"), "{text}");
+    assert!(text.contains("exists, 1 .blob file(s)"), "{text}");
+    assert!(!text.contains("acct-secret-x") && !text.contains(".blob\n"));
+    assert!(!text.contains(d.path().to_str().unwrap()), "no real paths");
 }
