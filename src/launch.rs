@@ -646,6 +646,88 @@ pub fn launch_grok_linux(
     tried
 }
 
+/// Where the Grok Bot `.deb` installs its Electron binary (the path has a space).
+pub const GROK_BOT_LINUX_BINARY: &str = "/opt/Grok Bot/grok-bot";
+
+/// `grok-bot*.desktop` files in `<dir>/applications` for each of `data_dirs`, in folder order,
+/// each folder sorted by name.
+pub fn find_grok_bot_desktop_files(data_dirs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for d in data_dirs {
+        let mut names: Vec<String> = std::fs::read_dir(d.join("applications"))
+            .map(|rd| {
+                rd.filter_map(Result::ok)
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| {
+                        let l = n.to_ascii_lowercase();
+                        l.starts_with("grok-bot") && l.ends_with(".desktop")
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        out.extend(names.into_iter().map(|n| d.join("applications").join(n)));
+    }
+    out
+}
+
+/// Linux: the Grok Bot app. 1. each `grok-bot*.desktop` entry in `data_dirs` (`gio launch <file>`,
+/// then `gtk-launch <id>`), 2. `binary` started directly (argv, no shell). Stops at the first that
+/// works; an empty result means the app is not installed.
+pub fn launch_grok_bot_linux(
+    data_dirs: &[PathBuf],
+    binary: Option<&Path>,
+    spawner: &dyn Spawner,
+) -> Vec<Attempt> {
+    let mut tried = Vec::new();
+    let mut push = |method: String, r: Result<(), String>| -> bool {
+        let ok = r.is_ok();
+        tried.push(Attempt {
+            method,
+            ok,
+            detail: r.err(),
+        });
+        ok
+    };
+    for f in find_grok_bot_desktop_files(data_dirs) {
+        let file = f.to_string_lossy().into_owned();
+        if push(
+            format!("Grok Bot: gio launch {file}"),
+            spawner.run(Path::new("gio"), &["launch".into(), file]),
+        ) {
+            return tried;
+        }
+        if let Some(id) = f.file_stem().map(|s| s.to_string_lossy().into_owned()) {
+            if push(
+                format!("Grok Bot: gtk-launch {id}"),
+                spawner.run(Path::new("gtk-launch"), std::slice::from_ref(&id)),
+            ) {
+                return tried;
+            }
+        }
+    }
+    if let Some(b) = binary {
+        push(format!("Grok Bot: {}", b.display()), spawner.run(b, &[]));
+    }
+    tried
+}
+
+/// Linux, full order: the Grok Bot app, then the CLI in a terminal.
+pub fn launch_grok_linux_all(
+    data_dirs: &[PathBuf],
+    bot_binary: Option<&Path>,
+    cli: Option<&Path>,
+    terminals: &[(PathBuf, &'static str)],
+    spawner: &dyn Spawner,
+) -> Vec<Attempt> {
+    let mut tried = launch_grok_bot_linux(data_dirs, bot_binary, spawner);
+    if succeeded(&tried) {
+        return tried;
+    }
+    tried.extend(launch_grok_linux(cli, terminals, spawner));
+    tried
+}
+
 // ---------------------------------------------------------------- macOS
 
 /// The macOS `open` tool.
@@ -979,7 +1061,19 @@ pub fn launch_grok_async(log: PathBuf, done: impl FnOnce(bool) + Send + 'static)
                     std::env::var_os("PATH").as_deref(),
                 );
                 let cli = crate::grok_cli::find_cli_here(&env);
-                let tried = launch_grok_linux(cli.as_deref(), &terms, &SystemSpawner);
+                let dirs = xdg_data_dirs(
+                    env.home.as_deref(),
+                    std::env::var_os("XDG_DATA_HOME").as_deref(),
+                    std::env::var_os("XDG_DATA_DIRS").as_deref(),
+                );
+                let bin = Path::new(GROK_BOT_LINUX_BINARY);
+                let tried = launch_grok_linux_all(
+                    &dirs,
+                    bin.is_file().then_some(bin),
+                    cli.as_deref(),
+                    &terms,
+                    &SystemSpawner,
+                );
                 let line = log_text(&tried).replace("claude desktop launch", "grok launch");
                 append_log(&log, &line);
                 done(succeeded(&tried));

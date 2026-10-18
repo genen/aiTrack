@@ -221,7 +221,7 @@ jobs:
           # The macOS workflow makes the same release. If it is not there yet, create it; if the other
           # workflow creates it first (create fails), fall through and add to it.
           if ! gh release view "$TAG" --json tagName > /dev/null 2>&1; then
-            { echo "${first}"; echo; cat win-notes.md; } > notes.md
+            { echo "${first}"; echo; echo "aiTrack is a small always-on-top window that shows how much of your Claude and Grok plan limits you have used."; echo; echo "Code signing policy: https://github.com/genen/aiTrack/blob/main/CODE-SIGNING-POLICY.md | Privacy statement: https://github.com/genen/aiTrack/blob/main/PRIVACY.md"; echo; cat win-notes.md; } > notes.md
             if gh release create "$TAG" "$msi" "$msizip" "$zip" --target "$GITHUB_SHA" --title "$title" --notes-file notes.md "$kind"; then
               exit 0
             fi

@@ -98,6 +98,20 @@ pub fn running_text(pid: Option<u32>) -> String {
     }
 }
 
+/// `aiTrack is already running (pid 1234, started 2026-10-18 09:30)`; `since` is optional text.
+pub fn running_text_since(pid: Option<u32>, since: Option<&str>) -> String {
+    match (pid, since) {
+        (Some(p), Some(t)) => format!("aiTrack is already running (pid {p}, started {t})"),
+        (None, Some(t)) => format!("aiTrack is already running (started {t})"),
+        (p, None) => running_text(p),
+    }
+}
+
+/// When the running instance started: the modification time of its `aitrack.pid` file.
+pub fn started_at(lock: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(pid_path(lock)).ok()?.modified().ok()
+}
+
 /// Is a top-level window the aiTrack window of the running instance? Its title must be
 /// [`WINDOW_TITLE`] and, when the pid of the instance is known (from `aitrack.pid`), it must belong
 /// to that process: another program's window that happens to be called "aiTrack" (an Explorer folder

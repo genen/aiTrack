@@ -175,12 +175,14 @@ jobs:
           set -euo pipefail
           debver=$(printf '%s' "$VERSION" | sed 's/-/~/')
           deb="aitrack_${debver}_amd64.deb"
+          # GitHub stores an uploaded "~" as ".", so the release asset is named differently from the local file.
+          asset=$(printf '%s' "$deb" | tr '~' '.')
           title="aiTrack ${VERSION}"
           if [ "$CHANNEL" = "beta" ]; then kind="--prerelease"; first="${title} (pre-release)"; else kind="--latest"; first="${title}"; fi
           test -s "$deb" || { echo "::error::$deb was not downloaded from the build."; exit 1; }
 
           {
-            echo "Linux: Ubuntu 22.04 and newer, x86_64 (.deb). Install with: \`sudo apt install ./$deb\`. GNOME on Wayland runs through XWayland by default."
+            echo "Linux: Ubuntu 22.04 and newer, x86_64 (.deb). Install with: \`sudo apt install ./$asset\`. GNOME on Wayland runs through XWayland by default."
             echo
             echo "Linux SHA256:"
             echo '```'
@@ -197,7 +199,7 @@ jobs:
           # The Windows and macOS workflows make the same release. If it is not there yet, create it; if the other
           # workflow creates it first (create fails), fall through and add to it.
           if ! gh release view "$TAG" --json tagName > /dev/null 2>&1; then
-            { echo "${first}"; echo; cat linux-notes.md; } > notes.md
+            { echo "${first}"; echo; echo "aiTrack is a small always-on-top window that shows how much of your Claude and Grok plan limits you have used."; echo; echo "Code signing policy: https://github.com/genen/aiTrack/blob/main/CODE-SIGNING-POLICY.md | Privacy statement: https://github.com/genen/aiTrack/blob/main/PRIVACY.md"; echo; cat linux-notes.md; } > notes.md
             if gh release create "$TAG" "$deb" --target "$GITHUB_SHA" --title "$title" --notes-file notes.md "$kind"; then
               exit 0
             fi
@@ -208,7 +210,7 @@ jobs:
           # The release exists: never overwrite a file unless the run asked for it.
           existing=$(gh release view "$TAG" --json assets --jq '.assets[].name')
           for f in "$deb"; do
-            if printf '%s\n' "$existing" | grep -Fxq "$f"; then
+            if printf '%s\n' "$existing" | grep -Fxq "$(printf '%s' "$f" | tr '~' '.')"; then
               if [ "$REPLACE" != "true" ]; then
                 echo "::error::$TAG already has $f. Run the workflow by hand with Replace checked to overwrite it."
                 exit 1

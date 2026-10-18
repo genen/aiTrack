@@ -7,6 +7,8 @@
 //! Nothing here has been compiled or run on macOS by us. Every step is therefore defensive: a
 //! surprise in the layout hides the bar, it never panics (release builds abort on panic).
 //!
+//! * Linux: `${XDG_CONFIG_HOME:-~/.config}/Grok Bot/sand-client-persistence/` (Electron's
+//!   `userData` rule, same file kind assumed; **a guess until a Linux listing confirms it**).
 //! * macOS: `~/Library/Application Support/Grok Bot/sand-client-persistence/`. Windows (also
 //!   reported by Grok Bot, same file kind and keys, unverified by us): `%APPDATA%\Grok Bot\sand-client-persistence\`.
 //!   (`AITRACK_GROK_BOT_DIR` points at such a folder on any platform; the tests use it.)
@@ -62,9 +64,37 @@ pub fn persistence_dir(env: &Env) -> Option<PathBuf> {
             .appdata
             .clone()
             .or_else(|| Some(env.home.clone()?.join("AppData").join("Roaming")))?,
-        Os::Linux => return None,
+        Os::Linux => linux_config_base(env)?,
     };
-    Some(base.join("Grok Bot").join("sand-client-persistence"))
+    Some(base.join(APP_NAME).join("sand-client-persistence"))
+}
+
+/// The Electron `userData` folder name (the app's product name).
+pub const APP_NAME: &str = "Grok Bot";
+
+/// Linux: `$XDG_CONFIG_HOME`, else `~/.config` (where Electron puts `userData`).
+fn linux_config_base(env: &Env) -> Option<PathBuf> {
+    env.xdg_config_home
+        .clone()
+        .or_else(|| Some(env.home.clone()?.join(".config")))
+}
+
+/// The Grok Bot app's `userData` folder on Linux (`<config>/Grok Bot`); `None` elsewhere or when
+/// there is no home.
+pub fn linux_user_data_dir(env: &Env) -> Option<PathBuf> {
+    (env.os == Os::Linux)
+        .then(|| linux_config_base(env))
+        .flatten()
+        .map(|b| b.join(APP_NAME))
+}
+
+/// Linux only: is the Grok Bot app's data folder there (or the override folder)? This alone is
+/// enough to show the Grok block on Linux, where the Grok CLI is often not installed. Windows and
+/// macOS keep detecting the CLI's folder only.
+pub fn linux_app_present(env: &Env) -> bool {
+    env.os == Os::Linux
+        && (linux_user_data_dir(env).is_some_and(|d| d.is_dir())
+            || env.grok_bot_dir.as_ref().is_some_and(|d| d.is_dir()))
 }
 
 // ---------------------------------------------------------------- names
@@ -224,7 +254,7 @@ pub fn diagnose(env: &Env, now: DateTime<Utc>) -> String {
         "Grok Bot app (second weekly meter, \"Weekly Grok Bot Limit\"; reads the app's local cache)\n",
     );
     let state = match persistence_dir(env) {
-        None => "not available on this platform (macOS and Windows only)".to_string(),
+        None => "not available (no home folder to look in)".to_string(),
         Some(dir) => {
             let s = scan_dir(&dir);
             match (s.dir_exists, s.reading) {
@@ -255,6 +285,33 @@ pub fn diagnose(env: &Env, now: DateTime<Utc>) -> String {
         }
     };
     o.push_str(&format!("   {SOURCE}: {state}\n"));
+    if env.os == Os::Linux {
+        // names and counts only: no file names are listed, nothing is opened
+        let ud = linux_user_data_dir(env);
+        let pd = persistence_dir(env);
+        let ud_text = if ud.as_ref().is_some_and(|d| d.is_dir()) {
+            "exists"
+        } else {
+            "missing"
+        };
+        let pd_text = match pd.as_ref().and_then(|d| std::fs::read_dir(d).ok()) {
+            Some(rd) => format!(
+                "exists, {} .blob file(s)",
+                rd.filter_map(Result::ok)
+                    .filter(|e| e.file_name().to_string_lossy().ends_with(".blob"))
+                    .count()
+            ),
+            None => "missing".to_string(),
+        };
+        let base = if env.xdg_config_home.is_some() {
+            "$XDG_CONFIG_HOME"
+        } else {
+            "~/.config"
+        };
+        o.push_str(&format!(
+            "   checked: {base}/{APP_NAME}: {ud_text}; {base}/{APP_NAME}/sand-client-persistence: {pd_text}\n"
+        ));
+    }
     o
 }
 

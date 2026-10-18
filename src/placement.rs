@@ -241,6 +241,15 @@ fn set(v: Option<&str>) -> bool {
     v.is_some_and(|s| !s.trim().is_empty())
 }
 
+fn wants_native(e: &DisplayEnv) -> bool {
+    e.aitrack_wayland.is_some_and(|v| {
+        matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "native" | "wayland" | "1" | "true"
+        )
+    })
+}
+
 /// Pick the backend. Wayland session + X display = XWayland unless `AITRACK_WAYLAND=native`.
 pub fn choose_backend(e: &DisplayEnv) -> BackendChoice {
     let wayland_session = set(e.wayland_display)
@@ -249,12 +258,7 @@ pub fn choose_backend(e: &DisplayEnv) -> BackendChoice {
     if !wayland_session {
         return BackendChoice::Auto;
     }
-    let wants_native = e.aitrack_wayland.is_some_and(|v| {
-        matches!(
-            v.trim().to_ascii_lowercase().as_str(),
-            "native" | "wayland" | "1" | "true"
-        )
-    });
+    let wants_native = wants_native(e);
     if !set(e.wayland_display) {
         // no Wayland socket to connect to: only an X display can work
         return BackendChoice::Auto;
@@ -277,6 +281,228 @@ pub fn x_socket_path(display: &str) -> Option<std::path::PathBuf> {
         return None;
     }
     Some(std::path::PathBuf::from(format!("/tmp/.X11-unix/X{num}")))
+}
+
+/// Display numbers found in socket file names (`X0`, `X1024`; anything else is ignored), lowest first.
+pub fn x_display_numbers<S: AsRef<str>>(names: &[S]) -> Vec<u32> {
+    let mut v: Vec<u32> = names
+        .iter()
+        .filter_map(|n| n.as_ref().strip_prefix('X'))
+        .filter(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+        .filter_map(|d| d.parse().ok())
+        .collect();
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
+/// How the backend was decided, for the log and Settings. Never contains values of variables.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendDecision {
+    pub choice: BackendChoice,
+    /// `DISPLAY` to export before the window opens (set only when it was unset and a socket was found).
+    pub display: Option<String>,
+    pub why: &'static str,
+}
+
+/// Decide the backend. `scan` lists the names in `/tmp/.X11-unix`; `reach` really connects to an X
+/// display (`:0`) and says whether it answered. Both are injected so the logic is testable.
+/// - an X display that does not answer falls back to native Wayland;
+/// - `DISPLAY` unset in a Wayland session: the first reachable display found by `scan` is used.
+pub fn decide_backend(
+    e: &DisplayEnv,
+    scan: &dyn Fn() -> Vec<String>,
+    reach: &dyn Fn(&str) -> bool,
+) -> BackendDecision {
+    let base = choose_backend(e);
+    let done = |choice, display, why| BackendDecision {
+        choice,
+        display,
+        why,
+    };
+    match base {
+        BackendChoice::Auto => done(base, None, "not a Wayland session"),
+        BackendChoice::XWayland => {
+            let d = e.display.unwrap_or_default();
+            if reach(d) {
+                done(base, None, "X display answered")
+            } else {
+                done(
+                    BackendChoice::NativeWayland,
+                    None,
+                    "X display did not answer",
+                )
+            }
+        }
+        BackendChoice::NativeWayland if wants_native(e) => {
+            done(base, None, "AITRACK_WAYLAND asks for native Wayland")
+        }
+        BackendChoice::NativeWayland => {
+            // DISPLAY unset: look for a running X server
+            let found = x_display_numbers(&scan())
+                .into_iter()
+                .map(|n| format!(":{n}"))
+                .find(|d| reach(d));
+            match found {
+                Some(d) => done(
+                    BackendChoice::XWayland,
+                    Some(d),
+                    "DISPLAY was unset; found an X display",
+                ),
+                None => done(base, None, "no X display found"),
+            }
+        }
+    }
+}
+
+/// `x11 (XWayland)` / `wayland (native)` / `auto (library default)`.
+pub fn backend_name(b: BackendChoice) -> &'static str {
+    match b {
+        BackendChoice::XWayland => "x11 (XWayland)",
+        BackendChoice::NativeWayland => "wayland (native)",
+        BackendChoice::Auto => "auto (library default)",
+    }
+}
+
+/// What the window really runs on, read from its window handle after creation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActualBackend {
+    X11,
+    Wayland,
+    Unknown,
+}
+
+impl ActualBackend {
+    pub fn text(self) -> &'static str {
+        match self {
+            ActualBackend::X11 => "x11",
+            ActualBackend::Wayland => "wayland",
+            ActualBackend::Unknown => "unknown",
+        }
+    }
+}
+
+/// A warning when the window runs on another backend than the one chosen (`None` = agreement, or
+/// nothing to compare: `Auto` or an unreadable handle).
+pub fn backend_mismatch(chosen: BackendChoice, actual: ActualBackend) -> Option<String> {
+    let want = match chosen {
+        BackendChoice::XWayland => ActualBackend::X11,
+        BackendChoice::NativeWayland => ActualBackend::Wayland,
+        BackendChoice::Auto => return None,
+    };
+    (actual != ActualBackend::Unknown && actual != want).then(|| {
+        format!(
+            "window: WARNING chose {} but the window runs on {}",
+            backend_name(chosen),
+            actual.text()
+        )
+    })
+}
+
+/// The `display backend: ...` line for the log, `--sources` and Settings. `actual` is known only
+/// once the window exists.
+pub fn backend_line(chosen: BackendChoice, actual: Option<ActualBackend>) -> String {
+    match actual {
+        Some(a) if a != ActualBackend::Unknown => format!(
+            "display backend: {} (chosen: {})",
+            match a {
+                ActualBackend::X11 => "x11 (running)",
+                _ => "wayland (running)",
+            },
+            backend_name(chosen),
+        ),
+        _ => format!("display backend: {} (chosen)", backend_name(chosen)),
+    }
+}
+
+/// Hint appended to a window start-up error so the owner knows what to try.
+pub fn failure_hint(chosen: BackendChoice) -> &'static str {
+    match chosen {
+        BackendChoice::XWayland => {
+            "it was started through XWayland and that failed; try AITRACK_WAYLAND=native aitrack"
+        }
+        BackendChoice::NativeWayland => {
+            "it was started on native Wayland and that failed; check that DISPLAY points at a running X server and that AITRACK_WAYLAND is not set"
+        }
+        BackendChoice::Auto => "check that DISPLAY or WAYLAND_DISPLAY points at a running display",
+    }
+}
+
+/// Connect to the X server's socket, retrying (Xwayland may be started lazily by the compositor).
+/// `true` as soon as one connect works.
+#[cfg(unix)]
+pub fn probe_x_socket(path: &std::path::Path, attempts: u32, delay: std::time::Duration) -> bool {
+    for i in 0..attempts.max(1) {
+        if std::os::unix::net::UnixStream::connect(path).is_ok() {
+            return true;
+        }
+        if i + 1 < attempts {
+            std::thread::sleep(delay);
+        }
+    }
+    false
+}
+
+/// Real-world `reach`: a local display is probed (5 tries, 200 ms apart, about 1 s); a display
+/// that is not a local socket is assumed to work and winit finds out.
+#[cfg(unix)]
+pub fn reach_x_display(display: &str) -> bool {
+    match x_socket_path(display) {
+        Some(p) => probe_x_socket(&p, 5, std::time::Duration::from_millis(200)),
+        None => !display.trim().is_empty(),
+    }
+}
+
+/// Names in `/tmp/.X11-unix`.
+#[cfg(unix)]
+pub fn scan_x_sockets() -> Vec<String> {
+    std::fs::read_dir("/tmp/.X11-unix")
+        .map(|d| {
+            d.flatten()
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The decision for this process from the real environment and X sockets (Linux/unix; reads the
+/// environment and may wait about a second for a lazily started Xwayland). Changes nothing.
+#[cfg(unix)]
+pub fn current_decision() -> BackendDecision {
+    let var = |k: &str| std::env::var(k).ok();
+    let (wd, st, d, aw) = (
+        var("WAYLAND_DISPLAY"),
+        var("XDG_SESSION_TYPE"),
+        var("DISPLAY"),
+        var("AITRACK_WAYLAND"),
+    );
+    decide_backend(
+        &DisplayEnv {
+            wayland_display: wd.as_deref(),
+            xdg_session_type: st.as_deref(),
+            display: d.as_deref(),
+            aitrack_wayland: aw.as_deref(),
+        },
+        &scan_x_sockets,
+        &reach_x_display,
+    )
+}
+
+static BACKEND_REPORT: std::sync::OnceLock<std::sync::Mutex<String>> = std::sync::OnceLock::new();
+
+/// Remember the current `display backend: ...` line for Settings (Linux only; empty elsewhere).
+pub fn set_backend_report(line: String) {
+    let m = BACKEND_REPORT.get_or_init(Default::default);
+    if let Ok(mut g) = m.lock() {
+        *g = line;
+    }
+}
+
+pub fn backend_report() -> String {
+    BACKEND_REPORT
+        .get()
+        .and_then(|m| m.lock().ok().map(|g| g.clone()))
+        .unwrap_or_default()
 }
 
 /// How much of the window place can be used.

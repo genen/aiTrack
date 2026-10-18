@@ -593,3 +593,51 @@ fn linux_grok_messages_when_cli_or_terminal_is_missing() {
     assert!(launch::log_text(&no_term).contains("no terminal emulator"));
     assert!(fake.calls().is_empty());
 }
+
+#[test]
+fn linux_grok_bot_entry_binary_then_cli_order() {
+    let t = TempDir::new();
+    let apps = t.join("share").join("applications");
+    std::fs::create_dir_all(&apps).unwrap();
+    std::fs::write(apps.join("grok-bot.desktop"), "").unwrap();
+    std::fs::write(apps.join("other.desktop"), "").unwrap();
+    let dirs = vec![t.join("share")];
+    let bin = Path::new("/opt/Grok Bot/grok-bot");
+    let terms = vec![(PathBuf::from("/t/a"), "-e")];
+    let cli = Path::new("/h/.grok/bin/grok");
+    // built with join, like the code under test, so the separators match on Windows too
+    let entry = apps.join("grok-bot.desktop").display().to_string();
+
+    // 1. the desktop entry works: nothing else is tried
+    let fake = Fake::default();
+    let tried = launch::launch_grok_linux_all(&dirs, Some(bin), Some(cli), &terms, &fake);
+    assert_eq!(fake.calls(), vec![format!("run gio launch {entry}")]);
+    assert!(launch::succeeded(&tried));
+
+    // 2. entry fails (gio and gtk-launch): the binary is spawned with its spaced path as one argv
+    let fake = Fake::failing(&["gio", "gtk-launch"]);
+    let tried = launch::launch_grok_linux_all(&dirs, Some(bin), Some(cli), &terms, &fake);
+    assert_eq!(
+        fake.calls(),
+        vec![
+            format!("run gio launch {entry}"),
+            "run gtk-launch grok-bot".to_string(),
+            "run /opt/Grok Bot/grok-bot ".to_string()
+        ]
+    );
+    assert!(launch::succeeded(&tried));
+
+    // 3. no entry, no binary: the terminal + CLI path, as before
+    let fake = Fake::default();
+    let tried = launch::launch_grok_linux_all(&[], None, Some(cli), &terms, &fake);
+    assert_eq!(
+        fake.calls(),
+        vec!["run /t/a -e /h/.grok/bin/grok".to_string()]
+    );
+    assert!(launch::succeeded(&tried));
+
+    // 4. everything fails: not a success
+    let fake = Fake::failing(&["run"]);
+    let tried = launch::launch_grok_linux_all(&dirs, Some(bin), Some(cli), &terms, &fake);
+    assert!(!launch::succeeded(&tried));
+}
