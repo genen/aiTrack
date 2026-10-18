@@ -75,7 +75,7 @@ Priority: optional
 Maintainer: Sir Gene <aitrack@sirgene.com>
 Homepage: https://github.com/genen/aiTrack
 Installed-Size: $size
-Depends: libc6 (>= 2.35), libxkbcommon0, libxkbcommon-x11-0, libx11-6, libxcursor1, libxi6, libxrandr2, libwayland-client0, libgl1, libegl1
+Depends: libc6 (>= 2.35), libxkbcommon0, libxkbcommon-x11-0, libx11-6, libxcursor1, libxi6, libxrandr2, libwayland-client0, libwayland-egl1, libx11-xcb1, libxrender1, libgl1, libegl1
 Recommends: libnotify-bin
 Description: Small always-on-top meter for Claude and Grok plan usage
  aiTrack shows how much of your Claude and Grok plan limits you have used,
