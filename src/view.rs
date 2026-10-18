@@ -192,8 +192,9 @@ pub struct Row {
     pub dim: bool,
     /// Hover tooltip: reset time, pace, and (weekly) per-model limits and credits.
     pub tip: Vec<TipLine>,
-    /// An extra meter under the vendor's own rows (Grok Bot): it has no detail pane, so clicking
-    /// does nothing.
+    /// An extra meter under the vendor's own rows (Grok Bot). It is not one of the vendor's
+    /// [`Kind`] windows: clicking it opens its own detail pane ([`build_bot_detail`]) charting its
+    /// own history, and the UI tracks it separately from `expanded`.
     pub secondary: bool,
 }
 
@@ -391,6 +392,9 @@ pub struct Detail {
     pub rows: Vec<(String, String)>,
     /// Plan window whose history line can be charted.
     pub chart: Option<Kind>,
+    /// The pane is the Grok Bot weekly meter: its chart reads the Grok Bot's own history
+    /// (`usage-grok-bot.jsonl`), not the vendor's.
+    pub bot: bool,
 }
 
 fn row_label(k: Kind) -> &'static str {
@@ -854,6 +858,7 @@ pub fn build_detail_at(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Ut
         note: None,
         rows: vec![],
         chart: v.history.then_some(kind),
+        bot: false,
     };
     if let (Some(_), false) = (v.gauge(kind), v.current) {
         d.resets = Some("No current data".into());
@@ -898,6 +903,56 @@ pub fn build_detail_at(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Ut
                 .map(|h| format!("{h}%"))
                 .unwrap_or_else(|| "-".into()),
         ));
+    }
+    d
+}
+
+/// Detail pane for the Grok Bot weekly meter. Same layout as [`build_detail_at`]; the reading is a
+/// cached file, so it follows the staleness rules: kept however old, a caution note after
+/// [`STALE_WARN_MIN`], no pace or projection, dashes once its weekly period has ended. The chart
+/// is always offered (it says "No history yet" when nothing is stored).
+pub fn build_bot_detail(
+    b: &crate::grok_bot::BotReading,
+    remaining: bool,
+    now: DateTime<Utc>,
+) -> Detail {
+    let age = b.age_min(now);
+    let mut d = Detail {
+        title: "Grok Bot weekly".into(),
+        vendor: VendorId::Grok,
+        level: Level::Normal,
+        value: "--".into(),
+        unit: "",
+        resets: None,
+        note: None,
+        rows: vec![("Reading".into(), ago(age))],
+        chart: Some(Kind::Weekly),
+        bot: true,
+    };
+    if b.period_ended(now) {
+        d.resets = Some("Reset passed, waiting for a new reading".into());
+        d.rows
+            .push(("Last value".into(), format!("{}%", js_round(b.pct) as i64)));
+        return d;
+    }
+    let shown = if remaining {
+        (100.0 - b.pct).max(0.0)
+    } else {
+        b.pct
+    };
+    let hours = (b.resets_at - now).num_milliseconds() as f64 / 3.6e6;
+    d.level = level(b.pct);
+    d.value = format!("{}", js_round(shown) as i64);
+    d.unit = if remaining { "% left" } else { "%" };
+    d.resets = Some(format!("Resets in {}", left(hours)));
+    if b.stale(now) {
+        d.note = Some(Note {
+            text: format!(
+                "Reading is {} old: open the Grok Bot app to update it",
+                age_short(age).trim_start_matches("about ")
+            ),
+            warn: false,
+        });
     }
     d
 }

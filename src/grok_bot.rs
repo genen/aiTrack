@@ -21,7 +21,8 @@
 //!
 //! Readings are appended (when they change, or every [`SAVE_EVERY_MIN`] minutes) to
 //! `usage-grok-bot.jsonl` next to the other history files, as records with the field `bot_weekly`.
-//! That file is a separate append-only history (for later charts); the window shows the live file.
+//! That file is a separate append-only history; the window shows the live file, and the Grok Bot
+//! row's detail pane charts this history.
 
 use crate::sources::{Env, Os};
 use crate::store::Store;
