@@ -106,3 +106,24 @@ fn mac_raise_command_targets_the_pid_and_needs_one() {
         "tell application \"System Events\" to set frontmost of (first process whose unix id is 4242) to true"
     );
 }
+
+#[test]
+fn running_text_names_pid_and_start_time() {
+    use aitrack::instance::running_text_since as t;
+    assert_eq!(
+        t(Some(42), Some("2026-10-18 09:30")),
+        "aiTrack is already running (pid 42, started 2026-10-18 09:30)"
+    );
+    assert_eq!(t(Some(42), None), "aiTrack is already running (pid 42)");
+    assert_eq!(t(None, None), "aiTrack is already running");
+    assert_eq!(t(None, Some("x")), "aiTrack is already running (started x)");
+}
+
+#[test]
+fn started_at_reads_the_pid_file_of_the_holder() {
+    let dir = crate::common::TempDir::new();
+    let lock = dir.path().join("aitrack.lock");
+    assert!(aitrack::instance::started_at(&lock).is_none());
+    let _g = aitrack::instance::acquire(&lock);
+    assert!(aitrack::instance::started_at(&lock).is_some());
+}

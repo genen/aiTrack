@@ -63,9 +63,10 @@ pub fn auth_path(env: &Env) -> PathBuf {
     grok_home(env).join("auth.json")
 }
 
-/// Is Grok installed for this user (its data folder exists)?
+/// Is Grok installed for this user (the CLI's data folder exists)? On Linux the Grok Bot app's
+/// data folder is enough too (see [`crate::grok_bot::linux_app_present`]).
 pub fn detected(env: &Env) -> bool {
-    grok_home(env).is_dir()
+    grok_home(env).is_dir() || crate::grok_bot::linux_app_present(env)
 }
 
 // ---------------------------------------------------------------- the log

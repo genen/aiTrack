@@ -469,3 +469,152 @@ fn the_log_line_is_short_and_has_only_numbers() {
     );
     assert!(describe(None, &ok).contains("no saved position"));
 }
+
+// ---- Linux backend decision (explicit inputs, injected scan and probe) ----------------------
+
+mod linux_backend {
+    use super::*;
+
+    fn denv<'a>(d: Option<&'a str>, a: Option<&'a str>) -> DisplayEnv<'a> {
+        DisplayEnv {
+            wayland_display: Some("wayland-0"),
+            xdg_session_type: Some("wayland"),
+            display: d,
+            aitrack_wayland: a,
+        }
+    }
+
+    fn names(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn display_numbers_are_sorted_and_filtered() {
+        let n = x_display_numbers(&["X1024", "X0", "X1", "ignore", "X", "Xa", "X0"]);
+        assert_eq!(n, vec![0, 1, 1024]);
+    }
+
+    #[test]
+    fn answering_display_gives_xwayland() {
+        let d = decide_backend(&denv(Some(":0"), None), &|| vec![], &|d| d == ":0");
+        assert_eq!(d.choice, BackendChoice::XWayland);
+        assert_eq!(d.display, None);
+    }
+
+    #[test]
+    fn silent_display_falls_back_to_native() {
+        let d = decide_backend(&denv(Some(":0"), None), &|| names(&["X0"]), &|_| false);
+        assert_eq!(d.choice, BackendChoice::NativeWayland);
+        assert_eq!(d.why, "X display did not answer");
+    }
+
+    #[test]
+    fn unset_display_scans_for_the_first_reachable_socket() {
+        let d = decide_backend(&denv(None, None), &|| names(&["X1024", "X0", "X1"]), &|d| {
+            d == ":1" || d == ":1024"
+        });
+        assert_eq!(d.choice, BackendChoice::XWayland);
+        assert_eq!(d.display.as_deref(), Some(":1"));
+        let d = decide_backend(&denv(Some("  "), None), &|| names(&["X0"]), &|_| true);
+        assert_eq!(d.display.as_deref(), Some(":0"));
+    }
+
+    #[test]
+    fn unset_display_and_nothing_reachable_is_native() {
+        let d = decide_backend(&denv(None, None), &|| names(&["X0"]), &|_| false);
+        assert_eq!(d.choice, BackendChoice::NativeWayland);
+        assert_eq!(d.display, None);
+        assert_eq!(d.why, "no X display found");
+        let d = decide_backend(&denv(None, None), &|| vec![], &|_| true);
+        assert_eq!(d.choice, BackendChoice::NativeWayland);
+    }
+
+    #[test]
+    fn native_switch_never_probes_or_scans() {
+        let d = decide_backend(
+            &denv(Some(":0"), Some("native")),
+            &|| panic!("no scan"),
+            &|_| panic!("no probe"),
+        );
+        assert_eq!(d.choice, BackendChoice::NativeWayland);
+        let d = decide_backend(&denv(None, Some("native")), &|| panic!("no scan"), &|_| {
+            panic!("no probe")
+        });
+        assert_eq!(d.choice, BackendChoice::NativeWayland);
+    }
+
+    #[test]
+    fn x11_session_is_left_to_the_library() {
+        let e = DisplayEnv {
+            display: Some(":0"),
+            ..Default::default()
+        };
+        let d = decide_backend(&e, &|| panic!("no scan"), &|_| panic!("no probe"));
+        assert_eq!(d.choice, BackendChoice::Auto);
+    }
+
+    #[test]
+    fn lines_name_chosen_and_running_backend() {
+        assert_eq!(
+            backend_line(BackendChoice::XWayland, None),
+            "display backend: x11 (XWayland) (chosen)"
+        );
+        assert_eq!(
+            backend_line(BackendChoice::NativeWayland, Some(ActualBackend::Wayland)),
+            "display backend: wayland (running) (chosen: wayland (native))"
+        );
+        assert_eq!(
+            backend_line(BackendChoice::XWayland, Some(ActualBackend::Unknown)),
+            "display backend: x11 (XWayland) (chosen)"
+        );
+    }
+
+    #[test]
+    fn mismatch_warns_only_on_a_real_difference() {
+        use BackendChoice::*;
+        assert!(backend_mismatch(XWayland, ActualBackend::Wayland)
+            .unwrap()
+            .contains("WARNING"));
+        assert!(backend_mismatch(NativeWayland, ActualBackend::X11).is_some());
+        assert_eq!(backend_mismatch(XWayland, ActualBackend::X11), None);
+        assert_eq!(backend_mismatch(XWayland, ActualBackend::Unknown), None);
+        assert_eq!(backend_mismatch(Auto, ActualBackend::Wayland), None);
+    }
+
+    #[test]
+    fn failure_hint_names_the_way_out() {
+        assert!(failure_hint(BackendChoice::XWayland).contains("AITRACK_WAYLAND=native"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_connects_to_a_listening_socket_and_not_to_a_file_or_nothing() {
+        use std::time::Duration;
+        let dir = TempDir::new();
+        let sock = dir.path().join("X7");
+        assert!(!probe_x_socket(&sock, 2, Duration::from_millis(1)));
+        // a plain file named like a socket is not a server (the old exists() check said yes)
+        std::fs::write(&sock, b"").unwrap();
+        assert!(!probe_x_socket(&sock, 2, Duration::from_millis(1)));
+        std::fs::remove_file(&sock).unwrap();
+        let _l = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        assert!(probe_x_socket(&sock, 1, Duration::from_millis(1)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_waits_for_a_late_socket() {
+        use std::time::Duration;
+        let dir = TempDir::new();
+        let sock = dir.path().join("X8");
+        let s2 = sock.clone();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            let l = std::os::unix::net::UnixListener::bind(&s2).unwrap();
+            std::thread::sleep(Duration::from_millis(600));
+            drop(l);
+        });
+        assert!(probe_x_socket(&sock, 20, Duration::from_millis(50)));
+        t.join().unwrap();
+    }
+}
