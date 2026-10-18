@@ -342,6 +342,10 @@ Known limits:
 - Click the Grok Bot bar to see its weekly history chart; the chart is drawn from the readings aiTrack saved while the
   Grok Bot app was open. Gaps (app closed) show as gaps in the line.
 
+![The Grok Bot weekly pane](docs/img/grok-bot-pane.png)
+
+Clicking the Grok Bot bar opens its weekly pane: the current value, when it resets, how old the reading is (dimmed with a note when it is more than 60 minutes old), a history chart with 24h, 7d, 30d and All, and the Windows, Avg peak, Max peak and Hit rate numbers.
+
 ## 5. Grok needs the Grok CLI
 
 aiTrack reads Grok usage from the folder of the Grok **command-line tool** (`~/.grok`, which is
@@ -497,6 +501,10 @@ last check failed (hover for the full text).
 Click the **Stats** button (the bars icon). It shows three cards and has a **Back** button at the bottom.
 
 ![The Stats view](docs/img/stats.png)
+
+![Weekly blocks on the Stats view](docs/img/stats-grok-bot.png)
+
+The Stats page lists, for each weekly meter including Grok Bot weekly, the windows seen, peak average and max, hit rate, current window and when it resets.
 
 - **Today**: the cost and token count of today, from your local transcripts.
 - **Projects**: your projects ranked by cost, with tokens and a bar. Choose **7 days**, **30 days** or **All**.
