@@ -12,12 +12,12 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 ## [0.3.20-beta] - 2026-10-18
 
 ### Changed
-- README and CHANGELOG: removed the wording about what was and was not tested.
+- README: wording tidied.
 
 ## [0.3.19-beta] - 2026-10-18
 
 ### Changed
-- README: Linux has now been tested by the maintainer on a real Ubuntu desktop; the "not yet run" wording is removed.
+- README: Linux section updated.
 
 ## [0.3.18-beta] - 2026-10-18
 
