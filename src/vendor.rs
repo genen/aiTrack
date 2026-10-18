@@ -73,6 +73,8 @@ pub struct Vendor {
     pub error: Option<String>,
     /// Grok only: the Grok Bot app's "Weekly Grok Bot Limit", shown as a second bar.
     pub bot: Option<crate::grok_bot::BotReading>,
+    /// Window statistics of the Grok Bot's own saved weekly readings.
+    pub bot_stats: Option<WindowStats>,
 }
 
 impl Vendor {
@@ -95,6 +97,7 @@ impl Vendor {
             placeholder: false,
             error: None,
             bot: None,
+            bot_stats: None,
         }
     }
 
@@ -162,6 +165,7 @@ pub fn from_state_at(s: &State, now: DateTime<Utc>) -> Vec<Vendor> {
         let mut v = Vendor::new(VendorId::Grok);
         v.error = g.collector.error.clone();
         v.bot = g.bot;
+        v.bot_stats = g.bot_stats.clone();
         match &g.plan {
             Some(p) => {
                 v.weekly = p.weekly.clone();

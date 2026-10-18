@@ -51,6 +51,8 @@ pub struct GrokState {
     pub enabled: bool,
     /// The Grok Bot app's second weekly meter, when its cache file is found (see `grok_bot`).
     pub bot: Option<crate::grok_bot::BotReading>,
+    /// Window statistics of the Grok Bot's saved weekly readings (see `view::bot_window_stats`).
+    pub bot_stats: Option<crate::analysis::WindowStats>,
 }
 
 pub fn build_state(
@@ -228,5 +230,6 @@ pub fn build_grok_state(
         tier,
         enabled,
         bot: None,
+        bot_stats: None,
     }
 }
