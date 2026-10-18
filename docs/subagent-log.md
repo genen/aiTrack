@@ -3,6 +3,10 @@
 Which model each subagent ran on. The model is taken from the harness or the session transcript, never from
 memory; if it is not known the entry says "unknown".
 
+The same entries, plus what each one was asked to do (job), its limits and its output, and the size of each run (tokens, tool calls, seconds, when the harness reports them), are kept as
+one JSON object per line in `subagent-log.jsonl` (append only, newest last), so they can be charted later. Add a
+line to both files for every subagent.
+
 | Date | Subagent and purpose | Model | Source of the model |
 | --- | --- | --- | --- |
 | 2026-10-15 | this code agent (abbc4eec9ea3cb466): heap-corruption hunt, cache tests, About changes | claude-sonnet-5-5 | session transcript (requestedModel) |

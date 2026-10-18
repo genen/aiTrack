@@ -3,6 +3,16 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.3.16-beta] - 2026-10-18
+
+### Added
+- Grok Bot weekly row is now clickable: it opens a detail pane (percent, reset, reading age) with a history chart
+  of its own readings (24h/7d/30d/All), like the Claude and Grok rows.
+- The pane follows the staleness rules: old readings stay (dimmed, with a note), dashes after the weekly period ends, "No history yet" when empty.
+
+### Changed
+- README screenshots refreshed: Stats and Settings.
+
 ## [0.3.15-beta] - 2026-10-18
 
 ### Added

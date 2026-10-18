@@ -332,6 +332,8 @@ Known limits:
   shows dashes once that weekly period has ended.
 - It is shown only inside the Grok block, so the Grok CLI must still be found. No alerts for this bar yet.
 - `aitrack --sources` lists it as found, stale or not found (no paths with ids).
+- Click the Grok Bot bar to see its weekly history chart; the chart is drawn from the readings aiTrack saved while the
+  Grok Bot app was open. Gaps (app closed) show as gaps in the line.
 
 ## 5. Grok needs the Grok CLI
 
