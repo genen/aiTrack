@@ -58,6 +58,7 @@ dependencies = [
  "serde_json",
  "ureq",
  "windows 0.62.2",
+ "winit",
  "winreg 0.55.0",
 ]
 

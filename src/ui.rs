@@ -309,16 +309,13 @@ impl AitrackUi {
     /// minimised (see `placement`).
     fn track_window(&mut self, ctx: &Context) {
         let info = ctx.input(|i| i.viewport().clone());
-        let sample = match (info.outer_rect, info.inner_rect) {
-            (Some(o), Some(i)) => Some(crate::placement::Sample {
-                x: o.min.x as f64,
-                y: o.min.y as f64,
-                width: i.width() as f64,
-                scale: info.native_pixels_per_point.unwrap_or(1.0) as f64,
-                minimized: info.minimized.unwrap_or(false),
-            }),
-            _ => None,
-        };
+        let sample = crate::placement::sample_for(
+            crate::placement::mode(),
+            info.outer_rect.map(|o| (o.min.x as f64, o.min.y as f64)),
+            info.inner_rect.map(|i| i.width() as f64),
+            info.native_pixels_per_point.unwrap_or(1.0) as f64,
+            info.minimized.unwrap_or(false),
+        );
         if let Some(s) = self.tracker.observe(Instant::now(), sample) {
             self.app.settings.set_window(Some(s.to_pos()));
         }
@@ -1173,7 +1170,11 @@ impl AitrackUi {
                         ui,
                         pal,
                         "Always on top",
-                        "Keep the window above others",
+                        if crate::placement::on_top_unavailable() {
+                            "Not available on native Wayland (see README)"
+                        } else {
+                            "Keep the window above others"
+                        },
                         |ui| {
                             if toggle(ui, pal, v.on_top).clicked() {
                                 self.app.set_on_top(!v.on_top);
@@ -1708,27 +1709,55 @@ pub fn run(app: Arc<App>) -> eframe::Result {
         ))
         .with_min_inner_size([270.0, crate::view::MIN_WINDOW_H])
         .with_icon(app_icon());
-    // reopen where the window was left, when that place is still on a screen
-    let monitors = crate::placement::monitors();
-    let saved = app.settings.get().window;
-    let outcome = saved
-        .as_ref()
-        .map(|w| crate::placement::try_place(w, &monitors, cfg!(target_os = "macos")));
-    if let Some(o) = &outcome {
-        crate::alerts::log_line(&crate::placement::describe(saved.as_ref(), o));
+    if cfg!(target_os = "linux") {
+        // GNOME matches the window to aitrack.desktop (StartupWMClass=aitrack) by this id
+        viewport = viewport.with_app_id("aitrack");
     }
-    if let Some(Ok(((x, y), width))) = outcome {
-        viewport = viewport
-            .with_position([x, y])
-            .with_inner_size([width, crate::view::default_inner_size_pt().1]);
+    // reopen where the window was left, when that place is still on a screen
+    let saved = app.settings.get().window;
+    #[cfg(target_os = "linux")]
+    let backend = linux_backend();
+    #[cfg(not(target_os = "linux"))]
+    {
+        let monitors = crate::placement::monitors();
+        let outcome = saved
+            .as_ref()
+            .map(|w| crate::placement::try_place(w, &monitors, cfg!(target_os = "macos")));
+        if let Some(o) = &outcome {
+            crate::alerts::log_line(&crate::placement::describe(saved.as_ref(), o));
+        }
+        if let Some(Ok(((x, y), width))) = outcome {
+            viewport = viewport
+                .with_position([x, y])
+                .with_inner_size([width, crate::view::default_inner_size_pt().1]);
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(w) = saved.as_ref() {
+        let r = crate::placement::linux_place(w, crate::placement::mode());
+        crate::alerts::log_line(&crate::placement::describe_linux(w, &r));
+        if let Ok(p) = r {
+            if let Some((x, y)) = p.pos {
+                viewport = viewport.with_position([x, y]);
+            }
+            viewport = viewport.with_inner_size([p.width, crate::view::default_inner_size_pt().1]);
+        }
     }
     if on_top {
         viewport = viewport.with_always_on_top();
     }
-    let opts = eframe::NativeOptions {
+    #[allow(unused_mut)]
+    let mut opts = eframe::NativeOptions {
         viewport,
         ..Default::default()
     };
+    #[cfg(target_os = "linux")]
+    if backend == crate::placement::BackendChoice::XWayland {
+        use winit::platform::x11::EventLoopBuilderExtX11;
+        opts.event_loop_builder = Some(Box::new(|b| {
+            b.with_x11();
+        }));
+    }
     eframe::run_native(
         crate::instance::WINDOW_TITLE,
         opts,
@@ -1738,6 +1767,39 @@ pub fn run(app: Arc<App>) -> eframe::Result {
             }))
         }),
     )
+}
+
+/// Linux: decide X11 (XWayland) or native Wayland from the environment, falling back to native
+/// Wayland when the X display's socket is missing, and record what that allows (see `placement`).
+#[cfg(target_os = "linux")]
+fn linux_backend() -> crate::placement::BackendChoice {
+    use crate::placement::{choose_backend, x_socket_path, BackendChoice, DisplayEnv, PosMode};
+    let var = |k: &str| std::env::var(k).ok();
+    let (wd, st, d, aw) = (
+        var("WAYLAND_DISPLAY"),
+        var("XDG_SESSION_TYPE"),
+        var("DISPLAY"),
+        var("AITRACK_WAYLAND"),
+    );
+    let mut b = choose_backend(&DisplayEnv {
+        wayland_display: wd.as_deref(),
+        xdg_session_type: st.as_deref(),
+        display: d.as_deref(),
+        aitrack_wayland: aw.as_deref(),
+    });
+    if b == BackendChoice::XWayland {
+        if let Some(sock) = d.as_deref().and_then(x_socket_path) {
+            if !sock.exists() {
+                crate::alerts::log_line(
+                    "window: X display socket not found, using native Wayland (no always-on-top)",
+                );
+                b = BackendChoice::NativeWayland;
+            }
+        }
+    }
+    crate::alerts::log_line(&format!("window: display backend {b:?}"));
+    crate::placement::set_mode(PosMode::of(b));
+    b
 }
 
 struct Window {

@@ -39,6 +39,10 @@ OPTIONS:
     --sources          diagnose the usage sources (paths, file structure, ages); prints no ids or tokens
     -V, --version      print the build (version, build number, commit, date) and exit
     -h, --help         show this help
+
+ENVIRONMENT:
+    AITRACK_WAYLAND=native   Linux: use native Wayland instead of XWayland (no always-on-top,
+                             window position is not remembered)
 ";
 
 #[derive(Default)]

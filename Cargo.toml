@@ -19,7 +19,7 @@ path = "src/main.rs"
 
 [features]
 default = ["gui"]
-gui = ["dep:eframe"]
+gui = ["dep:eframe", "dep:winit"]
 # Test hooks: env overrides for the endpoint URLs and the Grok program, plain-http mock servers.
 # Never on in real builds; switched on for `cargo test` by the self dev-dependency below.
 test-hooks = []
@@ -37,6 +37,11 @@ png = "0.18"
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = ["UI_Notifications", "Data_Xml_Dom", "Foundation", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_Foundation"] }
 winreg = "0.55"
+
+# Linux: only to ask winit for the X11 backend (XWayland) through eframe's event-loop hook; the
+# same winit 0.30 that eframe already uses (no new crate).
+[target.'cfg(target_os = "linux")'.dependencies]
+winit = { version = "0.30", optional = true, default-features = false, features = ["x11", "wayland"] }
 
 # Native macOS notifications (UNUserNotificationCenter), used only from inside the .app bundle.
 # objc2 0.6 / objc2-foundation 0.3 are already in the lock file through eframe's dependencies.
