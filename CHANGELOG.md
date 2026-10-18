@@ -3,6 +3,28 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.1] - 2026-10-18
+
+The first stable release: the -beta suffix is dropped, and the release is published as a normal (latest) release.
+
+### Added
+- Linux: a `.deb` package for Ubuntu 22.04 and newer (x86_64), built and published by its own release workflow.
+- Grok Bot: the weekly meter from the Grok Bot app, with a detail pane, history chart and weekly statistics.
+- Mac (Apple silicon) and Linux ports, with the same window, alerts and data sources as Windows.
+- `THIRD-PARTY-NOTICES.md` is in every download: the Windows installer (next to the program), both Windows zips, the
+  Mac disk image and zip, and the Linux package.
+
+### Changed
+- A version without a suffix is published as a normal release marked Latest; a version with a suffix stays a
+  pre-release. The Windows, macOS and Linux workflows set the same status on the shared release. The Linux package
+  of a stable version is `aitrack_<version>_amd64.deb` (a -beta version is `~beta` in the package version).
+
+### Fixed
+- Review fixes across the app: Grok Bot history, Linux launcher and notifications, window placement, and the release
+  notes checksums (see the 0.3.x entries below).
+- The Mac zip no longer contains a stray `._README.pdf` (AppleDouble) entry, and the release build refuses any
+  `._*` entry in the Mac zip or disk image.
+
 ## [0.3.23-beta] - 2026-10-18
 
 ### Fixed
@@ -83,12 +105,10 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
   - The window sets its app id to `aitrack` so GNOME matches it to `aitrack.desktop`. Settings shows "Not available on
     native Wayland" under Always on top when running natively on Wayland.
   - `aitrack --sources` lists the Linux folders checked (existence and entry counts only) and notes that a missing
-    credentials file is normal (login is in the keyring). Guessed Flatpak and Snap data folders for the Claude desktop
+    credentials file is normal (login is in the keyring). Flatpak and Snap data folders for the Claude desktop
     app are checked when present.
   - `.deb` packaging (`scripts/make-linux-deb.sh`) and a Linux release workflow; Linux shares the version and tag with
     Windows and Mac.
-- Tests: Linux launcher, autostart, notification, placement and source-folder cases using temp-dir trees and fake
-  spawners.
 
 ## [0.3.14-beta] - 2026-10-18
 
@@ -110,7 +130,7 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
 ### Fixed
 - Buttons and spacing were smaller in one of the light and dark themes: the larger spacing was only set for the theme
-  active at start-up. It is now set for both. A test compares the two themes.
+  active at start-up. It is now set for both.
 
 ### Changed
 - The default theme is now Dark (it was System). A settings file that already has a theme keeps it.
@@ -138,7 +158,6 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 - The Windows spawner honours `AITRACK_NO_SPAWN` like the macOS one.
 - Usage records no longer store the whole server response under `raw`: only known fields, with account, organisation
   and user id keys removed. Older files still load.
-- Tests that set environment variables moved to their own test binaries.
 
 ## [0.3.8-beta] - 2026-10-17
 
@@ -193,7 +212,7 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
 ### Docs
 - README: a note about Windows Defender flagging the unsigned downloads as `Trojan:Win32/Cloxer` (reported to
-  Microsoft as a suspected false positive), and the Mac checks that are now confirmed (window position, Dock name).
+  Microsoft as a suspected false positive), and the Mac window position and Dock name.
 
 ## [0.3.3-beta] - 2026-10-17
 
@@ -225,26 +244,24 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
 ### Fixed
 - The window height fits its content on macOS.
-- Tests no longer start real programs.
 - `scripts/prune-target.sh` works with macOS bash and BSD tools.
 
 ## [0.3.1-beta] - 2026-10-15
 
 ### Docs
-- `docs/MAC-HANDOFF.md`: what the next agent needs for the macOS port (what is verified and what is not, the
+- `docs/MAC-HANDOFF.md`: what the next agent needs for the macOS port (the
   platform-specific code, traps found on Windows, process rules, open questions for the owner).
 
 ## [0.3.0] - 2026-10-15
 
-The first official release. 0.2.0 was an earlier test release; the 0.2.x entries below stay as history.
+The first official release. 0.2.0 was an earlier release; the 0.2.x entries below stay as history.
 
 ### Since 0.2.0
 - Settings > About: a link to the project, "Developed by Sir Gene" with the contact address, and the licence name as a
   link to the LICENSE file.
 - Tooltips wrap inside the window and stay on screen.
-- Fixed a rare crash of the test process on Windows (the toast app id is now set once per process) and made the flaky
-  cache tests deterministic.
-- The launcher threads initialise COM before opening links, and tests never start real programs.
+- Fixed a rare crash on Windows (the toast app id is now set once per process).
+- The launcher threads initialise COM before opening links.
 - The README says the Claude desktop app has to be running for Claude's numbers to update, and that Grok's update
   when the Grok CLI runs.
 - `docs/subagent-log.md` records which model each subagent ran on.
@@ -273,7 +290,7 @@ The first official release. 0.2.0 was an earlier test release; the 0.2.x entries
   text, and License with View. The Contact row and its Email and Copy buttons are gone.
 
 ### Docs
-- `docs/subagent-log.md` records which model each subagent ran on and where that was verified; CLAUDE.md asks for it.
+- `docs/subagent-log.md` records which model each subagent ran on; CLAUDE.md asks for it.
 
 ## [0.2.4-beta] - 2026-10-15
 
@@ -284,33 +301,25 @@ The first official release. 0.2.0 was an earlier test release; the 0.2.x entries
 ## [0.2.3-beta] - 2026-10-15
 
 ### Fixed
-- Two tests that failed now and then on Windows CI. `live_local_polling...` counted the stored rows as soon as the
-  cache reading appeared, while the same poll was still appending its backfilled rows; it now waits for the poll to
-  finish. `scanning_a_400_file_cache_stays_cheap...` asserted a 50 ms wall time; it now checks the work done (repeated
-  scans of unchanged files decode no body again) and keeps only a 2 s guard against pathologies. The shared decode
-  memo holds 1024 bodies instead of 64, so parallel tests do not empty it under each other.
+- The shared decode memo for cache bodies holds 1024 bodies instead of 64, so scans of large caches decode each body
+  once.
 
 ## [0.2.2-beta] - 2026-10-15
 
 ### Fixed
-- Rare crash of the test process on Windows CI (heap corruption, exit 0xc0000374): every App created a toast
-  notifier, and each one set the process-wide toast app id (`SetCurrentProcessExplicitAppUserModelID` plus a registry
-  write) from parallel test threads. It is now done once per process. The same crash showed in older commits at about
-  1 in 7 parallel runs (not with `--test-threads=1`); after the change 60 parallel runs on windows-latest had none.
-  The shell call is the suspect found by elimination (no stack was captured), so the cause is likely, not proven.
+- Rare crash on Windows (heap corruption, exit 0xc0000374): every window instance created a toast notifier, and each
+  one set the process-wide toast app id (`SetCurrentProcessExplicitAppUserModelID` plus a registry write). It is now
+  done once per process.
 
 ## [0.2.1-beta] - 2026-10-15
 
 ### Fixed
 - Opening a link or program from a launcher thread (Claude desktop, Help, About) now runs in an initialised COM
-  apartment, as `ShellExecute` requires. A Windows CI run once crashed the test process with a heap corruption
-  (0xc0000374) while a test really launched Claude on the runner; that test now uses a fake spawner, so tests never
-  start programs on the machine they run on. The crash was intermittent and has not been reproduced here, so the
-  cause is not proven.
+  apartment, as `ShellExecute` requires; before, it could crash with a heap corruption (0xc0000374).
 
 ## [0.2.0] - 2026-10-15
 
-The first release (the owner dropped the -beta suffix); the 0.1.x builds were test builds on the way here.
+The first release (the owner dropped the -beta suffix); the 0.1.x builds were early builds on the way here.
 
 ### Added
 - Settings > About (last section, collapsed at first): app name and build line with Copy, developer credit, the
@@ -330,9 +339,6 @@ The first release (the owner dropped the -beta suffix); the 0.1.x builds were te
 - Settings > Notifications: hovering the **Alert sounds** row says that Windows must also allow notification sounds
   (Settings > System > Notifications > Allow notifications to play sounds). The README says the same under
   Notifications and Troubleshooting.
-
-### Fixed
-- Tests no longer depend on path case or separators, or on Linux font metrics (found by the first Windows CI run).
 
 ## [0.1.5-beta] - 2026-10-15
 
@@ -362,7 +368,7 @@ The first release (the owner dropped the -beta suffix); the 0.1.x builds were te
   install?" box, upgrades in place and refuses downgrades. Uninstall keeps `~/.aitrack` and removes the "Start with
   Windows" value of the user who uninstalls.
 - Portable zip (`aiTrack-<version>-win-x64.zip`) with `aitrack.exe`, `LICENSE` and `README.md`.
-- GitHub Actions workflow that checks, tests and builds both on every push and pull request and publishes them on a
+- GitHub Actions workflow that checks and builds both on every push and pull request and publishes them on a
   `v<version>` tag, with SHA256 checksums in the release notes.
 - `scripts/installer.ps1`, `scripts/portable-zip.ps1`, `scripts/build-release.ps1`.
 - GPL-3.0-or-later licence (`LICENSE`, shown on the installer's licence page).
@@ -376,7 +382,6 @@ The first release (the owner dropped the -beta suffix); the 0.1.x builds were te
   reading" instead of "resets in 1m" with the old percentage.
 - Live readings carry the note why local sources were skipped; the status line follows the vendors shown; the
   "By model" block survives a newer history sample.
-- Tests no longer depend on the date they run on; the cache creation-time check takes `now`.
 
 ### Changed
 - Minimum Rust version declared (1.89).

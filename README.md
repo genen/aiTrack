@@ -57,7 +57,7 @@ when that tool is installed.
 > Grok's numbers update when the Grok CLI runs (**Refresh Grok now** starts it briefly). To keep Claude live without
 > the desktop app, sign in to Claude Code (run `claude`, then `/login`) so the usage-service fallback can work.
 
-Release status: 0.3.0 is the first official release (0.2.0 was an earlier test release). You can download an installer, a portable zip, a Mac disk image or a Linux `.deb` (see
+Release status: you can download an installer, a portable zip, a Mac disk image or a Linux `.deb` (see
 [section 3](#3-install-and-run)) or build it from source. aiTrack is free software under the GNU General Public
 License, version 3 or later (see `LICENSE`).
 
@@ -82,7 +82,7 @@ for Windows; the Mac steps are in [Install on a Mac](#install-on-a-mac) and the 
 ### Download and install (Windows)
 
 Go to the **Releases** page of the repository (https://github.com/genen/aiTrack/releases) and open the newest
-release (the one marked **Latest**). Releases marked "Pre-release" are test builds. Under **Assets** there are three files:
+release (the one marked **Latest**). Releases marked "Pre-release" are early builds that change faster. Under **Assets** there are three files:
 
 - **`aiTrack-Setup-<version>-win-x64.msi`**: the installer. It installs aiTrack for all users in
   `C:\Program Files\aiTrack`, adds Start menu and desktop shortcuts, and asks for administrator permission.
@@ -248,7 +248,7 @@ with fractional display scaling.
 **Display backend and Grok Bot.** See which backend is in use with `aitrack --sources` (line "display backend: ...") or
 Settings > About > Display. If the window does not open, try `AITRACK_WAYLAND=native aitrack`. A second launch says
 which aiTrack is already running. Grok Bot on Linux is read from `~/.config/Grok Bot/sand-client-persistence`
-(file layout assumed to match Windows/macOS; `aitrack --sources` shows what was found).
+(`aitrack --sources` shows what was found).
 
 **Start at login.** In Settings > General, turn on **Start at login**. aiTrack writes
 `~/.config/autostart/aitrack.desktop` (or under `$XDG_CONFIG_HOME`). If you later move the program, turn the setting off

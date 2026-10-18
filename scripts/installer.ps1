@@ -36,6 +36,7 @@ $files = @{
     Rtf     = Join-Path $root 'installer\License.rtf'
     License = Join-Path $root 'LICENSE'
     Readme  = Join-Path $root 'README.md'
+    Notices = Join-Path $root 'THIRD-PARTY-NOTICES.md'
     Project = Join-Path $root 'installer\aiTrack.Installer.wixproj'
 }
 foreach ($name in $files.Keys) {
@@ -58,7 +59,7 @@ Write-Output "Building the installer for aiTrack $($release.Version) (MSI versio
 dotnet build $files.Project -c Release -t:Rebuild `
     "-p:InstallerPlatform=x64" "-p:ProductVersion=$($release.Msi)" "-p:UpgradeCode=$upgradeCode" `
     "-p:ExePath=$(& $fwd $Exe)" "-p:IconPath=$(& $fwd $files.Icon)" "-p:LicenseRtf=$(& $fwd $files.Rtf)" `
-    "-p:LicenseTxt=$(& $fwd $files.License)" "-p:ReadmePath=$(& $fwd $files.Readme)" `
+    "-p:LicenseTxt=$(& $fwd $files.License)" "-p:ReadmePath=$(& $fwd $files.Readme)" "-p:NoticesPath=$(& $fwd $files.Notices)" `
     -o $OutDir
 if ($LASTEXITCODE -ne 0) { throw "The installer build failed (dotnet build exit code $LASTEXITCODE). The WiX messages are above." }
 
