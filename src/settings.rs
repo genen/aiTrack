@@ -193,11 +193,11 @@ impl BadgeVariant {
     }
 }
 
-/// The window's colour theme: follow the operating system, or force one.
+/// The window's colour theme: dark (the default), light, or follow the operating system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ThemeChoice {
-    #[default]
     System,
+    #[default]
     Dark,
     Light,
 }
@@ -294,7 +294,7 @@ impl Default for Values {
             claude_enabled: None,
             alert_sounds: true,
             badge_style: BadgeVariant::Auto,
-            theme: ThemeChoice::System,
+            theme: ThemeChoice::Dark,
             sections: Sections::default(),
             window: None,
         }

@@ -9,6 +9,9 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 - Buttons and spacing were smaller in one of the light and dark themes: the larger spacing was only set for the theme
   active at start-up. It is now set for both. A test compares the two themes.
 
+### Changed
+- The default theme is now Dark (it was System). A settings file that already has a theme keeps it.
+
 ## [0.3.11-beta] - 2026-10-18
 
 ### Changed

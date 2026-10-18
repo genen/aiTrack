@@ -13,11 +13,11 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 #[test]
-fn the_setting_defaults_to_system_persists_and_ignores_bad_values() {
+fn the_setting_defaults_to_dark_persists_and_ignores_bad_values() {
     let d = TempDir::new();
     let path = d.join("s.json");
     let s = Settings::load(&path);
-    assert_eq!(s.get().theme, ThemeChoice::System);
+    assert_eq!(s.get().theme, ThemeChoice::Dark);
     s.set_theme(ThemeChoice::Light);
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(saved["theme"], "light");
@@ -29,8 +29,8 @@ fn the_setting_defaults_to_system_persists_and_ignores_bad_values() {
     std::fs::write(&path, r#"{"interval_min": 5}"#).unwrap();
     assert_eq!(
         Settings::load(&path).get().theme,
-        ThemeChoice::System,
-        "older files follow the system"
+        ThemeChoice::Dark,
+        "older files without the key get the dark default"
     );
     for t in ThemeChoice::ALL {
         assert_eq!(ThemeChoice::parse(t.as_str()), Some(t));
@@ -102,7 +102,7 @@ impl Win {
 
 #[test]
 fn system_follows_the_os_preference_and_an_explicit_choice_overrides_it() {
-    let mut w = Win::new(None, Theme::Light);
+    let mut w = Win::new(Some("system"), Theme::Light);
     assert_eq!(w.ctx.theme(), Theme::Light, "System follows the (fake) OS");
     w.os = Some(Theme::Dark);
     w.frame(vec![]);

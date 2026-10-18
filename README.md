@@ -901,8 +901,8 @@ the average since the window started) and the data source; clicking a row opens 
 
 ### Badge style
 
-Settings > Appearance has two choices, both applied live. *Theme* (`theme` in settings.json): `system` (default,
-follows the operating system), `dark` or `light`. *Logos* (`badge_style`): the logo squares before the vendor
+Settings > Appearance has two choices, both applied live. *Theme* (`theme` in settings.json): `dark` (default), `light` or `system`
+(follows the operating system). *Logos* (`badge_style`): the logo squares before the vendor
 names come in four looks: `auto` (the default for new settings files: the Dark look on a dark window, the Light
 look on a light one, so there are light icons on dark and dark icons on light), `filled` (brand-coloured squircle,
 light logo), `dark` (dark squircle, logo in the brand colour) and `light` (light squircle with a thin outline,
