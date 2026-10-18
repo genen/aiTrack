@@ -276,16 +276,39 @@ jobs:
           # overwrite a section another run added in between. Re-read after each write and add the
           # section again until it is there (a concurrency group cannot do this: it keeps only one
           # waiting run per group, and there are three workflows).
-          for attempt in 1 2 3 4 5 6; do
-            body=$(gh release view "$TAG" --json body --jq .body)
-            if printf '%s\n' "$body" | grep -Fq "macOS SHA256:"; then
-              break
-            fi
-            { printf '%s\n\n' "$body"; cat mac-notes.md; } > notes.md
-            gh release edit "$TAG" --notes-file notes.md
-            sleep $((2 + RANDOM % 4))
-          done
-          if ! gh release view "$TAG" --json body --jq .body | grep -Fq "macOS SHA256:"; then
+          marker="macOS SHA256:"
+          hashes=$(grep -E '^[0-9a-f]{64} ' mac-notes.md)
+          # True when the notes hold this section with exactly the checksums of this run's files.
+          section_current() {
+            local text
+            text=$(printf '%s\n' "$1" | tr -d '\r')
+            printf '%s\n' "$text" | grep -Fq "$marker" || return 1
+            while IFS= read -r line; do
+              printf '%s\n' "$text" | grep -Fxq -- "$line" || return 1
+            done <<< "$hashes"
+          }
+          add_section() {
+            for attempt in 1 2 3 4 5 6; do
+              body=$(gh release view "$TAG" --json body --jq .body)
+              if section_current "$body"; then
+                return 0
+              fi
+              # A section from an earlier run of this workflow (Replace) is cut out, from its marker line
+              # to the closing code fence, so the new checksums take its place.
+              body=$(printf '%s\n' "$body" | awk -v m="$marker" 'skip == 0 && index($0, m) == 1 { skip = 1; fence = 0; next } skip == 1 { if ($0 ~ /^```/) { fence++; if (fence == 2) skip = 0 }; next } { print }')
+              { printf '%s\n\n' "$body"; cat mac-notes.md; } > notes.md
+              gh release edit "$TAG" --notes-file notes.md
+              sleep $((2 + RANDOM % 4))
+            done
+            return 1
+          }
+          add_section || true
+          # A slower run of another workflow may have read the text before our edit and written it back
+          # after our last check. Look once more after a pause and repair it if so. A writer slower than
+          # this pause can still win; rerunning the workflow with Replace checked repairs the notes.
+          sleep 10
+          add_section || true
+          if ! section_current "$(gh release view "$TAG" --json body --jq .body)"; then
             echo "::error::The macOS SHA256: section is missing from the release notes of $TAG."
             exit 1
           fi

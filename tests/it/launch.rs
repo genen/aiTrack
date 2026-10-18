@@ -11,6 +11,8 @@ struct Fake {
     calls: Mutex<Vec<String>>,
     /// Calls whose text contains one of these fail.
     fail: Vec<String>,
+    /// What `capture` answers (None: unsupported).
+    mime: Option<Result<String, String>>,
 }
 
 impl Fake {
@@ -18,6 +20,7 @@ impl Fake {
         Fake {
             calls: Mutex::default(),
             fail: patterns.iter().map(|s| s.to_string()).collect(),
+            mime: None,
         }
     }
     fn record(&self, what: String) -> Result<(), String> {
@@ -44,6 +47,18 @@ impl Spawner for Fake {
             program.display().to_string().replace('\\', "/"),
             args.join(" ")
         ))
+    }
+    fn capture(&self, program: &Path, args: &[String]) -> Result<String, String> {
+        if self.mime.is_some() {
+            self.calls.lock().unwrap().push(format!(
+                "capture {} {}",
+                program.display().to_string().replace('\\', "/"),
+                args.join(" ")
+            ));
+        }
+        self.mime
+            .clone()
+            .unwrap_or_else(|| Err("not supported".into()))
     }
 }
 
@@ -495,10 +510,47 @@ fn linux_claude_order_xdg_open_then_command_then_desktop_files() {
 }
 
 #[test]
+fn linux_claude_skips_xdg_open_when_no_claude_handler_is_registered() {
+    let fake = Fake {
+        mime: Some(Ok("\n".into())),
+        ..Fake::default()
+    };
+    let tried = launch::launch_claude_linux(&[], &fake);
+    let calls = fake.calls();
+    assert_eq!(
+        calls,
+        vec![
+            "capture xdg-mime query default x-scheme-handler/claude".to_string(),
+            "run claude-desktop ".to_string(),
+        ]
+    );
+    assert!(launch::succeeded(&tried));
+    assert!(!tried[0].ok && tried[0].method == "xdg-open claude://");
+    // a registered handler: xdg-open is used
+    let fake = Fake {
+        mime: Some(Ok("claude-desktop.desktop\n".into())),
+        ..Fake::default()
+    };
+    let tried = launch::launch_claude_linux(&[], &fake);
+    assert_eq!(fake.calls().last().unwrap(), "open claude://");
+    assert!(launch::succeeded(&tried));
+    // xdg-mime missing or failing: xdg-open is still tried
+    let fake = Fake {
+        mime: Some(Err("no such program".into())),
+        ..Fake::default()
+    };
+    launch::launch_claude_linux(&[], &fake);
+    assert_eq!(fake.calls().last().unwrap(), "open claude://");
+}
+
+#[test]
 fn linux_claude_stops_at_first_success() {
     let fake = Fake::default();
     let tried = launch::launch_claude_linux(&[], &fake);
-    assert_eq!(fake.calls(), vec!["open claude://".to_string()]);
+    assert_eq!(
+        fake.calls().last().map(String::as_str),
+        Some("open claude://")
+    );
     assert!(launch::succeeded(&tried));
 }
 
