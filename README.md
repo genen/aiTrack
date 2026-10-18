@@ -14,6 +14,8 @@ this guide names Windows, Mac or Linux, it applies to that system only.
 This guide is for people who just want to run it. Deeper technical notes are at the end, under
 [Details](#details).
 
+[Code signing policy](CODE-SIGNING-POLICY.md) · [Privacy statement](PRIVACY.md)
+
 ## Contents
 
 1. [What aiTrack is](#1-what-aitrack-is)
