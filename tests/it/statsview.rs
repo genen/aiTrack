@@ -63,6 +63,7 @@ fn plan_of(readings: &[Reading]) -> PlanData {
             .map(|k| (k, compute(readings, k, now(), 0)))
             .collect(),
         grok: None,
+        grok_bot: None,
     }
 }
 
@@ -325,6 +326,7 @@ fn the_service_scans_off_thread_wakes_the_window_and_rescans_on_request() {
         tz: Arc::new(|| 0),
         claude: Some(history),
         grok: None,
+        grok_bot: None,
         rescan_every: StdDuration::from_secs(3600),
     };
     let svc = StatsService::new(cfg);
@@ -438,4 +440,91 @@ fn the_projects_cli_labels_grok_rows_and_cuts_a_long_name_before_the_label() {
         "cut to 40 characters, then the label\n{cut}"
     );
     assert!(!cut.contains(&long[..41]), "{cut}");
+}
+
+/// A stored Grok Bot record (the `bot_weekly` form that `grok_bot::record` writes).
+fn bot_record(minutes_ago: i64, pct: f64) -> serde_json::Value {
+    json!({
+        "v": 1, "ok": true, "vendor": "grok", "source": "grok-bot",
+        "ts": (now() - Duration::minutes(minutes_ago)).to_rfc3339(),
+        "bot_weekly": {
+            "pct": pct,
+            "resets_at": (now() + Duration::days(3)).to_rfc3339(),
+            "read_at": (now() - Duration::minutes(minutes_ago)).to_rfc3339(),
+        },
+    })
+}
+
+#[test]
+fn grok_bot_weekly_follows_grok_weekly_and_is_absent_without_history() {
+    let bot: Vec<Reading> = [bot_record(60, 5.0), bot_record(5, 9.0)]
+        .iter()
+        .map(Reading::from_value)
+        .collect();
+    assert_eq!(bot[1].weekly.as_ref().map(|b| b.pct), Some(9.0));
+    let all = |rs: &[Reading]| {
+        StatsRange::ALL
+            .into_iter()
+            .map(|k| (k, compute(rs, k, now(), 0)))
+            .collect::<Vec<_>>()
+    };
+    let rs = vec![reading(60, 5.0, 20.0), reading(5, 8.0, 21.0)];
+    let mut plan = plan_of(&[]);
+    plan.grok = Some(all(&rs));
+    plan.grok_bot = Some(all(&bot));
+    let titles = |plan: PlanData| -> Vec<String> {
+        build_page(
+            &snapshot(&[], vec![], Some(plan)),
+            ProjRange::Days7,
+            StatsRange::Last7d,
+            now(),
+        )
+        .plan
+        .into_iter()
+        .map(|b| b.title)
+        .collect()
+    };
+    assert_eq!(titles(plan.clone()), ["Grok weekly", "Grok Bot weekly"]);
+    // tracked but nothing stored, or not tracked: no section
+    plan.grok_bot = Some(all(&[]));
+    assert_eq!(titles(plan.clone()), ["Grok weekly"]);
+    plan.grok_bot = None;
+    assert_eq!(titles(plan), ["Grok weekly"]);
+}
+
+#[test]
+fn the_service_reads_the_grok_bot_history_file() {
+    let dir = TempDir::new();
+    let hist = dir.join("usage-grok-bot.jsonl");
+    let store = JsonlStore::new(&hist);
+    for r in [bot_record(60, 5.0), bot_record(5, 9.0)] {
+        aitrack::store::Store::append(&store, &r).unwrap();
+    }
+    let tracker = Arc::new(aitrack::grok_bot::BotTracker::new(
+        aitrack::sources::Env::new(aitrack::sources::Os::Windows),
+        Box::new(JsonlStore::new(&hist)),
+    ));
+    let cfg = ServiceConfig {
+        roots: Roots {
+            claude_projects: dir.join("claude/projects"),
+            grok_home: dir.join("grok"),
+            index: Some(dir.join("idx.json")),
+        },
+        prices: Paths::in_dir(dir.path()),
+        tz: Arc::new(|| 0),
+        claude: None,
+        grok: None,
+        grok_bot: Some(tracker),
+        rescan_every: StdDuration::from_secs(3600),
+    };
+    let svc = StatsService::new(cfg);
+    svc.start();
+    let snap = wait_for(&svc, |s| s.plan.is_some() && !s.busy);
+    let plan = snap.plan.unwrap();
+    assert!(plan.grok.is_none());
+    assert!(plan.claude.is_empty());
+    let st = plan.grok_bot_at(StatsRange::All).unwrap();
+    assert_eq!(st.coverage.readings, 2);
+    svc.stop();
+    svc.join();
 }

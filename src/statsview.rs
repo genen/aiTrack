@@ -10,7 +10,7 @@
 //!   what is shown can be tested without egui.
 
 use crate::pricing::{Paths, PriceTable};
-use crate::reading::Kind;
+use crate::reading::{Kind, Reading};
 use crate::stats::{compute, Stats, StatsRange};
 use crate::store::History;
 use crate::transcripts::{
@@ -34,6 +34,8 @@ pub struct PlanData {
     pub claude: Vec<(StatsRange, Stats)>,
     /// `None` when Grok is not tracked.
     pub grok: Option<Vec<(StatsRange, Stats)>>,
+    /// `None` when the Grok Bot app is not tracked (weekly only).
+    pub grok_bot: Option<Vec<(StatsRange, Stats)>>,
 }
 
 impl PlanData {
@@ -43,6 +45,14 @@ impl PlanData {
 
     pub fn grok_at(&self, r: StatsRange) -> Option<&Stats> {
         self.grok
+            .as_ref()?
+            .iter()
+            .find(|(k, _)| *k == r)
+            .map(|(_, s)| s)
+    }
+
+    pub fn grok_bot_at(&self, r: StatsRange) -> Option<&Stats> {
+        self.grok_bot
             .as_ref()?
             .iter()
             .find(|(k, _)| *k == r)
@@ -74,6 +84,7 @@ pub struct ServiceConfig {
     pub tz: Arc<dyn Fn() -> i32 + Send + Sync>,
     pub claude: Option<Arc<History>>,
     pub grok: Option<Arc<History>>,
+    pub grok_bot: Option<Arc<crate::grok_bot::BotTracker>>,
     pub rescan_every: Duration,
 }
 
@@ -186,17 +197,18 @@ fn worker(
         busy(true);
         let tz = (cfg.tz)();
         let now = Utc::now();
-        let ranges = |h: &Arc<History>| -> Vec<(StatsRange, Stats)> {
-            // copy the readings out and compute without holding the history lock
-            let r = h.snapshot();
+        let compute_all = |r: &[Reading]| -> Vec<(StatsRange, Stats)> {
             StatsRange::ALL
                 .into_iter()
-                .map(|k| (k, compute(&r, k, now, tz)))
+                .map(|k| (k, compute(r, k, now, tz)))
                 .collect()
         };
+        // copy the readings out and compute without holding the history lock
+        let ranges = |h: &Arc<History>| compute_all(&h.snapshot());
         let plan = PlanData {
             claude: cfg.claude.as_ref().map(ranges).unwrap_or_default(),
             grok: cfg.grok.as_ref().map(ranges),
+            grok_bot: cfg.grok_bot.as_ref().map(|b| compute_all(&b.readings())),
         };
         let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
         s.plan = Some(Arc::new(plan));
@@ -489,6 +501,17 @@ pub fn build_page(
                 page.plan.push(PlanBlock {
                     vendor: VendorId::Grok,
                     title: "Grok weekly".into(),
+                    rows: plan_rows(st, Kind::Weekly, now),
+                });
+            }
+            // the Grok Bot app's own weekly limit (weekly only), when it has a history
+            if let Some(st) = plan
+                .grok_bot_at(plan_range)
+                .filter(|s| s.coverage.readings > 0)
+            {
+                page.plan.push(PlanBlock {
+                    vendor: VendorId::Grok,
+                    title: "Grok Bot weekly".into(),
                     rows: plan_rows(st, Kind::Weekly, now),
                 });
             }

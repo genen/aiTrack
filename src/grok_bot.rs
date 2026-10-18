@@ -294,6 +294,14 @@ impl BotTracker {
         self.version.load(Ordering::SeqCst)
     }
 
+    /// The stored history as readings (the file is read afresh; for the Stats view).
+    pub fn readings(&self) -> Vec<crate::reading::Reading> {
+        let mut out = Vec::new();
+        self.store
+            .read_each(&mut |v| out.push(crate::reading::Reading::from_value(&v)));
+        out
+    }
+
     pub fn latest(&self) -> Option<BotReading> {
         *self.latest.lock().unwrap_or_else(|e| e.into_inner())
     }

@@ -448,6 +448,7 @@ fn stats_snapshot(app: &Arc<App>, populated: bool) -> aitrack::statsview::Snapsh
             .into_iter()
             .map(|k| (k, compute(r, k, now, 0)))
             .collect(),
+        grok_bot: None,
         grok: None,
     });
     let src = |label: &str, path: &str, exists: bool, files: usize| SourceInfo {

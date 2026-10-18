@@ -626,6 +626,7 @@ impl App {
             tz: Arc::new(|| chrono::Local::now().offset().local_minus_utc() / 60),
             claude: Some(self.history.clone()),
             grok: self.grok.as_ref().map(|g| g.history.clone()),
+            grok_bot: self.grok.as_ref().and_then(|g| g.bot.get().cloned()),
             rescan_every: crate::statsview::RESCAN_EVERY,
         };
         self.set_stats(crate::statsview::StatsService::new(cfg));

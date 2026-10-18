@@ -124,7 +124,8 @@ impl Reading {
             failed: v.get("ok").and_then(Value::as_bool) == Some(false),
             error: v.get("error").and_then(Value::as_str).map(str::to_owned),
             session: bucket(v.get("session")),
-            weekly: bucket(v.get("weekly")),
+            // Grok Bot records keep their weekly meter under `bot_weekly`
+            weekly: bucket(v.get("weekly")).or_else(|| bucket(v.get("bot_weekly"))),
             spend,
             limits: v.get("limits").map(model_limits).unwrap_or_default(),
             source: v.get("source").and_then(Value::as_str).map(str::to_owned),

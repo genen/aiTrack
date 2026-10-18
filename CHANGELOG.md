@@ -3,6 +3,13 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.3.13-beta] - 2026-10-18
+
+### Added
+- The Stats view's Plan card shows a **Grok Bot weekly** block after **Grok weekly** (windows seen, peak avg / max,
+  hit the limit, current window, resets in, early resets), computed from the Grok Bot history file
+  (`usage-grok-bot.jsonl`). It appears only when that history has readings.
+
 ## [0.3.12-beta] - 2026-10-18
 
 ### Fixed
