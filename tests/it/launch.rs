@@ -480,8 +480,10 @@ fn linux_claude_order_xdg_open_then_command_then_desktop_files() {
     let tried = launch::launch_claude_linux(&dirs, &fake);
     let file = t.join("share/applications/claude-desktop.desktop");
     let file = file.display().to_string().replace('\\', "/");
+    // The desktop-file argument is a host path, so compare with `\` folded to `/` (Windows hosts).
+    let calls: Vec<String> = fake.calls().iter().map(|c| c.replace('\\', "/")).collect();
     assert_eq!(
-        fake.calls(),
+        calls,
         vec![
             "open claude://".to_string(),
             "run claude-desktop ".to_string(),

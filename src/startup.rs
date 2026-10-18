@@ -76,7 +76,11 @@ pub fn agent_disable(home: &Path) -> Result<(), String> {
 /// ignores relative values), else `<home>/.config/autostart`.
 pub fn autostart_dir(xdg_config_home: Option<&OsStr>, home: &Path) -> PathBuf {
     match xdg_config_home.map(Path::new) {
-        Some(p) if p.is_absolute() => p.join("autostart"),
+        // The XDG spec writes absolute paths in their Unix form, so a leading `/` counts on every host
+        // (on Windows `Path::is_absolute` would reject `/x/cfg`; this code only runs on Linux anyway).
+        Some(p) if p.is_absolute() || p.to_str().is_some_and(|s| s.starts_with('/')) => {
+            p.join("autostart")
+        }
         _ => home.join(".config").join("autostart"),
     }
 }

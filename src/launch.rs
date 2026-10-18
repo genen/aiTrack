@@ -429,6 +429,28 @@ pub const CLAUDE_LINUX_COMMAND: &str = "claude-desktop";
 #[allow(dead_code)]
 const LINUX_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
 
+/// Splits an XDG path list (`$XDG_DATA_DIRS`) on `:` as the spec says, whatever the host's own
+/// path-list separator is. Empty entries are dropped.
+fn split_xdg_list(list: &std::ffi::OsStr) -> Vec<PathBuf> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        list.as_bytes()
+            .split(|b| *b == b':')
+            .filter(|s| !s.is_empty())
+            .map(|s| PathBuf::from(std::ffi::OsStr::from_bytes(s)))
+            .collect()
+    }
+    #[cfg(not(unix))]
+    {
+        list.to_string_lossy()
+            .split(':')
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .collect()
+    }
+}
+
 /// Folders that hold `applications/*.desktop` entries: `$XDG_DATA_HOME` (default
 /// `~/.local/share`), then each of `$XDG_DATA_DIRS` (default `/usr/local/share:/usr/share`), then
 /// the Flatpak and Snap export folders.
@@ -443,7 +465,7 @@ pub fn xdg_data_dirs(
         None => v.extend(home.map(|h| h.join(".local").join("share"))),
     }
     match data_dirs.filter(|d| !d.is_empty()) {
-        Some(d) => v.extend(std::env::split_paths(d)),
+        Some(d) => v.extend(split_xdg_list(d)),
         None => {
             v.push(PathBuf::from("/usr/local/share"));
             v.push(PathBuf::from("/usr/share"));
