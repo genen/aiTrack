@@ -371,6 +371,11 @@ impl BotTracker {
         r
     }
 
+    /// Linux with the Grok Bot app but no Grok CLI folder: the CLI collector has nothing to read.
+    pub fn cli_absent(&self) -> bool {
+        !crate::grok::grok_home(&self.env).is_dir() && linux_app_present(&self.env)
+    }
+
     pub fn latest(&self) -> Option<BotReading> {
         *self.latest.lock().unwrap_or_else(|e| e.into_inner())
     }

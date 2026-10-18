@@ -341,6 +341,12 @@ impl App {
             let (st, det, bot) = (self.settings.clone(), detect.clone(), bot.clone());
             Box::new(move |s| {
                 if st.get().grok_on(det()) {
+                    // Only the Grok Bot app is installed (Linux): there is no CLI login or log to
+                    // read, so no failing poll is made and no "login not found" error is shown.
+                    if let Some(b) = bot.get().filter(|b| b.cli_absent()) {
+                        b.refresh(Utc::now());
+                        return Ok(Value::Null);
+                    }
                     let r = f(s);
                     // the second meter is independent of the CLI log: read it whatever `f` said
                     if let Some(b) = bot.get() {

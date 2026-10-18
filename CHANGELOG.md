@@ -3,6 +3,16 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.3.22-beta] - 2026-10-18
+
+### Fixed
+- Linux: with only the Grok Bot app installed, Grok no longer shows a "Grok login not found" error; the CLI is not polled when its folder does not exist.
+- Linux: the Grok Bot history is read once and kept until a record is appended, so the window no longer re-reads the growing file on every refresh.
+- Linux: "Send test notification" and alerts no longer wait for `notify-send`; a stuck notification service cannot freeze the window (a failure is written to `notify.log`, and after 10 s the program is stopped).
+- Linux: a window position of exactly (0, 0) saved by native Wayland is no longer applied when aiTrack starts under XWayland.
+- Linux: "Start at login" after a package upgrade writes the real program path, without the " (deleted)" suffix.
+- Release workflows: the SHA256 section of the release notes is checked after it is written and added again if another platform's run overwrote it.
+
 ## [0.3.21-beta] - 2026-10-18
 
 ### Changed
