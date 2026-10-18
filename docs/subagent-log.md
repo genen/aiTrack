@@ -31,3 +31,4 @@ memory; if it is not known the entry says "unknown".
 | 2026-10-17 | Opus code review of main bd01bfd (read-only, shared/Windows/macOS code, release scripts) | claude-opus-5-5 | subagent transcript (model field) |
 | 2026-10-17 | macOS review fixes subagent: alert delivery, Keychain timeout, Grok refresh group kill (0.3.8-beta) | claude-sonnet-5-5 | subagent transcript (model field) |
 | 2026-10-17 | Review fixes subagent: release notes merge, poll clock, Windows no-spawn, raw whitelist, env tests (0.3.9-beta) | claude-sonnet-5-5 | subagent transcript (model field) |
+| 2026-10-18 | Grok Bot weekly section on the stats page (0.3.13-beta) | claude-sonnet-5-5 | model parameter set when the subagent was launched (this session) |

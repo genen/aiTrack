@@ -13,7 +13,7 @@ These can be copied into `~/.claude/CLAUDE.md` to apply everywhere.
 - **Never print or store secrets:** no tokens, org ids or account ids in logs, diagnostics, tests or chat. Diagnostics must stay safe to paste.
 - **Ask before irreversible or outward-facing steps;** otherwise proceed with a sensible default and mention it.
 - **Roadmap discipline:** finish release 1 (code review, README/help) before porting. Order: Windows release, then Mac port, then Linux port, then more vendors (Gemini, ChatGPT). Do not add vendors early.
-- **Code review:** an Opus-model subagent review happens only when the owner says so. Do not start it unprompted.
+- **Code review:** an Opus-model subagent review happens only when the owner says so. Do not start it unprompted. When the owner does say so, first post a code review request to Grok Bot through `AGENT-COMMS.md` (the thread in `genen/claude-setup` pull request #3; name this project, the commit and the areas to look at in the `Re:` line), tell the owner it is sent, then start the Claude review without waiting. When Grok answers, check its findings against the code and add the real ones to the review list.
 - **README/help file:** raise it when the queued work lands; a detailed README is a release-1 deliverable.
 - **Keep a visible to-do list:** maintain the aiTrack To-Do artifact page (one pinned URL, republished as the list changes) so the owner never has to ask for it.
 - **To-Do lists are yours to edit:** any list, page, artifact or file with "To-Do" in its name is Claude's to create, edit, republish and delete whenever the work changes, without asking the owner first. Remove items when the owner reports results, add items when the owner has to do something.
