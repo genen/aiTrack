@@ -924,10 +924,15 @@ impl App {
         let g = self.grok.as_ref()?;
         let (status, enabled) = (g.collector.status(), settings.grok_on(g.detected()));
         let bot = g.bot.get().and_then(|b| b.latest());
+        let bot_stats = g
+            .bot
+            .get()
+            .and_then(|b| crate::view::bot_window_stats(&b.readings(), now));
         match g.history.try_snapshot() {
             Some(r) => {
                 let mut s = build_grok_state(&r, status, enabled, now);
                 s.bot = bot;
+                s.bot_stats = bot_stats.clone();
                 Some((s, true))
             }
             None => Some(match prev {
@@ -936,11 +941,13 @@ impl App {
                     p.collector = status;
                     p.enabled = enabled;
                     p.bot = bot;
+                    p.bot_stats = bot_stats.clone();
                     (p, false)
                 }
                 None => {
                     let mut s = build_grok_state(&[], status, enabled, now);
                     s.bot = bot;
+                    s.bot_stats = bot_stats.clone();
                     (s, false)
                 }
             }),

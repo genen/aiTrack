@@ -892,19 +892,32 @@ pub fn build_detail_at(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Ut
         }
     }
     if let Some(st) = v.stats(kind) {
-        d.rows.push(("Windows".into(), st.windows.to_string()));
-        d.rows
-            .push(("Avg peak".into(), opt(st.avg_peak, |x| format!("{x:.0}%"))));
-        d.rows
-            .push(("Max peak".into(), opt(st.max_peak, |x| format!("{x:.0}%"))));
-        d.rows.push((
-            "Hit rate".into(),
-            st.hit_rate
-                .map(|h| format!("{h}%"))
-                .unwrap_or_else(|| "-".into()),
-        ));
+        push_window_stats(&mut d.rows, st);
     }
     d
+}
+
+/// The window-statistics rows (Windows, Avg peak, Max peak, Hit rate) shared by the Claude, Grok
+/// and Grok Bot panes.
+fn push_window_stats(rows: &mut Vec<(String, String)>, st: &crate::analysis::WindowStats) {
+    rows.push(("Windows".into(), st.windows.to_string()));
+    rows.push(("Avg peak".into(), opt(st.avg_peak, |x| format!("{x:.0}%"))));
+    rows.push(("Max peak".into(), opt(st.max_peak, |x| format!("{x:.0}%"))));
+    rows.push((
+        "Hit rate".into(),
+        st.hit_rate
+            .map(|h| format!("{h}%"))
+            .unwrap_or_else(|| "-".into()),
+    ));
+}
+
+/// Window statistics of the Grok Bot's own saved weekly readings (`usage-grok-bot.jsonl`), by the
+/// same analysis the Claude and Grok panes use. `None` when there is no usable history.
+pub fn bot_window_stats(
+    readings: &[crate::reading::Reading],
+    now: DateTime<Utc>,
+) -> Option<crate::analysis::WindowStats> {
+    crate::analysis::analyze(readings, now).map(|p| p.weekly_stats)
 }
 
 /// Detail pane for the Grok Bot weekly meter. Same layout as [`build_detail_at`]; the reading is a
@@ -913,6 +926,7 @@ pub fn build_detail_at(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Ut
 /// is always offered (it says "No history yet" when nothing is stored).
 pub fn build_bot_detail(
     b: &crate::grok_bot::BotReading,
+    stats: Option<&crate::analysis::WindowStats>,
     remaining: bool,
     now: DateTime<Utc>,
 ) -> Detail {
@@ -933,6 +947,9 @@ pub fn build_bot_detail(
         d.resets = Some("Reset passed, waiting for a new reading".into());
         d.rows
             .push(("Last value".into(), format!("{}%", js_round(b.pct) as i64)));
+        if let Some(st) = stats {
+            push_window_stats(&mut d.rows, st);
+        }
         return d;
     }
     let shown = if remaining {
@@ -953,6 +970,9 @@ pub fn build_bot_detail(
             ),
             warn: false,
         });
+    }
+    if let Some(st) = stats {
+        push_window_stats(&mut d.rows, st);
     }
     d
 }
