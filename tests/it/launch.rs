@@ -192,13 +192,17 @@ fn the_log_names_what_was_tried_and_is_appended_to() {
 
 #[cfg(not(any(windows, target_os = "macos")))]
 #[test]
-fn the_system_spawner_does_nothing_off_windows() {
+fn the_system_spawner_refuses_when_spawning_is_disabled() {
+    // never starts anything: with AITRACK_NO_SPAWN set (scripts/test.sh, CI) every method refuses
+    if !launch::spawning_disabled() {
+        return;
+    }
     let s = launch::SystemSpawner;
     assert!(s
         .open_uri("claude://")
         .unwrap_err()
-        .contains("only supported on Windows and macOS"));
-    assert!(s.run(Path::new("explorer.exe"), &[]).is_err());
+        .contains("AITRACK_NO_SPAWN"));
+    assert!(s.run(Path::new("claude-desktop"), &[]).is_err());
 }
 
 #[test]
@@ -464,4 +468,126 @@ fn the_autostart_file_is_written_found_and_removed_under_explicit_dirs() {
         t.path()
     ));
     startup::autostart_disable(Some(xdg.as_os_str()), t.path()).unwrap();
+}
+
+// ---------------------------------------------------------------- Linux (fake spawner only)
+
+#[test]
+fn linux_claude_order_xdg_open_then_command_then_desktop_files() {
+    let t = local_with(&[], &["share/applications/claude-desktop.desktop"]);
+    let dirs = vec![t.join("share"), t.join("missing")];
+    let fake = Fake::failing(&["open claude://", "claude-desktop ", "gio launch"]);
+    let tried = launch::launch_claude_linux(&dirs, &fake);
+    let file = t.join("share/applications/claude-desktop.desktop");
+    let file = file.display().to_string().replace('\\', "/");
+    assert_eq!(
+        fake.calls(),
+        vec![
+            "open claude://".to_string(),
+            "run claude-desktop ".to_string(),
+            format!("run gio launch {file}"),
+            "run gtk-launch claude-desktop".to_string(),
+        ]
+    );
+    assert!(launch::succeeded(&tried));
+}
+
+#[test]
+fn linux_claude_stops_at_first_success() {
+    let fake = Fake::default();
+    let tried = launch::launch_claude_linux(&[], &fake);
+    assert_eq!(fake.calls(), vec!["open claude://".to_string()]);
+    assert!(launch::succeeded(&tried));
+}
+
+#[test]
+fn linux_claude_failure_has_a_clear_message() {
+    let fake = Fake::failing(&["open", "run"]);
+    let tried = launch::launch_claude_linux(&[], &fake);
+    assert!(!launch::succeeded(&tried));
+    let log = launch::log_text(&tried);
+    assert!(log.contains("not installed?") && log.contains("xdg-open claude://"));
+}
+
+#[test]
+fn linux_data_dirs_follow_the_xdg_rules() {
+    use std::ffi::OsStr;
+    let d = launch::xdg_data_dirs(Some(Path::new("/h")), None, None);
+    assert_eq!(d[0], PathBuf::from("/h/.local/share"));
+    assert_eq!(d[1], PathBuf::from("/usr/local/share"));
+    assert_eq!(d[2], PathBuf::from("/usr/share"));
+    let d = launch::xdg_data_dirs(
+        Some(Path::new("/h")),
+        Some(OsStr::new("/dh")),
+        Some(OsStr::new("/a:/b")),
+    );
+    assert_eq!(&d[..3], &[PathBuf::from("/dh"), "/a".into(), "/b".into()]);
+}
+
+fn fake_path(names: &[&str]) -> (TempDir, std::ffi::OsString) {
+    let t = local_with(&[], &[]);
+    for n in names {
+        std::fs::write(t.join(n), b"x").unwrap();
+    }
+    let p = t.path().as_os_str().to_owned();
+    (t, p)
+}
+
+#[test]
+fn linux_terminal_discovery_order() {
+    let (t, path) = fake_path(&[
+        "xterm",
+        "konsole",
+        "gnome-terminal",
+        "x-terminal-emulator",
+        "mine",
+    ]);
+    let names = |v: Vec<(PathBuf, &'static str)>| -> Vec<String> {
+        v.iter()
+            .map(|(p, f)| format!("{} {f}", p.file_name().unwrap().to_string_lossy()))
+            .collect()
+    };
+    let got = names(launch::linux_terminals(Some("mine".as_ref()), Some(&path)));
+    assert_eq!(
+        got,
+        [
+            "mine -e",
+            "x-terminal-emulator -e",
+            "gnome-terminal --",
+            "konsole -e",
+            "xterm -e"
+        ]
+    );
+    // without $TERMINAL, and with a $TERMINAL that is not there
+    let got = names(launch::linux_terminals(Some("nope".as_ref()), Some(&path)));
+    assert_eq!(got[0], "x-terminal-emulator -e");
+    assert!(launch::linux_terminals(None, Some("/nonexistent".as_ref())).is_empty());
+    drop(t);
+}
+
+#[test]
+fn linux_grok_runs_cli_in_first_working_terminal() {
+    let terms = vec![(PathBuf::from("/t/a"), "-e"), (PathBuf::from("/t/b"), "--")];
+    let fake = Fake::failing(&["/t/a"]);
+    let tried = launch::launch_grok_linux(Some(Path::new("/h/.grok/bin/grok")), &terms, &fake);
+    assert_eq!(
+        fake.calls(),
+        vec![
+            "run /t/a -e /h/.grok/bin/grok".to_string(),
+            "run /t/b -- /h/.grok/bin/grok".to_string()
+        ]
+    );
+    assert!(launch::succeeded(&tried));
+}
+
+#[test]
+fn linux_grok_messages_when_cli_or_terminal_is_missing() {
+    let fake = Fake::default();
+    let terms = vec![(PathBuf::from("/t/a"), "-e")];
+    let no_cli = launch::launch_grok_linux(None, &terms, &fake);
+    assert!(!launch::succeeded(&no_cli));
+    assert!(launch::log_text(&no_cli).contains("Grok CLI was not found"));
+    let no_term = launch::launch_grok_linux(Some(Path::new("/g")), &[], &fake);
+    assert!(launch::log_text(&no_term).contains("no terminal emulator"));
+    assert!(fake.calls().is_empty());
 }
