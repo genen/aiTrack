@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The platform notifier: native Windows toasts (Windows.UI.Notifications), `osascript` banners on
-//! macOS, a logging no-op elsewhere.
+//! macOS, `notify-send` banners on Linux (log fallback).
 //!
 //! An unpackaged desktop app must identify itself to the notification system with an
 //! AppUserModelID. We register `aiTrack` under
@@ -42,7 +42,78 @@ pub fn default_notifier() -> Arc<dyn Notifier> {
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
-        Arc::new(crate::alerts::LogNotifier)
+        Arc::new(LinuxNotifier)
+    }
+}
+
+/// Longest title and body (in characters) handed to `notify-send`.
+pub const NOTIFY_TITLE_MAX: usize = 120;
+pub const NOTIFY_BODY_MAX: usize = 500;
+
+fn clean_notify_text(s: &str, max: usize) -> String {
+    let mut out: String = s
+        .chars()
+        .filter(|c| !c.is_control() || *c == '\n')
+        .take(max)
+        .collect();
+    if s.chars().filter(|c| !c.is_control() || *c == '\n').count() > max {
+        out.pop();
+        out.push('\u{2026}');
+    }
+    out
+}
+
+/// The argument list (without the program name) for `notify-send` showing `n`. Passed as separate
+/// argv entries, never through a shell; title and body come after `--` so a leading dash cannot be
+/// taken for an option. Control characters are dropped (a NUL cannot be passed at all), long text is
+/// cut, and the body is XML-escaped because notification daemons render a markup subset.
+pub fn notify_send_args(n: &Notification) -> Vec<String> {
+    let urgency = match n.kind {
+        AlertKind::Info | AlertKind::Recovery => "low",
+        _ => "normal",
+    };
+    let mut args = vec![
+        "--app-name=aiTrack".to_string(),
+        format!("--urgency={urgency}"),
+        "--icon=aitrack".to_string(),
+    ];
+    if !(n.kind.important() && n.options.sounds) {
+        args.push("--hint=boolean:suppress-sound:true".to_string());
+    }
+    let body = clean_notify_text(&n.body, NOTIFY_BODY_MAX)
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    args.push("--".to_string());
+    args.push(clean_notify_text(&n.title, NOTIFY_TITLE_MAX));
+    args.push(body);
+    args
+}
+
+/// Linux banners through `notify-send` (libnotify-bin; GNOME plays its own sound). Falls back to the
+/// log when the program is missing or fails. UNVERIFIED on a real desktop.
+#[cfg(not(any(windows, target_os = "macos")))]
+struct LinuxNotifier;
+
+#[cfg(not(any(windows, target_os = "macos")))]
+impl Notifier for LinuxNotifier {
+    fn notify(&self, n: &Notification) -> Result<(), String> {
+        let fallback = |why: String| {
+            crate::alerts::log_line(&why);
+            crate::alerts::LogNotifier.notify(n)
+        };
+        match std::process::Command::new("notify-send")
+            .args(notify_send_args(n))
+            .output()
+        {
+            Ok(out) if out.status.success() => Ok(()),
+            Ok(out) => fallback(format!(
+                "notify-send failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            )),
+            Err(e) => fallback(format!("notify-send could not start: {e}")),
+        }
     }
 }
 

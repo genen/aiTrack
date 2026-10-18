@@ -27,6 +27,7 @@ mod grok_bot;
 mod grok_refresh;
 mod instance;
 mod launch;
+mod linux_sources;
 mod live;
 mod macos_bundle;
 mod pace;

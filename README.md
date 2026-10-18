@@ -1,9 +1,10 @@
 # aiTrack
 
-aiTrack is a small window for **Windows** and **macOS** that shows how much of your **Claude** and **Grok** plan
+aiTrack is a small window for **Windows**, **macOS** and **Linux** that shows how much of your **Claude** and **Grok** plan
 limits you have used. It stays on top of your other windows, updates by itself, and warns you with a normal system
-notification before a limit runs out. The Mac version is a beta for Apple silicon (see
-[section 15](#15-known-limits-and-roadmap)). Where this guide names Windows or Mac, it applies to that system only.
+notification before a limit runs out. The Mac version is for Apple silicon. Linux (new) is a first release for Ubuntu
+that has not yet been run on a real desktop by the maintainer (see [section 15](#15-known-limits-and-roadmap)). Where
+this guide names Windows, Mac or Linux, it applies to that system only.
 
 ![aiTrack in the dark theme](docs/img/home-dark.png)
 ![aiTrack in the light theme](docs/img/home-light.png)
@@ -43,7 +44,7 @@ aiTrack puts those numbers in one small window:
 - a warning when you are on course to run out before the reset;
 - a history chart for each limit;
 - a Stats view with your token use and cost per project;
-- notifications (Windows toasts or Mac banners) at 75 %, 90 % and 100 %.
+- notifications (Windows toasts, Mac banners or Linux desktop notifications) at 75 %, 90 % and 100 %.
 
 It runs on your computer and reads files that Claude and Grok already keep there. It only talks to the internet when
 those files have nothing recent (see [Files and privacy](#12-files-and-privacy)). A tool's block appears only
@@ -57,7 +58,8 @@ when that tool is installed.
 > fallback is not yet tested on the owner's PC.
 
 Release status: 0.3.0 is the first official release, tested on Windows (0.2.0 was an earlier test release). The Mac
-version is a beta (0.3.2-beta). You can download an installer, a portable zip or a Mac disk image (see
+version has been checked on one Apple silicon Mac. Linux (new) has not yet been run on a real desktop by the
+maintainer. You can download an installer, a portable zip, a Mac disk image or a Linux `.deb` (see
 [section 3](#3-install-and-run)) or build it from source. aiTrack is free software under the GNU General Public
 License, version 3 or later (see `LICENSE`).
 
@@ -65,20 +67,24 @@ License, version 3 or later (see `LICENSE`).
 
 - **Windows**: Windows 10 or 11. (The notifications use Windows 10 features. I have not tested older versions.)
 - **Mac**: a Mac with Apple silicon (M1 or later) on the latest macOS. Intel Macs are not built.
+- **Linux (new)**: Ubuntu 22.04 or newer (or a Debian-based system with the same libraries), x86_64, with a desktop
+  session. GNOME on Wayland is the main target; X11 also works. Notifications need `notify-send` (package
+  `libnotify-bin`).
 - At least one of the tools it tracks, already installed and signed in:
   - **Claude**: the Claude desktop app, or Claude Code.
   - **Grok**: the Grok command-line tool (the "Grok CLI"). See [section 5](#5-grok-needs-the-grok-cli).
-- To build it yourself: Git and Rust (steps below; on a Mac also the Xcode command line tools). You do not need Rust to run a downloaded copy.
+- To build it yourself: Git and Rust (steps below; on a Mac also the Xcode command line tools; on Linux the build tools and the X11 and Wayland development packages). You do not need Rust to run a downloaded copy.
 
 ## 3. Install and run
 
 You can download a ready-made copy (the easy way) or build it yourself from the source code. The steps below are
-for Windows; the Mac steps are in [Install on a Mac](#install-on-a-mac).
+for Windows; the Mac steps are in [Install on a Mac](#install-on-a-mac) and the Linux steps in
+[Install on Linux](#install-on-linux-new).
 
 ### Download and install (Windows)
 
 Go to the **Releases** page of the repository (https://github.com/genen/aiTrack/releases) and open the newest
-release (the one marked **Latest**). Releases marked "Pre-release" are betas. Under **Assets** there are three files:
+release (the one marked **Latest**). Releases marked "Pre-release" are test builds. Under **Assets** there are three files:
 
 - **`aiTrack-Setup-<version>-win-x64.msi`**: the installer. It installs aiTrack for all users in
   `C:\Program Files\aiTrack`, adds Start menu and desktop shortcuts, and asks for administrator permission.
@@ -182,7 +188,7 @@ that points at the exe you are running now. If you later move the exe, turn the 
 
 ### Install on a Mac
 
-Apple silicon only (M1 and later). This is a beta.
+Apple silicon only (M1 and later).
 
 **Download.** Once a Mac release is published, open the **Releases** page (https://github.com/genen/aiTrack/releases)
 and download `aiTrack-<version>-macos-arm64.dmg` (or the `.zip` with the same app inside). Open the dmg and drag
@@ -221,6 +227,33 @@ applies at your next sign in. If you later move the app, turn the setting off an
 **Uninstall.** Quit aiTrack, turn off **Start at login**, and drag `aiTrack.app` to the Bin. Your data stays in
 `~/.aitrack`; delete that folder yourself if you want it gone.
 
+### Install on Linux (new)
+
+Ubuntu 22.04 and newer, x86_64. This is a first release: it has not yet been run on a real desktop by the maintainer.
+
+**Download and install.** On the **Releases** page (https://github.com/genen/aiTrack/releases) download
+`aitrack_<version>_amd64.deb` and install it (apt resolves the libraries):
+
+```
+sudo apt install ./aitrack_<version>_amd64.deb
+```
+
+Then start **aiTrack** from the applications menu, or run `aitrack`. The package also holds this guide
+(`/usr/share/doc/aitrack/README.pdf`) and the licence.
+
+**Wayland and XWayland.** On a Wayland session (GNOME on Ubuntu) aiTrack starts through XWayland by default, because
+native Wayland has no "always on top" and lets an app neither read nor set its own window position. Set
+`AITRACK_WAYLAND=native` to run natively: the width is still remembered, but the position is not, and **Always on top**
+is not available (use the title-bar menu, Alt+Space on GNOME, per session). Under XWayland, text can look slightly soft
+with fractional display scaling.
+
+**Start at login.** In Settings > General, turn on **Start at login**. aiTrack writes
+`~/.config/autostart/aitrack.desktop` (or under `$XDG_CONFIG_HOME`). If you later move the program, turn the setting off
+and on again.
+
+**Uninstall.** `sudo apt remove aitrack`. Your data stays in `~/.aitrack`; delete that folder yourself if you want it
+gone.
+
 ## 4. What it tracks and where the numbers come from
 
 aiTrack never asks you to paste a key. It uses what the tools have already stored on your PC.
@@ -233,7 +266,8 @@ order and uses the first one that is recent:
 1. **Claude desktop app cache.** The desktop app keeps its last "usage" answer in its own cache folder. This has
    the percentages and the reset times, and needs no login. The folder is `%APPDATA%\Claude`, or for the
    Microsoft Store version `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`. On a Mac it is
-   `~/Library/Application Support/Claude`.
+   `~/Library/Application Support/Claude`. On Linux it is `$XDG_CONFIG_HOME/Claude`, else `~/.config/Claude` (Flatpak
+   and Snap folders are also checked, as a guess).
 2. **Claude desktop app history.** A second file of the app (`plan-usage-history.json`). It has percentages but no
    reset times, so aiTrack carries the reset time over from an earlier reading (see
    [Reading the window](#6-reading-the-window)).
@@ -253,6 +287,12 @@ is open. That is what I observed, not something Claude promises. If the bars sho
 usage page in the Claude app and press **Refresh now**. Source 4 reads `~/.claude/.credentials.json`, and on a Mac
 also the Keychain item "Claude Code-credentials" (macOS may ask you to allow it). I could not test the Keychain read:
 that item does not exist on the Mac I tested on.
+
+**On Linux** the Claude desktop app keeps its sign-in in the system keyring (GNOME Keyring), so
+`~/.claude/.credentials.json` may be absent. That is normal: aiTrack then shows the last reading dimmed, or "no Claude
+data found", and never an error dialog. aiTrack never reads the keyring. Whether the Linux desktop app's cache files
+parse like the Windows ones is not yet verified; if `aitrack --sources` says "usage entries found: 0", the reading falls
+back to `~/.claude.json`.
 
 **Keychain access dialog (Mac).** The first time aiTrack reads that Keychain item, macOS may ask whether to allow it;
 choose **Allow** or **Always Allow**. If the dialog is left unanswered, aiTrack waits about 10 seconds, then gives up on
@@ -296,7 +336,7 @@ Known limits:
 ## 5. Grok needs the Grok CLI
 
 aiTrack reads Grok usage from the folder of the Grok **command-line tool** (`~/.grok`, which is
-`C:\Users\<you>\.grok` on Windows and `/Users/<you>/.grok` on a Mac). The Grok desktop apps ("Grok" and "Grok Bot") do not leave anything there that aiTrack
+`C:\Users\<you>\.grok` on Windows, `/Users/<you>/.grok` on a Mac and `/home/<you>/.grok` on Linux). The Grok desktop apps ("Grok" and "Grok Bot") do not leave anything there that aiTrack
 can read. **Without the Grok CLI installed, the Grok block stays hidden.**
 
 ### Install the Grok CLI
@@ -323,6 +363,8 @@ irm https://x.ai/cli/install.ps1 | iex
 
 (`irm` downloads the script and `iex` runs it. That is why reading it first matters. Scripts change, so check
 https://x.ai/build for the current steps if this does not work.)
+
+**On Linux** run `grok` once in a terminal and sign in; aiTrack looks in `~/.grok/bin`, `~/.local/bin` and on your PATH.
 
 **On a Mac** the CLI is usually at `~/.local/bin/grok` or in `~/.grok/bin`; aiTrack looks in both and on your PATH.
 Install it with xAI's instructions at https://x.ai/build (read any install script before you run it). The Grok Bot
@@ -482,7 +524,8 @@ Click a row to open its detail pane; the chart is under **History**.
 ## 9. Alerts
 
 aiTrack sends Windows notifications (toasts) while the window is running. They are ordinary toasts that go away on
-their own. They carry the tool's logo. On a Mac they are ordinary notification banners (see **On a Mac** below).
+their own. They carry the tool's logo. On a Mac they are ordinary notification banners (see **On a Mac** below); on
+Linux they are desktop notifications (see **On Linux** below).
 
 | Alert | When | Sound |
 |---|---|---|
@@ -513,6 +556,11 @@ notifications, so aiTrack falls back to simple banners shown through Script Edit
 Script Editor's name and icon, and their sound setting is under Script Editor in System Settings > Notifications.
 A **Focus** mode such as Sleep or Do Not Disturb hides the banners. **Send a test toast** is the quickest check.
 
+**On Linux** alerts are desktop notifications sent with `notify-send` (package `libnotify-bin`, recommended by the
+`.deb`). If it is missing, the alert is only written to `~/.aitrack/notify.log`. GNOME plays its own notification
+sound, so **Alert sounds** only reminds you of that; Do Not Disturb hides the banners. **Send a test toast** is the
+quickest check.
+
 ## 10. Settings
 
 Click the sliders icon. The sections can be collapsed; **General** is open at first and the others are collapsed.
@@ -527,11 +575,11 @@ At the bottom: **Back**, a **Help** link (it opens this page), and the build lin
   your PC has a recent reading. Every minute may hit rate limits.
 - **Custom (minutes)**: any number of minutes, 1 to 1440.
 - **Local refresh (seconds)**: how often aiTrack re-reads the files of the Claude app. Default 60, allowed 15 to 600.
-- **Start with Windows** (on a Mac **Start at login**): start aiTrack when you sign in.
+- **Start with Windows** (on a Mac or Linux **Start at login**): start aiTrack when you sign in.
 
 **Appearance**
 
-- **Theme**: **System** (follows Windows or macOS), **Dark** or **Light**.
+- **Theme**: **System** (follows Windows, macOS or the desktop), **Dark** or **Light**.
 - **Logos**: the look of the logo squares: **Auto** (dark logos on a dark window, light logos on a light one),
   **Filled**, **Dark** or **Light**.
 
@@ -539,7 +587,8 @@ At the bottom: **Back**, a **Help** link (it opens this page), and the build lin
 
 - **Show remaining**: show what is left instead of what is used.
 - **Window position**: the window reopens where you left it. **Reset** forgets the position.
-- **Always on top**: keep the window above other windows (on by default).
+- **Always on top**: keep the window above other windows (on by default). On Linux under native Wayland it shows
+  "Not available on native Wayland" (see [Install on Linux](#install-on-linux-new)).
 - **Show Claude** and **Show Grok**: **Auto** (show it when the tool is found on this PC; the line under the name says
   "Found on this PC", on a Mac "Found on this Mac", or "Not found"), **On** (always show it) or **Off** (never).
 - **Refresh Grok now**: starts the Grok CLI in the background to fetch fresh Grok usage. This row only appears when
@@ -583,6 +632,10 @@ Clicking a tool's logo in the window opens that tool. Hover the logo to see "Ope
 **On a Mac** the same order is used, started with `open -a`: the Claude app, and for Grok the Grok Bot app, then the
 Grok app, then the Grok CLI in a new Terminal window in your home folder.
 
+**On Linux** the Claude badge tries `xdg-open claude://`, then the `claude-desktop` command, then a `claude*.desktop`
+entry (through `gio` or `gtk-launch`). The Grok badge runs the Grok CLI in a terminal (`$TERMINAL`,
+`x-terminal-emulator`, `gnome-terminal`, `konsole`, then `xterm`). It only opens the terminal; it never types anything.
+
 If nothing could be started, the status bar says "Could not launch Claude desktop" or "Could not launch Grok". What was
 tried is written to `~/.aitrack/launch.log`.
 
@@ -606,7 +659,7 @@ aiTrack keeps its own files in `C:\Users\<you>\.aitrack\` (written `~/.aitrack`)
 | `toast-icons\` | the logos used in notifications |
 | `aitrack.lock`, `aitrack.pid` | make sure only one window runs |
 
-On a Mac the folder is `/Users/<you>/.aitrack`, with the same files.
+On a Mac the folder is `/Users/<you>/.aitrack` and on Linux `/home/<you>/.aitrack`, with the same files.
 
 Deleting a file while aiTrack is closed resets what it holds. For example, deleting `usage.jsonl` removes your Claude
 history. The files grow slowly and are never trimmed.
@@ -688,11 +741,29 @@ The cache changes only when the Claude app fetches your usage. Open its usage pa
 Only the raw program (not the `.app`) needs this, once, to raise the first window. Allow it, or start aiTrack from
 the `.app`, where macOS handles it.
 
+**Linux: the Claude bars say "no Claude data found", or Claude looks signed out.**
+The desktop app keeps its sign-in in the system keyring, so a missing `~/.claude/.credentials.json` is normal. Run
+`aitrack --sources` and look at the Linux folders it lists; "usage entries found: 0" means the cache layout differs
+from the Windows one and aiTrack falls back to `~/.claude.json`. Then press **Refresh now** after opening the usage page
+in the Claude app.
+
+**Linux: no notifications appear.**
+Install `libnotify-bin` (`sudo apt install libnotify-bin`) and check that Do Not Disturb is off. Without `notify-send`
+alerts go to `~/.aitrack/notify.log` only.
+
+**Linux: the window cannot stay on top or forgets its position.**
+You are probably on native Wayland (`AITRACK_WAYLAND=native`), which allows neither. Remove that variable to use the
+default XWayland mode.
+
+**Linux: clicking a badge does nothing.**
+The status bar says what failed, and `~/.aitrack/launch.log` lists what was tried. For Grok, the Grok CLI must be
+installed (section 5) and a terminal emulator must exist.
+
 ### Copy the Diagnostics log safely
 
 Settings > Diagnostics > **Copy log** copies the build line and the recent rows. It has no sign-in tokens and no
 organisation ids. It can contain **file paths**, and paths include your user name (for example
-`C:\Users\<you>\.claude\.credentials.json`, or `/Users/<you>/.claude/.credentials.json` on a Mac). Read what you copied and replace your user name before you post it in
+`C:\Users\<you>\.claude\.credentials.json`, or `/Users/<you>/.claude/.credentials.json` on a Mac, or `/home/<you>/.claude/.credentials.json` on Linux). Read what you copied and replace your user name before you post it in
 public.
 
 ## 14. Command-line flags
@@ -707,7 +778,7 @@ before them, for example `cargo run --release -- --sources`.
 | `--interval MIN` | collector poll interval in minutes (default 15; headless only) |
 | `--data PATH` | the usage file to use (default `~/.aitrack/usage.jsonl`) |
 | `--projects [7\|30\|all]` | print per-project token and cost usage from local transcripts (default 7), no message content |
-| `--sources` | explain where usage data is found: paths, file structure and ages, no ids or tokens |
+| `--sources` | explain where usage data is found: paths, file structure and ages, no ids or tokens (on Linux: the folders checked, existence and entry counts only) |
 | `-V`, `--version` | print the version, build number, commit and date |
 | `-h`, `--help` | show the short help |
 
@@ -715,8 +786,11 @@ before them, for example `cargo run --release -- --sources`.
 
 Limits you should know about:
 
-- **Windows is the most tested system; the Mac version is a beta** (Apple silicon, latest macOS). There is no Linux
-  version yet: the program may compile there, but launching apps, notifications and Start at login are not done.
+- **Windows is the most tested system.** The Mac version (Apple silicon, latest macOS) has been checked on one Mac.
+  **Linux (new)** is a first release (Ubuntu 22.04 and newer, x86_64, `.deb`) that has not yet been run on a real
+  desktop by the maintainer: window placement, notifications, Start at login, badge launching and the Claude cache
+  layout on Linux are built from documentation and tests with fakes, not verified. Native Wayland has no
+  always-on-top and no remembered position (XWayland is the default).
 - **The downloads are not code-signed yet.** Windows shows "Unknown publisher" (see section 3). The Mac app is not
   signed with a developer identity or notarized, so macOS asks you to approve it once.
 - **Mac, checked on one Apple silicon Mac:** the numbers, alerts with the aiTrack icon and sound, Start at login
@@ -735,8 +809,8 @@ Limits you should know about:
 - The history files are never trimmed.
 - Only Claude and Grok are supported.
 
-Roadmap, in this order: the Windows release (done), the Mac version (now in beta), then a Linux version, then more
-tools (Gemini, ChatGPT).
+Roadmap, in this order: the Windows release (done), the Mac version (done), the Linux version (new, first release),
+then more tools (Gemini, ChatGPT).
 
 ---
 

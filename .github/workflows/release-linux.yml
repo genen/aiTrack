@@ -1,0 +1,225 @@
+name: Build and release Linux deb
+
+# Ubuntu 22.04 and newer, x86_64 (.deb). Pull requests and branch runs build, check and test only.
+# No secrets are used.
+# A release is published when a v<version> tag is pushed (v0.3.1-beta, v1.0.0), or when the workflow is run by
+# hand with a tag. A hand run builds the chosen branch and the release is created on that commit if it does not
+# exist. <version> must be exactly the version in Cargo.toml. A -beta version is a pre-release.
+# The release is shared with the Windows and macOS workflows: whichever runs first creates it, the other
+# adds its files.
+on:
+  push:
+    tags: ['v*.*.*-*', 'v*.*.*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to publish, for example v0.3.1-beta. It must match the version in Cargo.toml. Leave blank to build and test without publishing.
+        required: false
+        type: string
+      replace:
+        description: Replace the files if the release already has them.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One run at a time per tag or branch. A release run is never cancelled part way.
+concurrency:
+  group: release-linux-${{ inputs.tag || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+      channel: ${{ steps.version.outputs.channel }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # the build number in the app (aitrack --version) is the commit count
+          fetch-depth: 0
+
+      - name: Read the version
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml | head -n 1)
+          if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::No valid version found in Cargo.toml (got '$version')."
+            exit 1
+          fi
+          tag=""
+          if [ "$REF_TYPE" = "tag" ]; then tag="$REF_NAME"
+          elif [ -n "${INPUT_TAG// /}" ]; then tag=$(printf '%s' "$INPUT_TAG" | tr -d '[:space:]'); fi
+          publish=false
+          if [ -n "$tag" ]; then
+            publish=true
+            if [ "$tag" != "v$version" ]; then
+              echo "::error::Tag $tag does not match the version in Cargo.toml. Tag the commit as v$version, or change the version in Cargo.toml first."
+              exit 1
+            fi
+          fi
+          channel=stable
+          if printf '%s\n' "$version" | grep -Eq '(^|[.-])beta($|[.-])'; then channel=beta; fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "publish=$publish"
+            echo "channel=$channel"
+          } >> "$GITHUB_OUTPUT"
+          echo "Version $version ($channel). Publish: $publish."
+
+      - name: Install build tools and libraries
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev \
+            libxrandr-dev libxi-dev libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-x11-dev pkg-config \
+            fonts-dejavu-core python3-venv
+          # The PDF step prints with Google Chrome, which GitHub's Ubuntu runners have preinstalled.
+          # (Ubuntu's chromium packages are snap stubs and do not work in CI.)
+          command -v google-chrome || { echo "::error::google-chrome not found on the runner."; exit 1; }
+
+      - name: Set up Rust
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustc --version
+          minor=$(rustc --version | sed -n 's/^rustc 1\.\([0-9]*\)\..*/\1/p')
+          if [ -z "$minor" ] || [ "$minor" -lt 89 ]; then
+            echo "::error::Rust 1.89 or newer is needed (rust-version in Cargo.toml), found: $(rustc --version)"
+            exit 1
+          fi
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        env:
+          AITRACK_NO_SPAWN: "1"  # tests never start real programs
+        run: cargo test
+
+      - name: Build the release binary
+        run: cargo build --release
+
+      - name: Check the release binary
+        run: |
+          set -euo pipefail
+          file target/release/aitrack
+          if grep -q 'test hooks' target/release/aitrack; then
+            echo "::error::aitrack was built with the test-hooks feature."
+            exit 1
+          fi
+          ldd target/release/aitrack
+
+      - name: Make README.pdf (never committed)
+        run: ./scripts/readme-pdf.sh
+
+      - name: Build the deb
+        run: ./scripts/make-linux-deb.sh
+
+      - name: Check the deb carries the binary, desktop file, README.md, README.pdf, LICENSE and docs/img
+        run: |
+          set -euo pipefail
+          deb="dist/aitrack_$(echo "${{ steps.version.outputs.version }}" | sed 's/-/~/')_amd64.deb"
+          ./scripts/linux-contents-check.sh deb "$deb"
+          dpkg-deb -I "$deb"
+
+      - name: Keep the deb
+        uses: actions/upload-artifact@v7
+        with:
+          name: aiTrack-${{ steps.version.outputs.version }}-linux-amd64-deb
+          path: dist/aitrack_*_amd64.deb
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Get the deb
+        uses: actions/download-artifact@v8
+        with:
+          name: aiTrack-${{ needs.build.outputs.version }}-linux-amd64-deb
+
+      - name: Publish on the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+          CHANNEL: ${{ needs.build.outputs.channel }}
+          REPLACE: ${{ inputs.replace || false }}
+        run: |
+          set -euo pipefail
+          debver=$(printf '%s' "$VERSION" | sed 's/-/~/')
+          deb="aitrack_${debver}_amd64.deb"
+          title="aiTrack ${VERSION}"
+          if [ "$CHANNEL" = "beta" ]; then kind="--prerelease"; first="${title} (pre-release)"; else kind="--latest"; first="${title}"; fi
+          test -s "$deb" || { echo "::error::$deb was not downloaded from the build."; exit 1; }
+
+          {
+            echo "Linux: Ubuntu 22.04 and newer, x86_64 (.deb). Install with: \`sudo apt install ./$deb\`. GNOME on Wayland runs through XWayland by default."
+            echo
+            echo "Linux SHA256:"
+            echo '```'
+            sha256sum "$deb"
+            echo '```'
+          } > linux-notes.md
+
+          # The tag has to point at the commit this run built.
+          if commit=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha 2>/dev/null) && [ "$commit" != "$GITHUB_SHA" ]; then
+            echo "::error::Tag $TAG points at $commit, but this run built $GITHUB_SHA."
+            exit 1
+          fi
+
+          # The Windows and macOS workflows make the same release. If it is not there yet, create it; if the other
+          # workflow creates it first (create fails), fall through and add to it.
+          if ! gh release view "$TAG" --json tagName > /dev/null 2>&1; then
+            { echo "${first}"; echo; cat linux-notes.md; } > notes.md
+            if gh release create "$TAG" "$deb" --target "$GITHUB_SHA" --title "$title" --notes-file notes.md "$kind"; then
+              exit 0
+            fi
+            echo "Release creation failed, probably another run created it first. Adding to it."
+            gh release view "$TAG" --json tagName > /dev/null
+          fi
+
+          # The release exists: never overwrite a file unless the run asked for it.
+          existing=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+          for f in "$deb"; do
+            if printf '%s\n' "$existing" | grep -Fxq "$f"; then
+              if [ "$REPLACE" != "true" ]; then
+                echo "::error::$TAG already has $f. Run the workflow by hand with Replace checked to overwrite it."
+                exit 1
+              fi
+            fi
+          done
+          gh release upload "$TAG" "$deb" --clobber
+
+          # Add the Linux notes to the existing text, once (the other runs append their sections the same way).
+          body=$(gh release view "$TAG" --json body --jq .body)
+          if ! printf '%s\n' "$body" | grep -Fq "Linux SHA256:"; then
+            { printf '%s\n\n' "$body"; cat linux-notes.md; } > notes.md
+            gh release edit "$TAG" --notes-file notes.md
+          fi

@@ -3,6 +3,31 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.3.15-beta] - 2026-10-18
+
+### Added
+- Linux (experimental, first `.deb` package, untested on a real desktop):
+  - Start at login writes an XDG autostart file (`~/.config/autostart/aitrack.desktop`, honours `XDG_CONFIG_HOME`).
+  - Alerts are shown as desktop notifications through `notify-send` (log fallback if it is missing).
+  - Settings wording for Start at login and Alert sounds (GNOME plays its own sound).
+  - Clicking the Claude badge opens the desktop app (`xdg-open claude://`, then `claude-desktop`, then a `claude*.desktop`
+    entry via gio/gtk-launch). Clicking the Grok badge opens the Grok CLI in a terminal (`$TERMINAL`,
+    `x-terminal-emulator`, `gnome-terminal`, `konsole`, `xterm`).
+  - Launch attempts are logged to `launch.log` and honour `AITRACK_NO_SPAWN`; a short status message shows when nothing
+    could be started.
+  - On a Wayland session aiTrack starts through XWayland by default, so "Always on top" and the remembered window
+    position work; `AITRACK_WAYLAND=native` selects native Wayland (width is remembered, position and always-on-top are
+    not available). Falls back to native Wayland if the X display socket is missing.
+  - The window sets its app id to `aitrack` so GNOME matches it to `aitrack.desktop`. Settings shows "Not available on
+    native Wayland" under Always on top when running natively on Wayland.
+  - `aitrack --sources` lists the Linux folders checked (existence and entry counts only) and notes that a missing
+    credentials file is normal (login is in the keyring). Guessed Flatpak and Snap data folders for the Claude desktop
+    app are checked when present.
+  - `.deb` packaging (`scripts/make-linux-deb.sh`) and a Linux release workflow; Linux shares the version and tag with
+    Windows and Mac.
+- Tests: Linux launcher, autostart, notification, placement and source-folder cases using temp-dir trees and fake
+  spawners.
+
 ## [0.3.14-beta] - 2026-10-18
 
 ### Fixed

@@ -476,3 +476,56 @@ fn a_denied_permission_is_respected_and_an_undecided_one_waits() {
         FailureAction::Osascript
     );
 }
+
+// ---------------------------------------------------------------- Linux notify-send arguments
+
+#[test]
+fn notify_send_args_are_fixed_options_then_dash_dash_then_title_and_body() {
+    let a = notify_send_args(&Notification::new("T", "B", AlertKind::Warning));
+    assert_eq!(a[0], "--app-name=aiTrack");
+    assert_eq!(a[1], "--urgency=normal");
+    assert_eq!(a[2], "--icon=aitrack");
+    assert_eq!(&a[a.len() - 3..], ["--", "T", "B"]);
+    let low = notify_send_args(&Notification::new("T", "B", AlertKind::Info));
+    assert_eq!(low[1], "--urgency=low");
+    assert!(low.contains(&"--hint=boolean:suppress-sound:true".to_string()));
+}
+
+#[test]
+fn notify_send_text_cannot_become_an_option_or_a_second_command() {
+    let n = Notification::new(
+        "--urgency=critical",
+        "-h x; rm -rf ~ $(id) `id` \"q\" 'q' <b>&\nline2\u{0}\u{7}",
+        AlertKind::Limit,
+    );
+    let a = notify_send_args(&n);
+    let dd = a.iter().position(|s| s == "--").unwrap();
+    assert_eq!(
+        a.len(),
+        dd + 3,
+        "title and body are single entries after --"
+    );
+    assert_eq!(a[dd + 1], "--urgency=critical"); // stays text
+    assert!(a[dd + 2].starts_with("-h x; rm -rf ~ $(id) `id` \"q\" 'q' &lt;b&gt;&amp;\nline2"));
+    assert!(!a[dd + 2].contains('\u{0}') && !a[dd + 2].contains('\u{7}'));
+    assert!(a[..dd].iter().all(|s| s.starts_with("--")));
+}
+
+#[test]
+fn notify_send_text_is_cut_to_a_sane_length() {
+    let n = Notification::new("t".repeat(10_000), "b".repeat(100_000), AlertKind::Info);
+    let a = notify_send_args(&n);
+    assert_eq!(a[a.len() - 2].chars().count(), NOTIFY_TITLE_MAX);
+    assert_eq!(a[a.len() - 1].chars().count(), NOTIFY_BODY_MAX);
+}
+
+#[test]
+fn with_spawning_disabled_the_default_notifier_runs_no_program() {
+    // AITRACK_NO_SPAWN is set by scripts/test.sh and CI; the notifier then only logs.
+    if aitrack::launch::spawning_disabled() {
+        let n = default_notifier();
+        assert!(n
+            .notify(&Notification::new("t", "b", AlertKind::Info))
+            .is_ok());
+    }
+}

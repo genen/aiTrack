@@ -168,9 +168,49 @@ pub fn desktop_history_candidates(env: &Env) -> Vec<PathBuf> {
                 .xdg_config_home
                 .clone()
                 .unwrap_or_else(|| home.join(".config"));
-            vec![cfg.join("Claude").join(HISTORY_NAME)]
+            let mut v = vec![cfg.join("Claude").join(HISTORY_NAME)];
+            v.extend(
+                linux_sandbox_data_dirs(&home)
+                    .into_iter()
+                    .map(|d| d.join(HISTORY_NAME)),
+            );
+            v
         }
     }
+}
+
+/// GUESSES, never verified on a real machine: where a sandboxed Claude desktop package would keep
+/// its Electron data. Flatpak: `~/.var/app/<app id>/config/Claude` (the app id is unknown, so every
+/// app folder whose name contains "claude" is tried). Snap: `~/snap/<name>/current/.config/Claude`
+/// (same name rule). Only folders that exist are returned, so a normal install gains no candidates.
+pub fn linux_sandbox_data_dirs(home: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for (root, tail) in [
+        (home.join(".var").join("app"), vec!["config", "Claude"]),
+        (home.join("snap"), vec!["current", ".config", "Claude"]),
+    ] {
+        let mut names: Vec<PathBuf> = std::fs::read_dir(&root)
+            .map(|rd| {
+                rd.filter_map(Result::ok)
+                    .filter(|e| {
+                        e.file_name()
+                            .to_string_lossy()
+                            .to_ascii_lowercase()
+                            .contains("claude")
+                    })
+                    .map(|e| e.path())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        for n in names {
+            let d = tail.iter().fold(n, |p, t| p.join(t));
+            if d.is_dir() {
+                out.push(d);
+            }
+        }
+    }
+    out
 }
 
 /// `$CLAUDE_CONFIG_DIR/.claude.json` (if set), then `~/.claude.json`.
@@ -863,6 +903,51 @@ fn fmt_pct(p: Option<f64>) -> String {
     p.map(|v| format!("{v}")).unwrap_or_else(|| "-".into())
 }
 
+/// Number of entries directly inside a folder (names are never printed).
+fn count_entries(p: &Path) -> Option<usize> {
+    std::fs::read_dir(p).ok().map(|rd| rd.count())
+}
+
+/// Linux only: the folders checked and whether each exists, with entry counts. Names and
+/// contents of files are never printed.
+fn linux_folders(env: &Env, line: &mut impl FnMut(String)) {
+    let home = env.home.clone().unwrap_or_default();
+    let show = |p: &Path| match count_entries(p) {
+        Some(n) => format!("[exists ] {} ({n} entries)", p.display()),
+        None => format!("[missing] {}", p.display()),
+    };
+    line("linux folders checked:".into());
+    let cfg = env
+        .xdg_config_home
+        .clone()
+        .unwrap_or_else(|| home.join(".config"));
+    line(format!(
+        "   config base ($XDG_CONFIG_HOME or ~/.config): {}",
+        cfg.display()
+    ));
+    for d in desktop_data_dirs(env) {
+        line(format!("   Claude desktop app data: {}", show(&d)));
+        line(format!(
+            "   Claude desktop app cache: {}",
+            show(&cache_dir_of(&d))
+        ));
+    }
+    let sandbox = linux_sandbox_data_dirs(&home);
+    line(format!(
+        "   Flatpak/Snap Claude folders (guessed locations, only listed if present): {}",
+        sandbox.len()
+    ));
+    line(format!(
+        "   Claude Code folder: {}",
+        show(&crate::detect::claude_code_dir(env))
+    ));
+    line(
+        "   note: the desktop app keeps its sign-in in the system keyring, so a missing \
+         ~/.claude/.credentials.json is normal and is not an error"
+            .into(),
+    );
+}
+
 /// Human-readable diagnostic for `--sources`. Prints structure only: file paths, counts, field
 /// names, ages and the two percentages. Never organisation ids, tokens or other file contents.
 pub fn diagnose(env: &Env, now: DateTime<Utc>) -> String {
@@ -875,6 +960,9 @@ pub fn diagnose(env: &Env, now: DateTime<Utc>) -> String {
         "aiTrack sources (tried in this order; a sample must be at most {MAX_AGE_MIN} min old)"
     ));
     line(format!("platform: {:?}", env.os));
+    if env.os == Os::Linux {
+        linux_folders(env, &mut line);
+    }
     line(String::new());
 
     // --- desktop cache

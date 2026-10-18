@@ -212,6 +212,190 @@ pub fn describe(saved: Option<&WindowPos>, outcome: &Result<((f32, f32), f32), D
     }
 }
 
+// ---- Linux: display backend and what position handling each one allows ----------------------
+
+/// Which display backend the window should start under (Linux only; the decision is pure so it
+/// can be tested, [`crate::ui::run`] applies it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendChoice {
+    /// Not a Wayland session (or nothing to choose between): let winit pick.
+    Auto,
+    /// Wayland session, X display available: start through XWayland, so "always on top" and
+    /// remembering the window position work (the default).
+    XWayland,
+    /// Native Wayland: no always-on-top, no window position (size only).
+    NativeWayland,
+}
+
+/// The environment values the backend choice depends on (`None` or empty = not set).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DisplayEnv<'a> {
+    pub wayland_display: Option<&'a str>,
+    pub xdg_session_type: Option<&'a str>,
+    pub display: Option<&'a str>,
+    /// `AITRACK_WAYLAND`: `native` (or `wayland`, `1`) asks for native Wayland.
+    pub aitrack_wayland: Option<&'a str>,
+}
+
+fn set(v: Option<&str>) -> bool {
+    v.is_some_and(|s| !s.trim().is_empty())
+}
+
+/// Pick the backend. Wayland session + X display = XWayland unless `AITRACK_WAYLAND=native`.
+pub fn choose_backend(e: &DisplayEnv) -> BackendChoice {
+    let wayland_session = set(e.wayland_display)
+        || e.xdg_session_type
+            .is_some_and(|t| t.trim().eq_ignore_ascii_case("wayland"));
+    if !wayland_session {
+        return BackendChoice::Auto;
+    }
+    let wants_native = e.aitrack_wayland.is_some_and(|v| {
+        matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "native" | "wayland" | "1" | "true"
+        )
+    });
+    if !set(e.wayland_display) {
+        // no Wayland socket to connect to: only an X display can work
+        return BackendChoice::Auto;
+    }
+    if wants_native || !set(e.display) {
+        BackendChoice::NativeWayland
+    } else {
+        BackendChoice::XWayland
+    }
+}
+
+/// Socket file of a local X display (`:0`, `:1.0`, `unix:0`); `None` for a remote host or an
+/// unparsable value (then the display is assumed to work and winit finds out).
+pub fn x_socket_path(display: &str) -> Option<std::path::PathBuf> {
+    let d = display.trim();
+    let d = d.strip_prefix("unix").unwrap_or(d);
+    let rest = d.strip_prefix(':')?;
+    let num = rest.split('.').next()?;
+    if num.is_empty() || !num.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(std::path::PathBuf::from(format!("/tmp/.X11-unix/X{num}")))
+}
+
+/// How much of the window place can be used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PosMode {
+    /// Windows and macOS: position and width, checked against the monitors.
+    Full,
+    /// X11 / XWayland: trust a sane saved point, the window manager clamps it.
+    Trust,
+    /// Native Wayland: clients cannot read or set their position; only the width is kept.
+    WidthOnly,
+}
+
+impl PosMode {
+    pub fn of(b: BackendChoice) -> Self {
+        match b {
+            BackendChoice::NativeWayland => PosMode::WidthOnly,
+            _ => PosMode::Trust,
+        }
+    }
+}
+
+static MODE: std::sync::OnceLock<PosMode> = std::sync::OnceLock::new();
+
+/// Record the mode for this run (first call wins). Not set = [`PosMode::Full`].
+pub fn set_mode(m: PosMode) {
+    let _ = MODE.set(m);
+}
+
+pub fn mode() -> PosMode {
+    MODE.get().copied().unwrap_or(PosMode::Full)
+}
+
+/// Native Wayland cannot keep a window above others; the Settings row says so.
+pub fn on_top_unavailable() -> bool {
+    mode() == PosMode::WidthOnly
+}
+
+/// A saved point on X11 is trusted inside these generous bounds (points); the window manager
+/// moves it further if needed.
+const TRUST_X: (f64, f64) = (-4000.0, 16000.0);
+const TRUST_Y: (f64, f64) = (-100.0, 16000.0);
+
+/// The place to ask for when reopening on Linux: a position (X11 only) and the width.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LinuxPlace {
+    pub pos: Option<(f32, f32)>,
+    pub width: f32,
+}
+
+/// Linux restore rule. `Trust`: a non-sentinel point inside sane bounds is used as saved, an
+/// absurd one keeps only the width. `WidthOnly`: x/y are never applied.
+pub fn linux_place(saved: &WindowPos, mode: PosMode) -> Result<LinuxPlace, Discard> {
+    let width = saved
+        .width
+        .filter(|w| w.is_finite())
+        .unwrap_or(DEFAULT_WIDTH)
+        .clamp(MIN_WIDTH, MAX_WIDTH) as f32;
+    match mode {
+        PosMode::WidthOnly => Ok(LinuxPlace { pos: None, width }),
+        _ => {
+            if is_sentinel(saved.x, saved.y) {
+                return Err(Discard::Sentinel);
+            }
+            let sane = (TRUST_X.0..=TRUST_X.1).contains(&saved.x)
+                && (TRUST_Y.0..=TRUST_Y.1).contains(&saved.y);
+            Ok(LinuxPlace {
+                pos: sane.then_some((saved.x as f32, saved.y as f32)),
+                width,
+            })
+        }
+    }
+}
+
+/// One-line description for `notify.log` (numbers only).
+pub fn describe_linux(saved: &WindowPos, r: &Result<LinuxPlace, Discard>) -> String {
+    match r {
+        Ok(LinuxPlace {
+            pos: Some((x, y)),
+            width,
+        }) => {
+            format!("window: restored saved position ({x:.0}, {y:.0}), width {width:.0}")
+        }
+        Ok(LinuxPlace { pos: None, width }) => {
+            format!("window: restored width {width:.0} only (no usable position on this display)")
+        }
+        Err(d) => format!(
+            "window: discarded saved position ({:.0}, {:.0}): {}",
+            saved.x,
+            saved.y,
+            d.text()
+        ),
+    }
+}
+
+/// Build the per-frame sample for the tracker. `Full` needs the outer position (as before);
+/// `Trust` the same; `WidthOnly` takes the width alone and stores a constant (0, 0), because the
+/// position is not known or meaningful there.
+pub fn sample_for(
+    mode: PosMode,
+    outer_min: Option<(f64, f64)>,
+    inner_width: Option<f64>,
+    scale: f64,
+    minimized: bool,
+) -> Option<Sample> {
+    let width = inner_width?;
+    let (x, y) = match mode {
+        PosMode::WidthOnly => (0.0, 0.0),
+        _ => outer_min?,
+    };
+    Some(Sample {
+        x,
+        y,
+        width,
+        scale,
+        minimized,
+    })
+}
+
 /// A Cocoa screen as `NSScreen` reports it: points, origin at the bottom-left of the primary
 /// screen, y growing upwards.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -480,5 +664,163 @@ mod sys {
 
     pub fn monitors() -> Vec<Monitor> {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod linux_tests {
+    use super::*;
+
+    fn env<'a>(
+        w: Option<&'a str>,
+        t: Option<&'a str>,
+        d: Option<&'a str>,
+        a: Option<&'a str>,
+    ) -> DisplayEnv<'a> {
+        DisplayEnv {
+            wayland_display: w,
+            xdg_session_type: t,
+            display: d,
+            aitrack_wayland: a,
+        }
+    }
+
+    #[test]
+    fn wayland_with_x_display_defaults_to_xwayland() {
+        let e = env(Some("wayland-0"), Some("wayland"), Some(":0"), None);
+        assert_eq!(choose_backend(&e), BackendChoice::XWayland);
+    }
+
+    #[test]
+    fn native_switch_wins() {
+        for v in ["native", "Native", "wayland", "1"] {
+            let e = env(Some("wayland-0"), Some("wayland"), Some(":0"), Some(v));
+            assert_eq!(choose_backend(&e), BackendChoice::NativeWayland, "{v}");
+        }
+        let e = env(Some("wayland-0"), Some("wayland"), Some(":0"), Some("x11"));
+        assert_eq!(choose_backend(&e), BackendChoice::XWayland);
+    }
+
+    #[test]
+    fn wayland_without_x_display_is_native() {
+        let e = env(Some("wayland-0"), Some("wayland"), None, None);
+        assert_eq!(choose_backend(&e), BackendChoice::NativeWayland);
+        let e = env(Some("wayland-0"), None, Some(""), None);
+        assert_eq!(choose_backend(&e), BackendChoice::NativeWayland);
+    }
+
+    #[test]
+    fn non_wayland_sessions_are_left_to_winit() {
+        assert_eq!(
+            choose_backend(&env(None, Some("x11"), Some(":0"), None)),
+            BackendChoice::Auto
+        );
+        assert_eq!(
+            choose_backend(&env(None, None, None, None)),
+            BackendChoice::Auto
+        );
+        // session says wayland but there is no socket to connect to
+        assert_eq!(
+            choose_backend(&env(None, Some("wayland"), Some(":0"), None)),
+            BackendChoice::Auto
+        );
+        assert_eq!(
+            choose_backend(&env(Some(" "), None, Some(":0"), Some("native"))),
+            BackendChoice::Auto
+        );
+    }
+
+    #[test]
+    fn x_socket_paths() {
+        let p = |d: &str| x_socket_path(d).map(|p| p.to_string_lossy().into_owned());
+        assert_eq!(p(":0").as_deref(), Some("/tmp/.X11-unix/X0"));
+        assert_eq!(p(":12.1").as_deref(), Some("/tmp/.X11-unix/X12"));
+        assert_eq!(p("unix:1").as_deref(), Some("/tmp/.X11-unix/X1"));
+        assert_eq!(p("host:0"), None);
+        assert_eq!(p(":"), None);
+        assert_eq!(p(":a"), None);
+    }
+
+    fn saved(x: f64, y: f64, w: Option<f64>) -> WindowPos {
+        WindowPos {
+            x,
+            y,
+            width: w,
+            scale: Some(1.0),
+        }
+    }
+
+    #[test]
+    fn trust_mode_uses_sane_points_and_keeps_width() {
+        let r = linux_place(&saved(1210.0, 96.0, Some(330.0)), PosMode::Trust).unwrap();
+        assert_eq!(
+            r,
+            LinuxPlace {
+                pos: Some((1210.0, 96.0)),
+                width: 330.0
+            }
+        );
+        // second monitor to the left is fine
+        let r = linux_place(&saved(-1500.0, 40.0, None), PosMode::Trust).unwrap();
+        assert_eq!(r.pos, Some((-1500.0, 40.0)));
+        assert_eq!(r.width, DEFAULT_WIDTH as f32);
+    }
+
+    #[test]
+    fn trust_mode_drops_absurd_points_but_keeps_width() {
+        let r = linux_place(&saved(20000.0, 10.0, Some(300.0)), PosMode::Trust).unwrap();
+        assert_eq!(r.pos, None);
+        assert_eq!(r.width, 300.0);
+        let r = linux_place(&saved(10.0, -5000.0, Some(300.0)), PosMode::Trust).unwrap();
+        assert_eq!(r.pos, None);
+    }
+
+    #[test]
+    fn trust_mode_rejects_the_sentinel() {
+        assert_eq!(
+            linux_place(&saved(-32000.0, -32000.0, Some(300.0)), PosMode::Trust),
+            Err(Discard::Sentinel)
+        );
+        assert_eq!(
+            linux_place(&saved(f64::NAN, 1.0, None), PosMode::Trust),
+            Err(Discard::Sentinel)
+        );
+    }
+
+    #[test]
+    fn width_only_never_applies_a_position() {
+        let r = linux_place(&saved(1210.0, 96.0, Some(5000.0)), PosMode::WidthOnly).unwrap();
+        assert_eq!(r.pos, None);
+        assert_eq!(r.width, MAX_WIDTH as f32);
+        let r = linux_place(&saved(0.0, 0.0, Some(100.0)), PosMode::WidthOnly).unwrap();
+        assert_eq!(r.width, MIN_WIDTH as f32);
+    }
+
+    #[test]
+    fn samples_per_mode() {
+        let outer = Some((10.0, 20.0));
+        let s = sample_for(PosMode::Full, outer, Some(310.0), 1.0, false).unwrap();
+        assert_eq!((s.x, s.y, s.width), (10.0, 20.0, 310.0));
+        assert!(sample_for(PosMode::Trust, None, Some(310.0), 1.0, false).is_none());
+        let s = sample_for(PosMode::WidthOnly, None, Some(310.0), 1.0, false).unwrap();
+        assert_eq!((s.x, s.y, s.width), (0.0, 0.0, 310.0));
+        assert!(sample_for(PosMode::WidthOnly, outer, None, 1.0, false).is_none());
+    }
+
+    #[test]
+    fn pos_mode_follows_backend() {
+        assert_eq!(
+            PosMode::of(BackendChoice::NativeWayland),
+            PosMode::WidthOnly
+        );
+        assert_eq!(PosMode::of(BackendChoice::XWayland), PosMode::Trust);
+        assert_eq!(PosMode::of(BackendChoice::Auto), PosMode::Trust);
+    }
+
+    #[test]
+    fn describe_has_no_surprises() {
+        let sv = saved(1.0, 2.0, Some(300.0));
+        let r = linux_place(&sv, PosMode::WidthOnly);
+        assert!(describe_linux(&sv, &r).contains("width 300 only"));
     }
 }

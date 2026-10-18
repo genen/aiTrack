@@ -75,5 +75,5 @@ fn the_real_launcher_reports_failure_and_logs() {
     std::env::remove_var("AITRACK_LAUNCH_LOG");
     assert!(std::fs::read_to_string(&log_file)
         .unwrap()
-        .contains("protocol"));
+        .contains("claude://"));
 }

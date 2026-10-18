@@ -50,8 +50,8 @@ main() {
       mnt="$(mktemp -d)"
       hdiutil attach -readonly -nobrowse -noverify -mountpoint "$mnt" "$file" >/dev/null
       echo "Contents of $(basename "$file"):"
-      ls -la "$mnt" | sed 's/^/  /'
-      ls -R "$mnt/docs" 2>/dev/null | sed 's/^/  /' || true
+      find "$mnt" -maxdepth 1 -mindepth 1 -exec ls -ld {} + | sed 's/^/  /'
+      find "$mnt/docs" 2>/dev/null | sed 's/^/  /' || true
       ( cd "$mnt" && find . \( -type f -o -type l \) -not -name '.*' | sed 's#^\./##' ) | check_names || rc=1
       if [ -f "$mnt/README.pdf" ]; then
         check_pdf "$(wc -c < "$mnt/README.pdf" | tr -d ' ')" "$(head -c 5 "$mnt/README.pdf")" || rc=1
