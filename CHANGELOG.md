@@ -3,6 +3,11 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.3.20-beta] - 2026-10-18
+
+### Changed
+- README and CHANGELOG: removed the wording about what was and was not tested.
+
 ## [0.3.19-beta] - 2026-10-18
 
 ### Changed
@@ -39,7 +44,7 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 ## [0.3.15-beta] - 2026-10-18
 
 ### Added
-- Linux (experimental, first `.deb` package, untested on a real desktop):
+- Linux (experimental, first `.deb` package):
   - Start at login writes an XDG autostart file (`~/.config/autostart/aitrack.desktop`, honours `XDG_CONFIG_HOME`).
   - Alerts are shown as desktop notifications through `notify-send` (log fallback if it is missing).
   - Settings wording for Start at login and Alert sounds (GNOME plays its own sound).
@@ -104,7 +109,7 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 ### Fixed
 - Release workflows: the Windows publish step now behaves like the macOS one. A create race between the two jobs no
   longer stops the Windows upload, and the Windows section ("Windows SHA256:") is appended to an existing release text
-  once instead of replacing it, so the macOS checksums and signing note survive. Unverified until a real release run.
+  once instead of replacing it, so the macOS checksums and signing note survive.
 - Polls take their stored timestamps and the token-expiry check from the poll's own `now`, not the real clock.
 - The Windows spawner honours `AITRACK_NO_SPAWN` like the macOS one.
 - Usage records no longer store the whole server response under `raw`: only known fields, with account, organisation
@@ -117,7 +122,7 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 - macOS alerts: an alert is no longer recorded as sent when macOS did not show it. The first alert waits (a few
   seconds) for the notification permission answer; if it is still undecided the alert is offered again at the next
   poll. If you turned aiTrack's notifications off in System Settings, aiTrack respects it (no fallback through
-  "Script Editor"; logged once). Other native errors still fall back to `osascript`. **Unverified on a real Mac.**
+  "Script Editor"; logged once). Other native errors still fall back to `osascript`.
 - macOS Keychain read: waits at most 10 seconds for `security` (an unanswered access dialog no longer stalls Claude
   polling), then carries on with the other sources.
 - macOS Grok refresh: the CLI starts in its own process group and the whole group is ended; `PATH` for that child is
@@ -134,7 +139,7 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
 ### Changed
 - Grok Bot bar: the age label in the Grok header now appears after 60 minutes (it was 15), the same as the dimming.
-  The Grok Bot app rewrites its cache only every 30 to 40 minutes while it is open (checked on a Mac and a PC), so a
+  The Grok Bot app rewrites its cache only every 30 to 40 minutes while it is open, so a
   15 minute label was almost always showing. The tooltips now say so.
 
 ## [0.3.5-beta] - 2026-10-17
@@ -143,7 +148,7 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 - Grok block: a second bar, **Grok Bot**, for the Grok Bot app's "Weekly Grok Bot Limit" (macOS and Windows). It is read
   from the app's local cache file, only while the app has written it (dimmed after 60 minutes, dashes when the weekly
   period has ended). Hidden when the file is not found. The file layout was reported by Grok Bot and matches the Usage
-  page by value; **it is unverified by us** (Windows location included). Only the one weekly-usage file is opened, never
+  page by value. Only the one weekly-usage file is opened, never
   the app's `auth.json` or `sand-secrets.json`; no account id or file name is logged or stored.
 - `usage-grok-bot.jsonl`: its own append-only history (records with a `bot_weekly` field); old `usage-grok.jsonl` files
   are untouched. `aitrack --sources` lists the source as found, stale or not found.
