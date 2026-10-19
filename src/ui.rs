@@ -152,6 +152,12 @@ pub struct AitrackUi {
     plan_versions: Option<(u64, u64)>,
     /// Screen rect of each range choice of the Stats view (for tests / the render tool).
     pub stats_rects: Vec<(String, Rect)>,
+    /// Screen rect of the header's shrink button from the last frame (tests / the render tool).
+    pub shrink_rect: Option<Rect>,
+    /// The small-window state the window was last set up for (decorations, level, size limits).
+    small_sent: Option<bool>,
+    /// The inner height last requested for the small window.
+    small_h_sent: Option<f32>,
 }
 
 fn theme_pref(t: ThemeChoice) -> egui::ThemePreference {
@@ -237,6 +243,10 @@ impl AitrackUi {
             plan_range: StatsRange::Last30d,
             plan_versions: None,
             stats_rects: vec![],
+            shrink_rect: None,
+            // the window was built for the saved mode (see `run`)
+            small_sent: Some(SMALL_SUPPORTED && first.small),
+            small_h_sent: None,
         }
     }
 
@@ -328,7 +338,9 @@ impl AitrackUi {
             info.minimized.unwrap_or(false),
         );
         if let Some(s) = self.tracker.observe(Instant::now(), sample) {
-            self.app.settings.set_window(Some(s.to_pos()));
+            self.app
+                .settings
+                .set_window(Some(self.keep_full_width(s.to_pos())));
         }
         if self.tracker.pending() {
             ctx.request_repaint_after(crate::placement::SETTLE + Duration::from_millis(150));
@@ -338,8 +350,20 @@ impl AitrackUi {
     /// Save the window place once more on exit (if it changed since the last save).
     pub fn flush_window(&mut self) {
         if let Some(s) = self.tracker.flush() {
-            self.app.settings.set_window(Some(s.to_pos()));
+            self.app
+                .settings
+                .set_window(Some(self.keep_full_width(s.to_pos())));
         }
+    }
+
+    /// The small window shares the full window's place but not its width: while small, the saved
+    /// width stays the full window's.
+    fn keep_full_width(&self, mut pos: crate::settings::WindowPos) -> crate::settings::WindowPos {
+        let v = self.app.settings.get();
+        if SMALL_SUPPORTED && v.small {
+            pos.width = v.window.and_then(|w| w.width);
+        }
+        pos
     }
 
     /// "Reset window position": forget the saved place and move the window to the default spot.
@@ -358,6 +382,97 @@ impl AitrackUi {
                 .unwrap_or(1.0) as f64,
             minimized: false,
         }));
+    }
+
+    /// Set the window up for small or full mode when the mode changes: no title bar and a
+    /// smaller minimum while small; back to the saved width (the height re-fits) when full.
+    fn apply_small(&mut self, ctx: &Context, small: bool) {
+        if self.small_sent == Some(small) {
+            return;
+        }
+        self.small_sent = Some(small);
+        self.small_h_sent = None;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(!small));
+        if small {
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(vec2(
+                view::SMALL_WINDOW_W,
+                40.0,
+            )));
+        } else {
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(vec2(
+                MIN_WINDOW_W,
+                view::MIN_WINDOW_H,
+            )));
+            let w = self
+                .app
+                .settings
+                .get()
+                .window
+                .and_then(|w| w.width)
+                .map_or(view::default_inner_size_pt().0, |w| w as f32);
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(
+                w,
+                view::default_inner_size_pt().1,
+            )));
+            // the home view fits itself again
+            self.fits.remove(&Screen::Home);
+            self.size_for = None;
+        }
+        ctx.request_repaint();
+    }
+
+    /// The small window: only the vendor blocks, a hair of border, no title bar. Dragging any part
+    /// moves the window, a single click does nothing, a double-click goes back to the full window.
+    fn draw_small(
+        &mut self,
+        ctx: &Context,
+        pal: &Palette,
+        st: &State,
+        home: &view::HomeView,
+        vendors: &[Vendor],
+    ) {
+        let mut content_h = 0.0;
+        egui::CentralPanel::default()
+            .frame(
+                Frame::new()
+                    .fill(pal.background)
+                    .inner_margin(Margin::same(SMALL_BORDER as i8)),
+            )
+            .show(ctx, |ui| {
+                // under everything else, so the rows (hover only) keep their tooltips
+                let bg = ui.interact(
+                    ui.max_rect(),
+                    ui.id().with("small-window"),
+                    Sense::click_and_drag(),
+                );
+                if bg.drag_started() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
+                if bg.double_clicked() {
+                    self.app.settings.set_small(false);
+                }
+                let top = ui.cursor().top();
+                if home.empty.is_some() {
+                    ui.label(
+                        RichText::new("No AI tools found (double-click for details)")
+                            .font(prop(11.5))
+                            .color(pal.muted),
+                    );
+                } else {
+                    self.vendor_stack(ui, pal, st, home, vendors, true);
+                }
+                content_h = ui.cursor().top() - top;
+            });
+        let h = (content_h + 2.0 * SMALL_BORDER).ceil();
+        if self.small_h_sent.is_none_or(|s| (s - h).abs() > 1.0) {
+            self.small_h_sent = Some(h);
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(
+                view::SMALL_WINDOW_W,
+                h,
+            )));
+        }
+        let soon = st.collector.next_in.is_some_and(|n| n < 90.0);
+        ctx.request_repaint_after(Duration::from_secs(if soon { 1 } else { 5 }));
     }
 
     /// Draw one frame.
@@ -384,9 +499,12 @@ impl AitrackUi {
             self.theme_sent = Some(st.settings.theme);
             ctx.set_theme(theme_pref(st.settings.theme));
         }
-        if self.on_top_sent != Some(st.settings.on_top) {
-            self.on_top_sent = Some(st.settings.on_top);
-            let level = if st.settings.on_top {
+        let small = SMALL_SUPPORTED && st.settings.small;
+        self.apply_small(ctx, small);
+        let on_top = st.settings.on_top || small;
+        if self.on_top_sent != Some(on_top) {
+            self.on_top_sent = Some(on_top);
+            let level = if on_top {
                 egui::WindowLevel::AlwaysOnTop
             } else {
                 egui::WindowLevel::Normal
@@ -413,6 +531,11 @@ impl AitrackUi {
                 };
                 ctx.request_repaint_after(Duration::from_millis(500));
             }
+        }
+
+        if small {
+            self.draw_small(ctx, &pal, &st, &home, &vendors);
+            return;
         }
 
         let status_h = egui::TopBottomPanel::bottom("status")
@@ -622,6 +745,17 @@ impl AitrackUi {
                 {
                     self.app.refresh();
                 }
+                if SMALL_SUPPORTED {
+                    let shrink = icon_button(ui, pal, Icon::Shrink, false, false);
+                    self.shrink_rect = Some(shrink.rect);
+                    if shrink
+                        .on_hover_text("Small window (double-click it to come back)")
+                        .clicked()
+                    {
+                        self.screen = Screen::Home;
+                        self.app.settings.set_small(true);
+                    }
+                }
             });
         });
     }
@@ -693,7 +827,9 @@ impl AitrackUi {
         let top = ui.cursor().top();
         let out = egui::ScrollArea::vertical()
             .auto_shrink([false, true])
-            .show(ui, |ui| self.vendor_stack(ui, pal, st, home, vendors));
+            .show(ui, |ui| {
+                self.vendor_stack(ui, pal, st, home, vendors, false)
+            });
         top + out.content_size.y
     }
 
@@ -705,6 +841,7 @@ impl AitrackUi {
         st: &State,
         home: &view::HomeView,
         vendors: &[Vendor],
+        small: bool,
     ) {
         let remaining = st.settings.remaining();
         let n = home.vendors.len();
@@ -737,8 +874,10 @@ impl AitrackUi {
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    let launchable =
-                        self.launch_enabled && matches!(vv.id, VendorId::Claude | VendorId::Grok);
+                    // in the small window a click does nothing (the window is dragged by any part)
+                    let launchable = !small
+                        && self.launch_enabled
+                        && matches!(vv.id, VendorId::Claude | VendorId::Grok);
                     let variant = st.settings.badge_style;
                     if vendor_header(ui, pal, vv, launchable, variant, &mut self.badge_rects) {
                         let launcher = if vv.id == VendorId::Grok {
@@ -755,6 +894,11 @@ impl AitrackUi {
                         50.0
                     };
                     for row in &vv.rows {
+                        if small {
+                            let resp = small_row_widget(ui, pal, row, vv.id, value_w, strip_x);
+                            resp.on_hover_ui(|ui| tooltip(ui, pal, row));
+                            continue;
+                        }
                         let open = if row.secondary {
                             self.bot_expanded
                         } else {
@@ -775,6 +919,9 @@ impl AitrackUi {
                             }
                         }
                         resp.on_hover_ui(|ui| tooltip(ui, pal, row));
+                    }
+                    if small {
+                        return;
                     }
                     if vv.id == VendorId::Grok {
                         self.grok_refresh_line(ui, pal, st);
@@ -1761,7 +1908,7 @@ pub fn run(app: Arc<App>) -> eframe::Result {
             crate::view::default_inner_size_pt().0,
             crate::view::default_inner_size_pt().1,
         ))
-        .with_min_inner_size([270.0, crate::view::MIN_WINDOW_H])
+        .with_min_inner_size([MIN_WINDOW_W, crate::view::MIN_WINDOW_H])
         .with_icon(app_icon());
     if cfg!(target_os = "linux") {
         // GNOME matches the window to aitrack.desktop (StartupWMClass=aitrack) by this id
@@ -1797,7 +1944,15 @@ pub fn run(app: Arc<App>) -> eframe::Result {
             viewport = viewport.with_inner_size([p.width, crate::view::default_inner_size_pt().1]);
         }
     }
-    if on_top {
+    let small = SMALL_SUPPORTED && app.settings.get().small;
+    if small {
+        // the small window: no title bar, floating, sized to its content on the first frame
+        viewport = viewport
+            .with_decorations(false)
+            .with_min_inner_size([crate::view::SMALL_WINDOW_W, 40.0])
+            .with_inner_size([crate::view::SMALL_WINDOW_W, crate::view::SMALL_WINDOW_H]);
+    }
+    if on_top || small {
         viewport = viewport.with_always_on_top();
     }
     #[allow(unused_mut)]
@@ -2278,6 +2433,7 @@ enum Icon {
     Refresh,
     Sliders,
     Bars,
+    Shrink,
 }
 
 fn icon_button(ui: &mut Ui, pal: &Palette, icon: Icon, active: bool, spin: bool) -> Response {
@@ -2349,6 +2505,21 @@ fn icon_button(ui: &mut Ui, pal: &Palette, icon: Icon, active: bool, spin: bool)
             p.circle_stroke(q(16.0, 7.0), 1.6, st);
             p.circle_stroke(q(8.0, 17.0), 1.6, st);
         }
+        Icon::Shrink => {
+            // two arrows pointing in from opposite corners, each with an L-shaped head
+            let o = c - vec2(7.5, 7.5);
+            let q = |x: f32, y: f32| o + vec2(x, y) * (15.0 / 24.0);
+            p.line_segment([q(20.0, 4.0), q(14.0, 10.0)], st);
+            p.add(Shape::line(
+                vec![q(14.0, 5.0), q(14.0, 10.0), q(19.0, 10.0)],
+                st,
+            ));
+            p.line_segment([q(4.0, 20.0), q(10.0, 14.0)], st);
+            p.add(Shape::line(
+                vec![q(5.0, 14.0), q(10.0, 14.0), q(10.0, 19.0)],
+                st,
+            ));
+        }
     }
     resp
 }
@@ -2410,6 +2581,12 @@ const DIAG_ROWS_SHOWN: usize = 8;
 
 const STACK_RADIUS: u8 = 10;
 const STRIPE_W: f32 = 4.0;
+/// Smallest width of the full window (points).
+const MIN_WINDOW_W: f32 = 270.0;
+/// The small window is Windows only for now (the owner tries it there before Mac and Linux).
+const SMALL_SUPPORTED: bool = cfg!(windows);
+/// Border around the vendor blocks in the small window (points).
+const SMALL_BORDER: f32 = 2.0;
 
 const BADGE: f32 = 18.0;
 
@@ -2825,6 +3002,69 @@ fn row_widget(
         Pos2::new(rect.left() + strip_x, cy - 4.0),
         Pos2::new(
             (rect.right() - value_w - 6.0).max(rect.left() + strip_x + 10.0),
+            cy + 4.0,
+        ),
+    );
+    if row.stale {
+        led_dashes(p, strip, pal.muted);
+    } else {
+        led_strip(p, strip, &row.cells, color, pal.dark);
+    }
+    resp
+}
+
+/// Width of the small window's time column (`33h 10m`, `\u{221e}`).
+const SMALL_TIME_W: f32 = 56.0;
+
+/// One meter row of the small window: like [`row_widget`] plus the time column, and hover only
+/// (a click or drag goes to the window behind it).
+fn small_row_widget(
+    ui: &mut Ui,
+    pal: &Palette,
+    row: &view::Row,
+    vendor: VendorId,
+    value_w: f32,
+    strip_x: f32,
+) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
+    let p = ui.painter();
+    let color = pal.level(vendor, row.level);
+    let cy = rect.center().y;
+    p.text(
+        Pos2::new(rect.left() + 2.0, cy),
+        Align2::LEFT_CENTER,
+        row.label,
+        prop(11.5),
+        pal.muted,
+    );
+    let color = if row.dim {
+        color.gamma_multiply(0.55)
+    } else {
+        color
+    };
+    if let Some(t) = &row.time {
+        let tcol = if t.warn { pal.red } else { pal.foreground };
+        p.text(
+            Pos2::new(rect.right() - 2.0, cy),
+            Align2::RIGHT_CENTER,
+            &t.text,
+            mono(11.5),
+            tcol,
+        );
+    }
+    let value_right = rect.right() - 2.0 - SMALL_TIME_W;
+    let vcol = if row.value == "--" { pal.muted } else { color };
+    p.text(
+        Pos2::new(value_right, cy),
+        Align2::RIGHT_CENTER,
+        &row.value,
+        mono(12.0),
+        vcol,
+    );
+    let strip = Rect::from_min_max(
+        Pos2::new(rect.left() + strip_x, cy - 4.0),
+        Pos2::new(
+            (value_right - value_w - 4.0).max(rect.left() + strip_x + 10.0),
             cy + 4.0,
         ),
     );

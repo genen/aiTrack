@@ -3,6 +3,14 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.2-beta] - Unreleased
+
+### Added
+- Windows: a small window. The new shrink button in the header turns the window into just the vendor meters, with no
+  title bar, always on top. Beside each meter is how long until it runs out at the current pace (hours and minutes),
+  or ∞ when it lasts past the reset. Drag it to move it; double-click it to go back to the full window. aiTrack
+  remembers the mode and opens in it next time.
+
 ## [0.5.1] - 2026-10-18
 
 The first stable release: the -beta suffix is dropped, and the release is published as a normal (latest) release.

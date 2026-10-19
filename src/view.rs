@@ -196,6 +196,59 @@ pub struct Row {
     /// [`Kind`] windows: clicking it opens its own detail pane ([`build_bot_detail`]) charting its
     /// own history, and the UI tracks it separately from `expanded`.
     pub secondary: bool,
+    /// Small mode's time column: the reset countdown, or the estimated time until the window runs
+    /// out when the pace would empty it first. `None` when neither is known.
+    pub time: Option<RowTime>,
+}
+
+/// The small window's time beside a meter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RowTime {
+    /// `1h 12m` (runs out in, at this pace), `limit`, or [`INFINITY`] (lasts past the reset).
+    pub text: String,
+    /// Runs out before the reset (drawn as a warning).
+    pub warn: bool,
+}
+
+/// Shown when the pace would last past the reset.
+pub const INFINITY: &str = "\u{221e}";
+
+/// `45m`, `3h 05m`, `33h 10m`: hours and minutes, never days.
+pub fn hours_minutes(hours: f64) -> String {
+    let mins = js_round(hours.max(0.0) * 60.0) as i64;
+    if mins < 60 {
+        format!("{}m", mins.max(1))
+    } else {
+        format!("{}h {:02}m", mins / 60, mins % 60)
+    }
+}
+
+/// The small window's time for a gauge, from the pace the tooltip uses: hours and minutes until
+/// the window runs out when that comes before its reset, [`INFINITY`] when it lasts past the
+/// reset. `None` without a pace and a reset time to compare (and for an old reading).
+pub fn row_time(g: &Gauge, old: bool) -> Option<RowTime> {
+    if old {
+        return None;
+    }
+    if g.pct >= 100.0 && g.hours_left.is_some() {
+        return Some(RowTime {
+            text: "limit".into(),
+            warn: true,
+        });
+    }
+    // the same test as the tooltip's "Limit in ~... at this pace"
+    if let (Some(htl), Some(hl)) = (g.hours_to_limit, g.hours_left) {
+        if htl < hl {
+            return Some(RowTime {
+                text: hours_minutes(htl),
+                warn: true,
+            });
+        }
+    }
+    (g.hours_left.is_some() && g.rate_per_hour.is_some()).then(|| RowTime {
+        text: INFINITY.into(),
+        warn: false,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -550,6 +603,7 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
                 },
             )],
             secondary: false,
+            time: None,
         };
     };
     if g.reset_passed && v.current {
@@ -578,6 +632,7 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
                 Tone::Warn,
             )],
             secondary: false,
+            time: None,
         };
     }
     if !v.current {
@@ -606,6 +661,7 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
             dim: false,
             tip: tipv,
             secondary: false,
+            time: None,
         };
     }
     let old = is_old(v, now);
@@ -682,6 +738,7 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
         dim: old,
         tip: t,
         secondary: false,
+        time: row_time(g, old),
     }
 }
 
@@ -716,6 +773,7 @@ pub fn bot_row(b: &crate::grok_bot::BotReading, remaining: bool, now: DateTime<U
                 tip(from, Tone::Muted),
             ],
             secondary: true,
+            time: None,
         };
     }
     let hours = (b.resets_at - now).num_milliseconds() as f64 / 3.6e6;
@@ -748,6 +806,8 @@ pub fn bot_row(b: &crate::grok_bot::BotReading, remaining: bool, now: DateTime<U
         dim: stale,
         tip: t,
         secondary: true,
+        // the Grok Bot reading has no pace
+        time: None,
     }
 }
 
@@ -1380,6 +1440,10 @@ pub fn chart_data(
 
 /// Shortest the auto-fitted window gets (logical points).
 pub const MIN_WINDOW_H: f32 = 120.0;
+/// Width of the small window (points): the full window's default, so the meters keep their size.
+pub const SMALL_WINDOW_W: f32 = 310.0;
+/// The small window's first height before it fits its content (points).
+pub const SMALL_WINDOW_H: f32 = 160.0;
 /// Longest the Settings / Stats views auto-fit to (logical points), whatever the monitor.
 pub const SCROLL_VIEW_MAX_PT: f32 = 640.0;
 /// ... and never more than this share of the monitor's height.

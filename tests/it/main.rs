@@ -39,6 +39,7 @@ mod prune_script;
 mod release_review;
 mod review;
 mod settings_layout;
+mod small_window;
 mod sources;
 mod stale;
 mod stats;
