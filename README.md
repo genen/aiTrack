@@ -414,8 +414,8 @@ somewhere else, the **Refresh** button is hidden (the live billing and the log s
 
 The window has a header with three buttons, one block per tool, and a status line at the bottom.
 
-- Header buttons: **Small window** (two arrows pointing in, Windows only, see
-  [Small window](#small-window-windows)), **Refresh now** (the circular arrow, polls at once), **Stats** (the bars
+- Header buttons: **Small window** (two arrows pointing in, see
+  [Small window](#small-window)), **Refresh now** (the circular arrow, polls at once), **Stats** (the bars
   icon) and **Settings** (the sliders icon).
 - Each tool block has a logo, the tool's name and one bar per limit. Clicking the logo opens the tool
   (see [Clicking the logos](#11-clicking-the-logos)).
@@ -444,10 +444,11 @@ Hover a row to see a tooltip: when the window resets, the pace, and where the nu
 Click a row to open a detail pane with the pace, the projected use at the reset, time to the limit, window
 statistics and a [history chart](#8-history-chart). Click again to close it.
 
-### Small window (Windows)
+### Small window
 
 The small window shows only the tool blocks: no title bar, no buttons, no status line. It floats on top of other
-windows and sits on the desktop with rounded corners.
+windows and sits on the desktop with rounded corners. On Linux under native Wayland it cannot stay on top (see
+the always-on-top note in Settings).
 
 ![The small window](docs/img/small-window.png)
 

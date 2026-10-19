@@ -6,6 +6,7 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 ## [0.5.3-beta] - Unreleased
 
 ### Added
+- macOS and Linux: the small window (it was Windows only in 0.5.2-beta).
 - README: a section on the small window (how to open, move and close it, and what the times beside the bars mean),
   with a picture.
 

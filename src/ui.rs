@@ -245,7 +245,7 @@ impl AitrackUi {
             stats_rects: vec![],
             shrink_rect: None,
             // the window was built for the saved mode (see `run`)
-            small_sent: Some(SMALL_SUPPORTED && first.small),
+            small_sent: Some(first.small),
             small_h_sent: None,
         }
     }
@@ -360,7 +360,7 @@ impl AitrackUi {
     /// width stays the full window's.
     fn keep_full_width(&self, mut pos: crate::settings::WindowPos) -> crate::settings::WindowPos {
         let v = self.app.settings.get();
-        if SMALL_SUPPORTED && v.small {
+        if v.small {
             pos.width = v.window.and_then(|w| w.width);
         }
         pos
@@ -501,7 +501,7 @@ impl AitrackUi {
             self.theme_sent = Some(st.settings.theme);
             ctx.set_theme(theme_pref(st.settings.theme));
         }
-        let small = SMALL_SUPPORTED && st.settings.small;
+        let small = st.settings.small;
         self.apply_small(ctx, small);
         let on_top = st.settings.on_top || small;
         if self.on_top_sent != Some(on_top) {
@@ -747,16 +747,14 @@ impl AitrackUi {
                 {
                     self.app.refresh();
                 }
-                if SMALL_SUPPORTED {
-                    let shrink = icon_button(ui, pal, Icon::Shrink, false, false);
-                    self.shrink_rect = Some(shrink.rect);
-                    if shrink
-                        .on_hover_text("Small window (double-click it to come back)")
-                        .clicked()
-                    {
-                        self.screen = Screen::Home;
-                        self.app.settings.set_small(true);
-                    }
+                let shrink = icon_button(ui, pal, Icon::Shrink, false, false);
+                self.shrink_rect = Some(shrink.rect);
+                if shrink
+                    .on_hover_text("Small window (double-click it to come back)")
+                    .clicked()
+                {
+                    self.screen = Screen::Home;
+                    self.app.settings.set_small(true);
                 }
             });
         });
@@ -1952,7 +1950,7 @@ pub fn run(app: Arc<App>) -> eframe::Result {
             viewport = viewport.with_inner_size([p.width, crate::view::default_inner_size_pt().1]);
         }
     }
-    let small = SMALL_SUPPORTED && app.settings.get().small;
+    let small = app.settings.get().small;
     if small {
         // the small window: no title bar, floating, sized to its content on the first frame
         viewport = viewport
@@ -1964,11 +1962,9 @@ pub fn run(app: Arc<App>) -> eframe::Result {
         viewport = viewport.with_always_on_top();
     }
     // A window is transparent from its creation or never, and the full window can turn small at any
-    // time: so where the small window exists the window is always transparent. The full window's
+    // time: so the window is always transparent. The full window's
     // panels paint every pixel; the small window paints only its rounded blocks.
-    if SMALL_SUPPORTED {
-        viewport = viewport.with_transparent(true);
-    }
+    viewport = viewport.with_transparent(true);
     let demo = std::env::var_os("AITRACK_DEMO").is_some_and(|v| v == "1");
     if demo {
         crate::alerts::log_line("window: AITRACK_DEMO=1, showing mock vendors");
@@ -2073,13 +2069,8 @@ impl eframe::App for Window {
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        if SMALL_SUPPORTED {
-            // see the transparent viewport in `run`
-            [0.0; 4]
-        } else {
-            // eframe's own default
-            Color32::from_rgba_unmultiplied(12, 12, 12, 180).to_normalized_gamma_f32()
-        }
+        // see the transparent viewport in `run`
+        [0.0; 4]
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -2614,8 +2605,6 @@ const STACK_RADIUS: u8 = 10;
 const STRIPE_W: f32 = 4.0;
 /// Smallest width of the full window (points).
 const MIN_WINDOW_W: f32 = 270.0;
-/// The small window is Windows only for now (the owner tries it there before Mac and Linux).
-const SMALL_SUPPORTED: bool = cfg!(windows);
 /// Border around the vendor blocks in the small window (points; transparent, it only keeps the
 /// blocks' outline from being clipped).
 const SMALL_BORDER: f32 = 1.0;
