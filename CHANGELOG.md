@@ -3,6 +3,12 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.4-beta] - Unreleased
+
+### Changed
+- Every merge to `main` builds Windows, macOS and Linux (macOS and Linux used to build only on pull requests and
+  release tags). Releases are still published only from a version tag.
+
 ## [0.5.3-beta] - Unreleased
 
 ### Added
