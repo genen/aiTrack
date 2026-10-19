@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 /// Percent used at which the first (informational) alert fires.
@@ -49,6 +50,30 @@ impl AlertKind {
             self,
             AlertKind::Warning | AlertKind::Limit | AlertKind::Predictive
         )
+    }
+
+    /// The usage alerts (75 %, 90 %, limit) also bring the aiTrack window to the front.
+    pub fn raises_window(self) -> bool {
+        matches!(
+            self,
+            AlertKind::Info | AlertKind::Warning | AlertKind::Limit
+        )
+    }
+}
+
+/// Wraps a notifier: a usage alert (see [`AlertKind::raises_window`]) also sets `raise`, which the
+/// window reads to come to the front. Set whether or not the toast could be shown.
+pub struct Raising<'a> {
+    pub inner: &'a dyn Notifier,
+    pub raise: &'a AtomicBool,
+}
+
+impl Notifier for Raising<'_> {
+    fn notify(&self, n: &Notification) -> Result<(), String> {
+        if n.kind.raises_window() {
+            self.raise.store(true, Ordering::Relaxed);
+        }
+        self.inner.notify(n)
     }
 }
 

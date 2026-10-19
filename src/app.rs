@@ -2,7 +2,7 @@
 //! Everything the window needs behind one handle: history, settings, collector and a cached
 //! [`State`]. The GUI thread only calls cheap methods here; all I/O happens on the collector thread.
 
-use crate::alerts::{AlertKind, Alerts, Notification, Notifier};
+use crate::alerts::{AlertKind, Alerts, Notification, Notifier, Raising};
 use crate::collector::{Collector, PollFn};
 use crate::grok_cli::Progress;
 use crate::live::Poller;
@@ -12,6 +12,7 @@ use crate::state::{build_grok_state, build_state, GrokState, State};
 use crate::store::{History, Store};
 use chrono::Utc;
 use serde_json::Value;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -25,6 +26,8 @@ pub struct App {
     /// Grok: its own history file and collector (see [`App::with_grok`]).
     pub grok: Option<GrokPart>,
     notifier: Arc<Mutex<Arc<dyn Notifier>>>,
+    /// A usage alert fired: the window comes to the front (see [`App::take_raise`]).
+    raise: Arc<AtomicBool>,
     cache: Mutex<Option<Cached>>,
     /// Is Claude's tool installed? (stat only; `true` until the window installs the real check)
     claude_detect: Arc<Mutex<Detect>>,
@@ -290,9 +293,11 @@ impl App {
         let notifier: Arc<Mutex<Arc<dyn Notifier>>> =
             Arc::new(Mutex::new(crate::toast::default_notifier()));
         let alerts = Arc::new(Alerts::load(settings.path.with_file_name("alerts.json")));
+        let raise = Arc::new(AtomicBool::new(false));
         {
             // after every successful poll (on the collector thread): tell the user about limits
             let (h, st, n) = (history.clone(), settings.clone(), notifier.clone());
+            let up = raise.clone();
             let det = claude_detect.clone();
             collector.set_after_poll(move || {
                 let d = det.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -309,7 +314,11 @@ impl App {
                     return;
                 }
                 let notifier = n.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                alerts.evaluate("Claude", &plan, now, notifier.as_ref());
+                let raising = Raising {
+                    inner: notifier.as_ref(),
+                    raise: &up,
+                };
+                alerts.evaluate("Claude", &plan, now, &raising);
             });
         }
         Self {
@@ -318,6 +327,7 @@ impl App {
             collector,
             grok: None,
             notifier,
+            raise,
             cache: Mutex::new(None),
             stats: std::sync::OnceLock::new(),
             claude_detect,
@@ -371,6 +381,7 @@ impl App {
                 self.notifier.clone(),
                 detect.clone(),
             );
+            let up = self.raise.clone();
             collector.set_after_poll(move || {
                 let v = st.get();
                 if !v.notifications || !v.grok_on(det()) {
@@ -385,7 +396,11 @@ impl App {
                     return;
                 }
                 let notifier = n.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                alerts.evaluate("Grok", &plan, now, notifier.as_ref());
+                let raising = Raising {
+                    inner: notifier.as_ref(),
+                    raise: &up,
+                };
+                alerts.evaluate("Grok", &plan, now, &raising);
             });
         }
         self.grok = Some(GrokPart {
@@ -675,7 +690,16 @@ impl App {
         );
         // no vendor: the test toast carries the app icon
         note.options = self.settings.alert_options();
-        n.notify(&note)
+        let raising = Raising {
+            inner: n.as_ref(),
+            raise: &self.raise,
+        };
+        raising.notify(&note)
+    }
+
+    /// Did a usage alert fire since the last call? (The window then comes to the front.)
+    pub fn take_raise(&self) -> bool {
+        self.raise.swap(false, std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn set_notifications(&self, on: bool) {

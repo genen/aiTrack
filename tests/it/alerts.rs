@@ -319,6 +319,9 @@ fn the_real_collector_sends_one_toast_and_never_repeats_it_across_ticks_or_resta
     wait("the first alert", &|| !rec.titles().is_empty());
     wait("several more polls", &|| app.collector.status().polls >= 6);
     assert_eq!(rec.titles(), ["Claude session: 8% left"]);
+    // the 90 % warning also brings the window to the front, once
+    assert!(app.take_raise());
+    assert!(!app.take_raise());
     app.stop();
     app.collector.join();
 
@@ -328,6 +331,7 @@ fn the_real_collector_sends_one_toast_and_never_repeats_it_across_ticks_or_resta
     wait("poll after restart", &|| app2.collector.status().polls >= 1);
     std::thread::sleep(StdDuration::from_millis(300));
     assert!(rec2.titles().is_empty(), "{:?}", rec2.titles());
+    assert!(!app2.take_raise());
     app2.stop();
     app2.collector.join();
 
@@ -408,11 +412,45 @@ fn the_test_button_goes_through_the_notifier_and_reports_failures() {
     let (app, rec, _) = app_over_history(&t, 10.0);
     app.send_test_notification(AlertKind::Info).unwrap();
     assert_eq!(rec.titles(), ["Claude session: 75% used"]);
+    assert!(app.take_raise());
     app.set_notifier(Arc::new(Failing));
     assert_eq!(
         app.send_test_notification(AlertKind::Info).unwrap_err(),
         "toast service unavailable"
     );
+}
+
+#[test]
+fn usage_alerts_raise_the_window_and_the_others_do_not() {
+    use aitrack::alerts::Raising;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    for (kind, raises) in [
+        (AlertKind::Info, true),
+        (AlertKind::Warning, true),
+        (AlertKind::Limit, true),
+        (AlertKind::Predictive, false),
+        (AlertKind::Recovery, false),
+    ] {
+        let rec = Recorder::default();
+        let flag = AtomicBool::new(false);
+        let r = Raising {
+            inner: &rec,
+            raise: &flag,
+        };
+        r.notify(&Notification::new("t", "b", kind)).unwrap();
+        assert_eq!(flag.load(Ordering::Relaxed), raises, "{kind:?}");
+        assert_eq!(rec.titles(), ["t"], "the toast still goes out");
+    }
+    // a toast that could not be shown still raises the window
+    let flag = AtomicBool::new(false);
+    let r = Raising {
+        inner: &Failing,
+        raise: &flag,
+    };
+    assert!(r
+        .notify(&Notification::new("t", "b", AlertKind::Warning))
+        .is_err());
+    assert!(flag.load(Ordering::Relaxed));
 }
 
 #[test]

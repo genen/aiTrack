@@ -513,6 +513,16 @@ impl AitrackUi {
             };
             ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
         }
+        if self.app.take_raise() {
+            // a usage alert: un-minimise and lift the window above the others for a frame, then the
+            // next frame puts back its own level. No focus request: Windows would flash the taskbar.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+                egui::WindowLevel::AlwaysOnTop,
+            ));
+            self.on_top_sent = None;
+            ctx.request_repaint();
+        }
         let vendors = match &self.mock {
             Some(m) => m.clone(),
             None => vendor::from_state(&st),

@@ -573,6 +573,9 @@ Linux they are desktop notifications (see **On Linux** below).
 - Each alert fires **once per limit window**. aiTrack remembers what it sent in `~/.aitrack/alerts.json` (and
   `alerts-grok.json`), so restarting does not repeat it.
 - If you jump past a level, only the highest one is announced.
+- The Info, Warning and Limit alerts also bring the aiTrack window to the front (and back from the taskbar if it
+  was minimised), in the full and the small window. It does not take the keyboard focus. Native Wayland does not let
+  an app raise its own window.
 - Alerts need the window to be running. Closed means no alerts.
 - Old readings do not trigger alerts.
 
