@@ -104,3 +104,31 @@ fn hours_and_minutes_format() {
     assert_eq!(view::hours_minutes(3.0 + 5.0 / 60.0), "3h 05m");
     assert_eq!(view::hours_minutes(49.5), "49h 30m");
 }
+
+#[test]
+fn the_demo_vendors_show_both_kinds_of_time() {
+    // AITRACK_DEMO=1 previews the small window with these: one window runs out first, others last
+    use chrono::{TimeZone, Utc};
+    let now = Utc.with_ymd_and_hms(2026, 10, 19, 12, 0, 0).unwrap();
+    let vs = aitrack::vendor::demo_vendors(now);
+    let status = aitrack::collector::Status {
+        error: None,
+        polling: false,
+        next_in: None,
+        polls: 1,
+        live: false,
+        sample: None,
+    };
+    let st = aitrack::state::State::loading(Default::default(), status);
+    let home = view::build_home_for(&st, &vs, now);
+    let times: Vec<Option<RowTime>> = home
+        .vendors
+        .iter()
+        .flat_map(|v| v.rows.iter().map(|r| r.time.clone()))
+        .collect();
+    assert!(times.contains(&warn("10h 00m")), "{times:?}");
+    assert!(times
+        .iter()
+        .flatten()
+        .any(|t| t.text == view::INFINITY && !t.warn));
+}

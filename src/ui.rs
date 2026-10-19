@@ -1963,6 +1963,10 @@ pub fn run(app: Arc<App>) -> eframe::Result {
     if SMALL_SUPPORTED {
         viewport = viewport.with_transparent(true);
     }
+    let demo = std::env::var_os("AITRACK_DEMO").is_some_and(|v| v == "1");
+    if demo {
+        crate::alerts::log_line("window: AITRACK_DEMO=1, showing mock vendors");
+    }
     #[allow(unused_mut)]
     let mut opts = eframe::NativeOptions {
         viewport,
@@ -1981,9 +1985,12 @@ pub fn run(app: Arc<App>) -> eframe::Result {
         Box::new(move |cc| {
             #[cfg(target_os = "linux")]
             report_actual_backend(cc, backend);
-            Ok(Box::new(Window {
-                ui: AitrackUi::new(&cc.egui_ctx, app),
-            }))
+            let mut ui = AitrackUi::new(&cc.egui_ctx, app);
+            if demo {
+                // MOCK vendors (AITRACK_DEMO=1), to preview the look: never real data
+                ui.mock = Some(crate::vendor::demo_vendors(Utc::now()));
+            }
+            Ok(Box::new(Window { ui }))
         }),
     )
 }
