@@ -194,7 +194,7 @@ fn settings_defaults_and_an_early_format_file() {
         serde_json::from_str(&std::fs::read_to_string(dir.join("w.json")).unwrap()).unwrap();
     assert_eq!(
         written,
-        json!({"interval_min": 15.0, "local_interval_sec": 60.0, "direction": "used", "startup": false, "on_top": true, "notifications": true, "grok_enabled": null, "claude_enabled": null, "alert_sounds": true, "badge_style": "auto", "theme": "dark", "ui": {"sections": {"general": true, "appearance": false, "display": false, "notifications": false, "diagnostics": false, "about": false}}, "window": null})
+        json!({"interval_min": 15.0, "local_interval_sec": 60.0, "direction": "used", "startup": false, "on_top": true, "notifications": true, "grok_enabled": null, "claude_enabled": null, "alert_sounds": true, "badge_style": "auto", "theme": "dark", "ui": {"sections": {"general": true, "appearance": false, "display": false, "notifications": false, "diagnostics": false, "about": false}}, "window": null, "small": false})
     );
 }
 

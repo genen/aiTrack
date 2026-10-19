@@ -3,6 +3,19 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.2-beta] - Unreleased
+
+### Added
+- Windows: a small window. The new shrink button in the header turns the window into just the vendor meters, with no
+  title bar, always on top. Beside each meter is how long until it runs out at the current pace (hours and minutes),
+  or ∞ when it lasts past the reset. Drag it to move it; double-click it to go back to the full window. aiTrack
+  remembers the mode and opens in it next time.
+- `AITRACK_DEMO=1` starts aiTrack with mock vendors, to preview the look without real usage.
+
+### Fixed
+- Grok Bot: its meter now gets a pace from its saved readings, worked out the same way as Grok's: the tooltip and
+  detail pane show the pace and projection, and the bar shows where it is heading. Since 0.5.1 it had none.
+
 ## [0.5.1] - 2026-10-18
 
 The first stable release: the -beta suffix is dropped, and the release is published as a normal (latest) release.

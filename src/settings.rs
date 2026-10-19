@@ -279,6 +279,8 @@ pub struct Values {
     pub sections: Sections,
     /// Where the window was left (`None` = default placement).
     pub window: Option<WindowPos>,
+    /// Small mode: a borderless always-on-top window with only the vendor meters.
+    pub small: bool,
 }
 
 impl Default for Values {
@@ -297,6 +299,7 @@ impl Default for Values {
             theme: ThemeChoice::Dark,
             sections: Sections::default(),
             window: None,
+            small: false,
         }
     }
 }
@@ -331,6 +334,7 @@ impl Values {
             "theme": self.theme.as_str(),
             "ui": {"sections": self.sections.to_json()},
             "window": self.window.map(|w| w.to_json()),
+            "small": self.small,
         })
     }
 
@@ -359,6 +363,9 @@ impl Values {
         }
         if let Some(b) = new.get("notifications").and_then(Value::as_bool) {
             self.notifications = b;
+        }
+        if let Some(b) = new.get("small").and_then(Value::as_bool) {
+            self.small = b;
         }
         if let Some(b) = new.get("alert_sounds").and_then(Value::as_bool) {
             self.alert_sounds = b;
@@ -540,5 +547,8 @@ impl Settings {
     }
     pub fn set_on_top(&self, on: bool) -> Values {
         self.update(&json!({"on_top": on}), true)
+    }
+    pub fn set_small(&self, on: bool) -> Values {
+        self.update(&json!({"small": on}), true)
     }
 }

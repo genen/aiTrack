@@ -930,15 +930,19 @@ impl App {
         let g = self.grok.as_ref()?;
         let (status, enabled) = (g.collector.status(), settings.grok_on(g.detected()));
         let bot = g.bot.get().and_then(|b| b.latest());
-        let bot_stats = g
+        // the Grok Bot's saved readings get the same analysis as Grok's: window stats and a pace
+        let bot_plan = g
             .bot
             .get()
-            .and_then(|b| crate::view::bot_window_stats(&b.readings(), now));
+            .and_then(|b| crate::analysis::analyze(&b.readings(), now));
+        let bot_stats = bot_plan.as_ref().map(|p| p.weekly_stats.clone());
+        let bot_gauge = bot_plan.and_then(|p| p.weekly);
         match g.history.try_snapshot() {
             Some(r) => {
                 let mut s = build_grok_state(&r, status, enabled, now);
                 s.bot = bot;
                 s.bot_stats = bot_stats.clone();
+                s.bot_gauge = bot_gauge.clone();
                 Some((s, true))
             }
             None => Some(match prev {
@@ -948,12 +952,14 @@ impl App {
                     p.enabled = enabled;
                     p.bot = bot;
                     p.bot_stats = bot_stats.clone();
+                    p.bot_gauge = bot_gauge.clone();
                     (p, false)
                 }
                 None => {
                     let mut s = build_grok_state(&[], status, enabled, now);
                     s.bot = bot;
                     s.bot_stats = bot_stats.clone();
+                    s.bot_gauge = bot_gauge.clone();
                     (s, false)
                 }
             }),
