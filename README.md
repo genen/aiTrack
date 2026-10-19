@@ -1140,7 +1140,9 @@ use an administrator account use the portable zip.
 
 1. Raise the version in `Cargo.toml` (and `Cargo.lock`) and merge to `main`.
 2. Tag that commit `v<version>` exactly, for example `v0.1.4-beta`, and push the tag (or run the workflow by hand
-   from the Actions tab with that tag). The workflow stops if the tag does not match `Cargo.toml`.
+   from the Actions tab with that tag). The workflow stops if the tag does not match `Cargo.toml`. A tag push builds
+   the Windows and Linux files; the macOS workflow runs only by hand (Actions > Build and release macOS app > Run
+   workflow, with the same tag) and adds the Mac files to the release.
 3. The workflow checks formatting, clippy and the tests, builds the MSI and the zip, and publishes the release. A
    `-beta` version becomes a pre-release. It never overwrites files of an existing release unless you run it by hand
    with **Replace** ticked.

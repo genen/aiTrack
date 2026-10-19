@@ -3,6 +3,12 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.2-beta] - 2026-10-19
+
+### Changed
+- The macOS build runs only when started by hand from the Actions tab. Pull requests and release tags build Windows
+  and Linux only; a Mac build is added to a release by running the macOS workflow with the release tag.
+
 ## [0.5.1] - 2026-10-18
 
 The first stable release: the -beta suffix is dropped, and the release is published as a normal (latest) release.

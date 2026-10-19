@@ -9,11 +9,9 @@ name: Build and release macOS app
 # exist. <version> must be exactly the version in Cargo.toml. A -beta version is a pre-release; a plain version (v0.5.1) is a normal, latest release.
 # The release is shared with the Windows workflow (release-msi.yml): whichever runs first creates it, the other
 # adds its files.
+# Runs only by hand, with the owner's approval: macOS runner minutes cost ten times Linux ones, so pull requests and
+# tag pushes build Windows and Linux only. To add the Mac files to a release, run this workflow by hand with the tag.
 on:
-  push:
-    tags: ['v*.*.*-*', 'v*.*.*']
-  pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       tag:
