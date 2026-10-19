@@ -18,7 +18,9 @@ pdf="$out/README.pdf"
 rm -f "$pdf"
 
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+# Chrome's helper processes can outlive the main one and keep writing to the profile, so stop them
+# first; a leftover temp folder must not fail the build once the PDF is written.
+trap 'pkill -f "$tmp/profile" 2>/dev/null; sleep 1; rm -rf "$tmp" 2>/dev/null || true' EXIT
 
 py=python3
 if ! "$py" -c 'import markdown' 2>/dev/null; then
