@@ -3,19 +3,19 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
-## [0.5.4-beta] - Unreleased
+## [0.5.3] - 2026-10-19
 
-### Changed
-- Every merge to `main` builds Windows, macOS and Linux (macOS and Linux used to build only on pull requests and
-  release tags). Releases are still published only from a version tag.
-
-## [0.5.3-beta] - Unreleased
+The small window on Windows, macOS and Linux, as a stable version.
 
 ### Added
 - macOS and Linux: the small window (it was Windows only in 0.5.2-beta).
 - The 75 %, 90 % and limit alerts bring the aiTrack window to the front (un-minimised, without taking the focus).
 - README: a section on the small window (how to open, move and close it, and what the times beside the bars mean),
   with a picture.
+
+### Changed
+- Every merge to `main` builds Windows, macOS and Linux (macOS and Linux used to build only on pull requests and
+  release tags). Releases are still published only from a version tag.
 
 ## [0.5.2-beta] - 2026-10-19
 
