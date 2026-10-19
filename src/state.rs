@@ -53,6 +53,8 @@ pub struct GrokState {
     pub bot: Option<crate::grok_bot::BotReading>,
     /// Window statistics of the Grok Bot's saved weekly readings (see `view::bot_window_stats`).
     pub bot_stats: Option<crate::analysis::WindowStats>,
+    /// The Grok Bot's weekly gauge worked out from its saved readings (its pace), like Grok's own.
+    pub bot_gauge: Option<crate::analysis::Gauge>,
 }
 
 pub fn build_state(
@@ -231,5 +233,6 @@ pub fn build_grok_state(
         enabled,
         bot: None,
         bot_stats: None,
+        bot_gauge: None,
     }
 }

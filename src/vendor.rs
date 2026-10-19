@@ -75,6 +75,8 @@ pub struct Vendor {
     pub bot: Option<crate::grok_bot::BotReading>,
     /// Window statistics of the Grok Bot's own saved weekly readings.
     pub bot_stats: Option<WindowStats>,
+    /// The Grok Bot's weekly gauge from its saved readings: the pace for its row.
+    pub bot_gauge: Option<Gauge>,
 }
 
 impl Vendor {
@@ -98,6 +100,7 @@ impl Vendor {
             error: None,
             bot: None,
             bot_stats: None,
+            bot_gauge: None,
         }
     }
 
@@ -166,6 +169,7 @@ pub fn from_state_at(s: &State, now: DateTime<Utc>) -> Vec<Vendor> {
         v.error = g.collector.error.clone();
         v.bot = g.bot;
         v.bot_stats = g.bot_stats.clone();
+        v.bot_gauge = g.bot_gauge.clone();
         match &g.plan {
             Some(p) => {
                 v.weekly = p.weekly.clone();

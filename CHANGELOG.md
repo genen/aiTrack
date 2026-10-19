@@ -10,6 +10,11 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
   title bar, always on top. Beside each meter is how long until it runs out at the current pace (hours and minutes),
   or ∞ when it lasts past the reset. Drag it to move it; double-click it to go back to the full window. aiTrack
   remembers the mode and opens in it next time.
+- `AITRACK_DEMO=1` starts aiTrack with mock vendors, to preview the look without real usage.
+
+### Fixed
+- Grok Bot: its meter now gets a pace from its saved readings, worked out the same way as Grok's: the tooltip and
+  detail pane show the pace and projection, and the bar shows where it is heading. Since 0.5.1 it had none.
 
 ## [0.5.1] - 2026-10-18
 

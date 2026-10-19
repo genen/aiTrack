@@ -747,9 +747,15 @@ pub const BOT_LABEL: &str = "Grok Bot";
 
 /// The Grok Bot app's weekly meter as a second bar. The reading is a cached file the app writes
 /// only while it is open, so it follows the staleness rules: kept however old, dimmed after
-/// [`STALE_WARN_MIN`] with a caution line, no pace or projection, and dashes only once its weekly
-/// period has ended.
-pub fn bot_row(b: &crate::grok_bot::BotReading, remaining: bool, now: DateTime<Utc>) -> Row {
+/// [`STALE_WARN_MIN`] with a caution line and then no pace or projection, and dashes only once its
+/// weekly period has ended. A fresh reading gets the pace of `gauge` (Grok's own analysis of the
+/// saved Grok Bot readings): the tooltip lines, the projected cells and the small window's time.
+pub fn bot_row(
+    b: &crate::grok_bot::BotReading,
+    gauge: Option<&Gauge>,
+    remaining: bool,
+    now: DateTime<Utc>,
+) -> Row {
     let age = b.age_min(now);
     let from = "Read from the Grok Bot app's cache; the app rewrites it only every half hour or so, and only while it is open";
     if b.period_ended(now) {
@@ -787,6 +793,21 @@ pub fn bot_row(b: &crate::grok_bot::BotReading, remaining: bool, now: DateTime<U
         tip(format!("Reading {}", ago(age)), Tone::Muted),
         tip(from, Tone::Muted),
     ];
+    let pace = bot_pace(b, gauge, now);
+    if let Some(g) = pace {
+        if let Some(n) = pace_note(g) {
+            t.insert(
+                1,
+                tip(n.text, if n.warn { Tone::Warn } else { Tone::Muted }),
+            );
+        }
+        if let Some(r) = g.rate_per_hour {
+            t.insert(
+                2.min(t.len()),
+                tip(format!("Pace: {r:+.1} pts/h"), Tone::Muted),
+            );
+        }
+    }
     if stale {
         t.push(tip(
             format!(
@@ -800,15 +821,32 @@ pub fn bot_row(b: &crate::grok_bot::BotReading, remaining: bool, now: DateTime<U
         kind: Kind::Weekly,
         label: BOT_LABEL,
         value: pct_text_for(b.pct, remaining),
-        cells: bar_cells(b.pct, None, remaining),
+        cells: bar_cells(b.pct, pace.and_then(|g| g.projected_pct), remaining),
         level: level(b.pct),
         stale: false,
         dim: stale,
         tip: t,
         secondary: true,
-        // the Grok Bot reading has no pace
-        time: None,
+        time: pace.and_then(|g| row_time(g, false)),
     }
+}
+
+/// The Grok Bot's pace from its saved readings, as for Grok: only for a fresh reading, and only when
+/// the gauge describes the same weekly period as the reading shown.
+fn bot_pace<'a>(
+    b: &crate::grok_bot::BotReading,
+    gauge: Option<&'a Gauge>,
+    now: DateTime<Utc>,
+) -> Option<&'a Gauge> {
+    gauge.filter(|g| {
+        !b.stale(now)
+            && !b.period_ended(now)
+            && !g.reset_passed
+            && g.resets_at
+                .as_deref()
+                .and_then(parse_ts)
+                .is_some_and(|r| (r - b.resets_at).num_seconds().abs() <= 60)
+    })
 }
 
 /// The header chip for a Grok block whose own reading is fresh but whose Grok Bot reading is old
@@ -879,7 +917,11 @@ pub fn build_home_for(s: &State, vendors: &[Vendor], now: DateTime<Utc>) -> Home
                 .kinds()
                 .iter()
                 .map(|k| row_for(ven, *k, remaining, now))
-                .chain(ven.bot.as_ref().map(|b| bot_row(b, remaining, now)))
+                .chain(
+                    ven.bot
+                        .as_ref()
+                        .map(|b| bot_row(b, ven.bot_gauge.as_ref(), remaining, now)),
+                )
                 .collect(),
             warn: header_warning(ven).filter(|_| ven.current && !is_old(ven, now)),
             age_chip: age_chip(ven, s.settings.interval_min, now).or_else(|| bot_chip(ven, now)),
@@ -990,6 +1032,18 @@ pub fn build_bot_detail(
     remaining: bool,
     now: DateTime<Utc>,
 ) -> Detail {
+    build_bot_detail_with(b, stats, None, remaining, now)
+}
+
+/// [`build_bot_detail`] with the pace of `gauge` (see [`bot_row`]) for a fresh reading: the pace
+/// note and the Pace, At reset and To limit rows, as in Grok's own pane.
+pub fn build_bot_detail_with(
+    b: &crate::grok_bot::BotReading,
+    stats: Option<&crate::analysis::WindowStats>,
+    gauge: Option<&Gauge>,
+    remaining: bool,
+    now: DateTime<Utc>,
+) -> Detail {
     let age = b.age_min(now);
     let mut d = Detail {
         title: "Grok Bot weekly".into(),
@@ -1030,6 +1084,19 @@ pub fn build_bot_detail(
             ),
             warn: false,
         });
+    }
+    if let Some(g) = bot_pace(b, gauge, now) {
+        d.note = pace_note(g);
+        d.rows.push((
+            "Pace".into(),
+            opt(g.rate_per_hour, |r| format!("{r:+.1} pts/h")),
+        ));
+        d.rows.push((
+            "At reset".into(),
+            opt(g.projected_pct, |x| format!("{}%", js_round(x) as i64)),
+        ));
+        d.rows
+            .push(("To limit".into(), opt(g.hours_to_limit, left)));
     }
     if let Some(st) = stats {
         push_window_stats(&mut d.rows, st);

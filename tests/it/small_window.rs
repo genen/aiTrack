@@ -132,3 +132,67 @@ fn the_demo_vendors_show_both_kinds_of_time() {
         .flatten()
         .any(|t| t.text == view::INFINITY && !t.warn));
 }
+
+// ------------------------------------------------------------ Grok Bot pace
+
+fn bot_at(
+    now: chrono::DateTime<chrono::Utc>,
+    pct: f64,
+    age_min: i64,
+) -> aitrack::grok_bot::BotReading {
+    aitrack::grok_bot::BotReading {
+        pct,
+        resets_at: now + chrono::Duration::hours(50),
+        read_at: now - chrono::Duration::minutes(age_min),
+        expires_at: None,
+    }
+}
+
+fn bot_gauge(now: chrono::DateTime<chrono::Utc>, pct: f64, rate: f64) -> Gauge {
+    let mut g = gauge(pct, Some(50.0), Some(rate), Some((100.0 - pct) / rate));
+    g.resets_at = Some((now + chrono::Duration::hours(50)).to_rfc3339());
+    g.projected_pct = Some(pct + rate * 50.0);
+    g
+}
+
+#[test]
+fn the_grok_bot_row_gets_the_pace_of_its_saved_readings() {
+    use chrono::{TimeZone, Utc};
+    let now = Utc.with_ymd_and_hms(2026, 10, 19, 12, 0, 0).unwrap();
+    // 60% and 2 pts/h: empty in 20h, before the reset in 50h
+    let g = bot_gauge(now, 60.0, 2.0);
+    let row = view::bot_row(&bot_at(now, 60.0, 5), Some(&g), false, now);
+    assert_eq!(row.time, warn("20h 00m"));
+    assert!(
+        row.tip.iter().any(|t| t.text.starts_with("Pace: +2.0")),
+        "{:?}",
+        row.tip
+    );
+    // slow: lasts past the reset
+    let g = bot_gauge(now, 10.0, 0.5);
+    let row = view::bot_row(&bot_at(now, 10.0, 5), Some(&g), false, now);
+    assert_eq!(row.time.map(|t| t.text), Some(view::INFINITY.to_string()));
+    // an old reading gets no pace, and neither does a gauge for another weekly period
+    let g = bot_gauge(now, 60.0, 2.0);
+    assert_eq!(
+        view::bot_row(&bot_at(now, 60.0, 120), Some(&g), false, now).time,
+        None
+    );
+    let mut other = g.clone();
+    other.resets_at = Some((now + chrono::Duration::hours(10)).to_rfc3339());
+    assert_eq!(
+        view::bot_row(&bot_at(now, 60.0, 5), Some(&other), false, now).time,
+        None
+    );
+    assert_eq!(
+        view::bot_row(&bot_at(now, 60.0, 5), None, false, now).time,
+        None
+    );
+    // the detail pane shows the same pace
+    let d = view::build_bot_detail_with(&bot_at(now, 60.0, 5), None, Some(&g), false, now);
+    assert!(
+        d.rows.iter().any(|(k, v)| k == "Pace" && v == "+2.0 pts/h"),
+        "{:?}",
+        d.rows
+    );
+}

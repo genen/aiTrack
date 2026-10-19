@@ -928,13 +928,19 @@ impl AitrackUi {
                     if vv.id == VendorId::Grok {
                         self.grok_refresh_line(ui, pal, st);
                     }
-                    if let Some((b, bot_stats)) = vendors
+                    if let Some((b, v)) = vendors
                         .iter()
                         .find(|v| v.id == vv.id)
-                        .and_then(|v| v.bot.as_ref().map(|b| (b, v.bot_stats.as_ref())))
+                        .and_then(|v| v.bot.as_ref().map(|b| (b, v)))
                         .filter(|_| self.bot_expanded)
                     {
-                        let d = view::build_bot_detail(b, bot_stats, remaining, Utc::now());
+                        let d = view::build_bot_detail_with(
+                            b,
+                            v.bot_stats.as_ref(),
+                            v.bot_gauge.as_ref(),
+                            remaining,
+                            Utc::now(),
+                        );
                         self.detail(ui, pal, &d);
                     } else if let Some((id, kind)) = self.expanded.filter(|(id, _)| *id == vv.id) {
                         if let Some(v) = vendors.iter().find(|v| v.id == id) {
