@@ -434,8 +434,10 @@ impl AitrackUi {
         let mut content_h = 0.0;
         egui::CentralPanel::default()
             .frame(
+                // the window is transparent (see `run`): only the rounded blocks are drawn, so no
+                // square corners show around them
                 Frame::new()
-                    .fill(pal.background)
+                    .fill(Color32::TRANSPARENT)
                     .inner_margin(Margin::same(SMALL_BORDER as i8)),
             )
             .show(ctx, |ui| {
@@ -1955,6 +1957,12 @@ pub fn run(app: Arc<App>) -> eframe::Result {
     if on_top || small {
         viewport = viewport.with_always_on_top();
     }
+    // A window is transparent from its creation or never, and the full window can turn small at any
+    // time: so where the small window exists the window is always transparent. The full window's
+    // panels paint every pixel; the small window paints only its rounded blocks.
+    if SMALL_SUPPORTED {
+        viewport = viewport.with_transparent(true);
+    }
     #[allow(unused_mut)]
     let mut opts = eframe::NativeOptions {
         viewport,
@@ -2049,6 +2057,16 @@ struct Window {
 impl eframe::App for Window {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.ui.draw(ctx);
+    }
+
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        if SMALL_SUPPORTED {
+            // see the transparent viewport in `run`
+            [0.0; 4]
+        } else {
+            // eframe's own default
+            Color32::from_rgba_unmultiplied(12, 12, 12, 180).to_normalized_gamma_f32()
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -2585,8 +2603,9 @@ const STRIPE_W: f32 = 4.0;
 const MIN_WINDOW_W: f32 = 270.0;
 /// The small window is Windows only for now (the owner tries it there before Mac and Linux).
 const SMALL_SUPPORTED: bool = cfg!(windows);
-/// Border around the vendor blocks in the small window (points).
-const SMALL_BORDER: f32 = 2.0;
+/// Border around the vendor blocks in the small window (points; transparent, it only keeps the
+/// blocks' outline from being clipped).
+const SMALL_BORDER: f32 = 1.0;
 
 const BADGE: f32 = 18.0;
 
@@ -3044,11 +3063,17 @@ fn small_row_widget(
     };
     if let Some(t) = &row.time {
         let tcol = if t.warn { pal.red } else { pal.foreground };
+        // the infinity sign is a low, small glyph: drawn larger so it stands as tall as the % beside it
+        let font = if t.text == view::INFINITY {
+            mono(19.0)
+        } else {
+            mono(11.5)
+        };
         p.text(
             Pos2::new(rect.right() - 2.0, cy),
             Align2::RIGHT_CENTER,
             &t.text,
-            mono(11.5),
+            font,
             tcol,
         );
     }
