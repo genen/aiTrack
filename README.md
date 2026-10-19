@@ -414,8 +414,9 @@ somewhere else, the **Refresh** button is hidden (the live billing and the log s
 
 The window has a header with three buttons, one block per tool, and a status line at the bottom.
 
-- Header buttons: **Refresh now** (the circular arrow, polls at once), **Stats** (the bars icon) and
-  **Settings** (the sliders icon).
+- Header buttons: **Small window** (two arrows pointing in, see
+  [Small window](#small-window)), **Refresh now** (the circular arrow, polls at once), **Stats** (the bars
+  icon) and **Settings** (the sliders icon).
 - Each tool block has a logo, the tool's name and one bar per limit. Clicking the logo opens the tool
   (see [Clicking the logos](#11-clicking-the-logos)).
 
@@ -442,6 +443,27 @@ Hover a row to see a tooltip: when the window resets, the pace, and where the nu
 
 Click a row to open a detail pane with the pace, the projected use at the reset, time to the limit, window
 statistics and a [history chart](#8-history-chart). Click again to close it.
+
+### Small window
+
+The small window shows only the tool blocks: no title bar, no buttons, no status line. It floats on top of other
+windows and sits on the desktop with rounded corners. On Linux under native Wayland it cannot stay on top (see
+the always-on-top note in Settings).
+
+![The small window](docs/img/small-window.png)
+
+- **Open it:** click the **Small window** button in the header (two arrows pointing in, left of Refresh).
+- **Move it:** press anywhere on it and drag.
+- **Close it:** double-click it to go back to the full window, in the same place. A single click does nothing.
+- **Next start:** aiTrack opens in the mode it was in when you quit.
+
+Beside each bar is how long that window will last at your current pace:
+
+- **hours and minutes in red**, for example `1h 24m`, when you would run out before the window resets;
+- **∞** when your pace lasts past the reset;
+- nothing when there is no pace yet, or the reading is more than 60 minutes old (see [Old data](#old-data)).
+
+Hovering a row shows the same tooltip as in the full window.
 
 ### Reset times and "carried"
 
@@ -551,6 +573,9 @@ Linux they are desktop notifications (see **On Linux** below).
 - Each alert fires **once per limit window**. aiTrack remembers what it sent in `~/.aitrack/alerts.json` (and
   `alerts-grok.json`), so restarting does not repeat it.
 - If you jump past a level, only the highest one is announced.
+- The Info, Warning and Limit alerts also bring the aiTrack window to the front (and back from the taskbar if it
+  was minimised), in the full and the small window. It does not take the keyboard focus. Native Wayland does not let
+  an app raise its own window.
 - Alerts need the window to be running. Closed means no alerts.
 - Old readings do not trigger alerts.
 

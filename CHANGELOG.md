@@ -3,7 +3,15 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
-## [0.5.2-beta] - Unreleased
+## [0.5.3-beta] - Unreleased
+
+### Added
+- macOS and Linux: the small window (it was Windows only in 0.5.2-beta).
+- The 75 %, 90 % and limit alerts bring the aiTrack window to the front (un-minimised, without taking the focus).
+- README: a section on the small window (how to open, move and close it, and what the times beside the bars mean),
+  with a picture.
+
+## [0.5.2-beta] - 2026-10-19
 
 ### Added
 - Windows: a small window. The new shrink button in the header turns the window into just the vendor meters, with no
