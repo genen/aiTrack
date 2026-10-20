@@ -284,6 +284,10 @@ pub const CHIP_NETWORK_MIN: f64 = 10.0;
 /// The row tooltip carries a warning line when the data is older than this (minutes).
 pub const STALE_WARN_MIN: f64 = 60.0;
 
+/// Settings > Data: how long usage history is kept.
+pub const RETENTION_TEXT: &str =
+    "Usage history is kept for 90 days. Older readings are deleted once a day; the previous file stays as a .bak until the next run.";
+
 /// Minutes after which a reading from `source` counts as old enough for the chip (`None` for a
 /// source we know nothing about).
 pub fn chip_threshold_min(source: &str, interval_min: f64) -> Option<f64> {

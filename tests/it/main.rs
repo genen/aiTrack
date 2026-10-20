@@ -37,6 +37,7 @@ mod pricing;
 mod projects_cli;
 mod prune_script;
 mod release_review;
+mod retention;
 mod review;
 mod settings_layout;
 mod small_window;

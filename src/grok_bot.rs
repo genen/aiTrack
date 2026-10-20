@@ -354,6 +354,22 @@ impl BotTracker {
         self.version.load(Ordering::SeqCst)
     }
 
+    /// Prune the history file (see [`Store::prune`]). Runs on the Grok collector thread, the same
+    /// thread that appends, so the two never interleave.
+    pub fn prune(&self, now: DateTime<Utc>) -> std::io::Result<crate::store::PruneReport> {
+        let rep = self.store.prune(now)?;
+        if rep.changed() {
+            *self.cached.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            self.version.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(rep)
+    }
+
+    /// The history file: where it is and its size.
+    pub fn store_info(&self) -> (String, Option<u64>) {
+        (self.store.describe(), self.store.size())
+    }
+
     /// The stored history as readings (for the Stats view and charts). The file is read once and
     /// the result kept until this tracker appends a record (it is the only writer).
     pub fn readings(&self) -> std::sync::Arc<Vec<crate::reading::Reading>> {

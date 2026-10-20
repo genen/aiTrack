@@ -36,6 +36,7 @@ pub struct Sections {
     pub appearance: bool,
     pub display: bool,
     pub notifications: bool,
+    pub data: bool,
     pub diagnostics: bool,
     pub about: bool,
 }
@@ -47,6 +48,7 @@ impl Default for Sections {
             appearance: false,
             display: false,
             notifications: false,
+            data: false,
             diagnostics: false,
             about: false,
         }
@@ -54,11 +56,12 @@ impl Default for Sections {
 }
 
 impl Sections {
-    pub const NAMES: [&'static str; 6] = [
+    pub const NAMES: [&'static str; 7] = [
         "general",
         "appearance",
         "display",
         "notifications",
+        "data",
         "diagnostics",
         "about",
     ];
@@ -69,6 +72,7 @@ impl Sections {
             "appearance" => self.appearance,
             "display" => self.display,
             "notifications" => self.notifications,
+            "data" => self.data,
             "diagnostics" => self.diagnostics,
             "about" => self.about,
             _ => false,
@@ -82,6 +86,7 @@ impl Sections {
             "appearance" => self.appearance = open,
             "display" => self.display = open,
             "notifications" => self.notifications = open,
+            "data" => self.data = open,
             "diagnostics" => self.diagnostics = open,
             "about" => self.about = open,
             _ => return false,

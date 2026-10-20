@@ -69,7 +69,13 @@ fn sections_default_to_general_open_and_persist_each_one() {
     let s = Settings::load(&path);
     assert_eq!(s.get().sections, Sections::default());
     assert!(s.get().sections.general);
-    for n in ["appearance", "display", "notifications", "diagnostics"] {
+    for n in [
+        "appearance",
+        "display",
+        "notifications",
+        "data",
+        "diagnostics",
+    ] {
         assert!(!s.get().sections.get(n), "{n} starts collapsed");
     }
     s.set_section("diagnostics", true);
@@ -210,6 +216,9 @@ mod view {
                 modifiers: Default::default(),
             };
             self.frame(vec![Event::PointerMoved(p)]);
+            // a real pointer rests a moment: the hover tooltip settles beside the widget, rather
+            // than over it where egui first guesses it
+            self.frame(vec![]);
             self.frame(vec![btn(true)]);
             self.frame(vec![btn(false)]);
             self.frame(vec![]);
@@ -231,12 +240,13 @@ mod view {
             let w = Win::new(light, None);
             let h = w.ui.desired_height();
             // The upper bound leaves room for platform font metrics: the same layout measures a few
-            // points taller on Windows (524 pt on the CI runner) than with the Linux fonts.
+            // points taller on Windows (524 pt on the CI runner, before the Data section) than with
+            // the Linux fonts. It stays under the 640 pt cap.
             assert!(
-                (380.0..=580.0).contains(&h),
+                (380.0..=620.0).contains(&h),
                 "collapsed Settings is {h} pt (light {light})"
             );
-            assert_eq!(w.ui.section_rects.len(), 6);
+            assert_eq!(w.ui.section_rects.len(), 7);
         }
     }
 

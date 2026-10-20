@@ -34,6 +34,40 @@ pub struct App {
     claude_seen: Remembered,
     /// The Stats view's background service (transcripts + plan statistics), when set up.
     stats: std::sync::OnceLock<Arc<crate::statsview::StatsService>>,
+    /// What the last prune asked for in Settings did (shown under the "Prune now" button).
+    prune_result: Arc<Mutex<Option<String>>>,
+}
+
+/// Log what a prune run did, and keep the summary of an asked-for run for Settings.
+fn prune_reporter(
+    slot: Arc<Mutex<Option<String>>>,
+) -> impl Fn(&[crate::collector::PruneResult], bool) + Send + Sync + 'static {
+    move |reports, manual| {
+        let mut lines = Vec::new();
+        for (name, r) in reports {
+            let text = match r {
+                Ok(rep) if !rep.changed() && !manual => continue, // daily run, nothing to say
+                Ok(rep) => rep.describe(),
+                Err(e) => format!("prune failed, file left as it was: {e}"),
+            };
+            crate::alerts::log_line(&format!("prune {name}: {text}"));
+            let file = std::path::Path::new(name)
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_else(|| name.clone());
+            lines.push(format!("{file}: {text}"));
+        }
+        if manual {
+            let mut s = slot.lock().unwrap_or_else(|e| e.into_inner());
+            // the Claude and Grok collectors each report; keep both
+            let joined = lines.join("\n");
+            *s = Some(match s.take() {
+                Some(prev) if !prev.is_empty() && !joined.is_empty() => format!("{prev}\n{joined}"),
+                Some(prev) if joined.is_empty() => prev,
+                _ => joined,
+            });
+        }
+    }
 }
 
 /// Grok's history (a separate `usage-grok.jsonl`) and its collector.
@@ -332,7 +366,15 @@ impl App {
             stats: std::sync::OnceLock::new(),
             claude_detect,
             claude_seen: Remembered::new(),
+            prune_result: Arc::new(Mutex::new(None)),
         }
+        .with_prune_reporting()
+    }
+
+    fn with_prune_reporting(self) -> Self {
+        self.collector
+            .set_on_prune(prune_reporter(self.prune_result.clone()));
+        self
     }
 
     /// Add Grok tracking: its own store and collector, polled on the same timer structure (live
@@ -403,6 +445,7 @@ impl App {
                 alerts.evaluate("Grok", &plan, now, &raising);
             });
         }
+        collector.set_on_prune(prune_reporter(self.prune_result.clone()));
         self.grok = Some(GrokPart {
             history,
             collector,
@@ -418,11 +461,59 @@ impl App {
     /// without it). `store` is its own append-only history; `env` says where the app keeps its cache.
     pub fn with_grok_bot(self, store: Box<dyn Store>, env: crate::sources::Env) -> Self {
         if let Some(g) = &self.grok {
-            let _ = g
-                .bot
-                .set(Arc::new(crate::grok_bot::BotTracker::new(env, store)));
+            let bot = Arc::new(crate::grok_bot::BotTracker::new(env, store));
+            if g.bot.set(bot.clone()).is_ok() {
+                // same thread and schedule as Grok's own history
+                g.collector
+                    .add_pruner(bot.store_info().0, move |now| bot.prune(now));
+            }
         }
         self
+    }
+
+    /// Turn on the daily pruning of every history file (the real app; tests leave it off).
+    pub fn enable_auto_prune(&self) {
+        self.collector.set_auto_prune(true);
+        if let Some(g) = &self.grok {
+            g.collector.set_auto_prune(true);
+        }
+    }
+
+    /// Prune every history file now (on the collector threads; the result shows in
+    /// [`prune_result`](Self::prune_result)).
+    pub fn prune_now(&self) {
+        *self.prune_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(String::new());
+        self.collector.prune_now();
+        if let Some(g) = &self.grok {
+            g.collector.prune_now();
+        }
+    }
+
+    /// What the last "Prune now" did, one line per file (empty while it runs).
+    pub fn prune_result(&self) -> Option<String> {
+        self.prune_result
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// The history files with their sizes, for Settings > Data: (label, size in bytes).
+    pub fn data_files(&self) -> Vec<(String, Option<u64>)> {
+        let name = |d: String| {
+            std::path::Path::new(&d)
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or(d)
+        };
+        let mut out = vec![(name(self.history.describe()), self.history.size())];
+        if let Some(g) = &self.grok {
+            out.push((name(g.history.describe()), g.history.size()));
+            if let Some(b) = g.bot.get() {
+                let (d, size) = b.store_info();
+                out.push((name(d), size));
+            }
+        }
+        out
     }
 
     /// Replace how a refresh runs and how "is the CLI installed" is answered (tests use fakes).

@@ -547,7 +547,8 @@ Click a row to open its detail pane; the chart is under **History**.
 
 ![The history chart](docs/img/history-chart.png)
 
-- Choose **24h**, **7d**, **30d** or **All**.
+- Choose **24h**, **7d**, **30d** or **All** (**All** goes back at most 90 days: see
+  [Files and privacy](#12-files-and-privacy)).
 - Until you choose, it opens on the shortest range that shows everything stored: under a day of data opens
   **24h**, under a week **7d**, under 30 days **30d**, otherwise **All**. When you pick a range, aiTrack keeps your
   choice.
@@ -640,6 +641,14 @@ At the bottom: **Back**, a **Help** link (it opens this page), and the build lin
   Allow notifications to play sounds); hovering the row says so.
 - **Send a test toast**: **Info**, **Warning**, **Limit**.
 
+**Data**
+
+- **90-day usage cycling**: aiTrack keeps 90 days of usage history for every tool it tracks (Claude, Grok and the
+  Grok Bot). Once a day, while it runs, older readings are deleted. Readings from a limit window that ended less than
+  90 days ago stay until the whole window is older.
+- The history files and their sizes.
+- **Prune now** runs the cleanup at once and says what it removed.
+
 **Diagnostics**
 
 - The last polls, newest first, each with the time, a green check or red cross and a line saying which source
@@ -688,6 +697,8 @@ aiTrack keeps its own files in `C:\Users\<you>\.aitrack\` (written `~/.aitrack`)
 | `usage.jsonl` | Claude readings, one line per poll, including failed polls |
 | `usage-grok.jsonl` | Grok readings |
 | `usage-grok-bot.jsonl` | Grok Bot weekly readings (records with a `bot_weekly` field), appended when the value changes and at most every 15 minutes otherwise |
+| `*.jsonl.bak` | the history file as it was before the last cleanup (replaced at the next one) |
+| `*.jsonl.corrupt` | unreadable lines set aside by a cleanup, if there were any |
 | `settings.json` | your settings |
 | `alerts.json`, `alerts-grok.json` | which alerts were already sent |
 | `transcript-index.json` | a summary of the transcript files for the Stats view |
@@ -700,7 +711,12 @@ aiTrack keeps its own files in `C:\Users\<you>\.aitrack\` (written `~/.aitrack`)
 On a Mac the folder is `/Users/<you>/.aitrack` and on Linux `/home/<you>/.aitrack`, with the same files.
 
 Deleting a file while aiTrack is closed resets what it holds. For example, deleting `usage.jsonl` removes your Claude
-history. The files grow slowly and are never trimmed.
+history.
+
+**90-day usage cycling:** the three `usage*.jsonl` files keep 90 days of history. Once a day aiTrack deletes older
+readings (also when the window stays open for weeks), and **Settings > Data > Prune now** does it at once. The file as
+it was before each cleanup is kept as `.bak` until the next one, and a line that cannot be read is moved to `.corrupt`,
+never dropped.
 
 What a reading holds: the percentages, reset times, spend and per-model limits from the Claude usage answer, plus
 the whole answer from the Claude usage service. It does **not** hold your sign-in token, your organisation id,

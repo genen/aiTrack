@@ -638,7 +638,7 @@ impl Poller {
         let mut current_rec = None;
         for (k, (i, obs, _)) in seen.iter().enumerate() {
             let name = self.chain[*i].name();
-            let new = self.new_samples(store, name, obs);
+            let new = self.new_samples(store, name, obs, crate::store::prune_cutoff(now));
             for s in new.iter() {
                 let is_current = current == Some(k) && s.at == obs.latest.at;
                 // only the current reading's newest sample is a regular row; every other imported
@@ -838,13 +838,16 @@ impl Poller {
         store: &dyn Store,
         source: &str,
         obs: &'a Observation,
+        cutoff: DateTime<Utc>,
     ) -> Vec<&'a Sample> {
         let mut idx = self.index.lock().unwrap_or_else(|e| e.into_inner());
         self.ensure_scanned(store, &mut idx);
         let known = idx.stored.get(source);
+        // samples past retention are not imported: they were pruned, or would be at once
         let mut out: Vec<&Sample> = obs
             .history
             .iter()
+            .filter(|s| s.at >= cutoff)
             .filter(|s| !known.is_some_and(|k| k.contains(&s.at.timestamp())))
             .collect();
         out.sort_by_key(|s| s.at);
