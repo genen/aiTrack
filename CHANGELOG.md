@@ -3,6 +3,21 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.4-beta] - 2026-10-20
+
+### Added
+- 90-day usage cycling: the Claude, Grok and Grok Bot history files keep 90 days. Once a day (checked by the clock,
+  so a window left open for months still does it) older readings are deleted; readings of a limit window that ended
+  less than 90 days ago are kept until the whole window is older, so pace and projections never change.
+- Settings > **Data**: the history files with their sizes, and **Prune now**. Each cleanup is written to `notify.log`.
+
+### Changed
+- The cleanup rewrites a file safely: the new contents go to a temporary file that is synced and then renamed over
+  the old one (retried briefly on Windows when a virus scanner holds the file), so a crash at any point leaves a
+  complete file. The previous file stays as `.bak` until the next cleanup, and unreadable lines are moved to
+  `.corrupt`, never dropped.
+- Readings older than 90 days found in the Claude app's own history are no longer imported again.
+
 ## [0.5.3] - 2026-10-19
 
 The small window on Windows, macOS and Linux, as a stable version.

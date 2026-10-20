@@ -1513,6 +1513,53 @@ impl AitrackUi {
                 if let Some(o) = toggled_notifications {
                     self.app.settings.set_section("notifications", o);
                 }
+                let toggled_data = section_card(
+                    ui,
+                    pal,
+                    "Data",
+                    "data",
+                    v.sections.data,
+                    &mut sec_rects,
+                    |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(view::RETENTION_TEXT)
+                                .font(prop(11.5))
+                                .color(pal.muted),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(2.0);
+                    for (file, size) in self.app.data_files() {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(file).font(mono(11.5)).color(pal.foreground));
+                            ui.label(
+                                RichText::new(size.map_or("none yet".into(), crate::store::human_size))
+                                    .font(mono(11.5))
+                                    .color(pal.muted),
+                            );
+                        });
+                    }
+                    ui.add_space(4.0);
+                    let result = self.app.prune_result();
+                    let running = result.as_deref() == Some("");
+                    if pill(ui, pal, if running { "Pruning..." } else { "Prune now" }, false)
+                        .clicked()
+                        && !running
+                    {
+                        self.app.prune_now();
+                    }
+                    if let Some(r) = result.filter(|r| !r.is_empty()) {
+                        ui.add(
+                            egui::Label::new(RichText::new(r).font(prop(11.5)).color(pal.muted))
+                                .wrap(),
+                        );
+                    }
+                    },
+                );
+                if let Some(o) = toggled_data {
+                    self.app.settings.set_section("data", o);
+                }
                 let toggled_diagnostics = section_card(
                     ui,
                     pal,

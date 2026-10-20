@@ -9,10 +9,12 @@
 //! * `refresh()` polls now; `reschedule()` just re-evaluates the timer (used when the interval
 //!   changes) and does not poll by itself.
 //! * After a failure the next poll waits at least as long as the server's `Retry-After`.
+//! * After loading the history, and then once a day, the history files are pruned (see
+//!   [`Store::prune`]); `prune_now()` asks for a run at once. Pruning never runs on the GUI thread.
 
 use crate::live::{CollectError, Poller};
 use crate::settings::Settings;
-use crate::store::Store;
+use crate::store::{PruneReport, Store};
 use crate::util::parse_ts;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -22,6 +24,20 @@ use std::time::{Duration, Instant};
 
 pub type PollFn = Box<dyn Fn(&dyn Store) -> Result<Value, CollectError> + Send + Sync>;
 type Waker = Box<dyn Fn() + Send + Sync>;
+/// Prunes one more history file (beyond the collector's own store), e.g. the Grok Bot's.
+pub type Pruner = Box<dyn Fn(DateTime<Utc>) -> std::io::Result<PruneReport> + Send + Sync>;
+/// What one prune run did, by file: the report, or why it failed.
+pub type PruneResult = (String, Result<PruneReport, String>);
+/// Told what each prune run did, and whether it was asked for.
+type PruneDone = Box<dyn Fn(&[PruneResult], bool) + Send + Sync>;
+
+/// Automatic prunes run at most this often.
+pub const PRUNE_EVERY_HOURS: i64 = 24;
+
+/// Is an automatic prune due? Daily; a clock that went backwards counts as due.
+pub fn prune_due(last: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
+    last.is_none_or(|t| now < t || now - t >= chrono::Duration::hours(PRUNE_EVERY_HOURS))
+}
 
 /// What the last successful poll saw: which source, how old its sample is, and whether it was new.
 /// A poll that finds nothing newer than what is stored (the Claude app is closed) still succeeds;
@@ -73,6 +89,10 @@ struct State {
     /// Last poll of any kind (full or local).
     last_tick: Option<Instant>,
     backoff: f64,
+    /// Last prune run, by the wall clock (a monotonic clock stops while the PC sleeps, and the
+    /// window may stay open for months). `None` until the first, which follows loading.
+    last_prune: Option<DateTime<Utc>>,
+    prune_now: bool,
     last_error: Option<String>,
     polling: bool,
     polls: u64,
@@ -85,6 +105,11 @@ struct Shared {
     poll_fn: PollFn,
     local_fn: Option<PollFn>,
     after_poll: Mutex<Option<Waker>>,
+    pruners: Mutex<Vec<(String, Pruner)>>,
+    /// Daily automatic prunes (the app turns them on; tests that run a collector over fixture
+    /// files with fixed dates leave them off, so the real clock never deletes their data).
+    auto_prune: std::sync::atomic::AtomicBool,
+    on_prune: Mutex<Option<PruneDone>>,
     local_override: Mutex<Option<Duration>>,
     state: Mutex<State>,
     cv: Condvar,
@@ -123,6 +148,9 @@ impl Collector {
                 poll_fn,
                 local_fn,
                 after_poll: Mutex::new(None),
+                pruners: Mutex::new(Vec::new()),
+                auto_prune: std::sync::atomic::AtomicBool::new(false),
+                on_prune: Mutex::new(None),
                 local_override: Mutex::new(None),
                 state: Mutex::new(state),
                 cv: Condvar::new(),
@@ -153,6 +181,43 @@ impl Collector {
     /// Called on the collector thread after every successful poll (for alerts and the like).
     pub fn set_after_poll(&self, f: impl Fn() + Send + Sync + 'static) {
         *lock(&self.shared.after_poll) = Some(Box::new(f));
+    }
+
+    /// Prune another history file together with this collector's own store (same thread, same
+    /// schedule). `name` labels it in the report.
+    pub fn add_pruner(
+        &self,
+        name: impl Into<String>,
+        f: impl Fn(DateTime<Utc>) -> std::io::Result<PruneReport> + Send + Sync + 'static,
+    ) {
+        lock(&self.shared.pruners).push((name.into(), Box::new(f)));
+    }
+
+    /// Called on the collector thread after each prune run with what it did, and whether the run
+    /// was asked for with [`prune_now`](Self::prune_now).
+    pub fn set_on_prune(&self, f: impl Fn(&[PruneResult], bool) + Send + Sync + 'static) {
+        *lock(&self.shared.on_prune) = Some(Box::new(f));
+    }
+
+    /// Turn the daily automatic prune on or off (off by default; the app turns it on).
+    pub fn set_auto_prune(&self, on: bool) {
+        self.shared
+            .auto_prune
+            .store(on, std::sync::atomic::Ordering::Relaxed);
+        self.reschedule();
+    }
+
+    /// Prune the history now (on the collector thread, as soon as it is free).
+    pub fn prune_now(&self) {
+        let mut st = lock(&self.shared.state);
+        st.prune_now = true;
+        st.wake = true;
+        self.shared.cv.notify_all();
+    }
+
+    /// Run one prune on the calling thread with an explicit `now` (tests, `--prune`-style callers).
+    pub fn prune_blocking(&self, now: DateTime<Utc>) -> Vec<PruneResult> {
+        self.shared.prune(now)
     }
 
     /// Called (from the collector thread) whenever the status changes, e.g. to repaint the GUI.
@@ -318,6 +383,45 @@ impl Shared {
         }
     }
 
+    fn prune(&self, now: DateTime<Utc>) -> Vec<PruneResult> {
+        let mut out = vec![(
+            self.store.describe(),
+            self.store.prune(now).map_err(|e| e.to_string()),
+        )];
+        for (name, f) in lock(&self.pruners).iter() {
+            out.push((name.clone(), f(now).map_err(|e| e.to_string())));
+        }
+        out
+    }
+
+    /// Prune when due (after loading, then daily) or asked for.
+    fn prune_if_due(&self) {
+        let now = Utc::now();
+        let manual = {
+            let mut st = lock(&self.state);
+            let auto = self.auto_prune.load(std::sync::atomic::Ordering::Relaxed)
+                && prune_due(st.last_prune, now);
+            if !auto && !st.prune_now {
+                return;
+            }
+            let manual = st.prune_now;
+            st.prune_now = false;
+            st.last_prune = Some(now);
+            manual
+        };
+        let reports = self.prune(now);
+        if let Some(f) = lock(&self.on_prune).as_ref() {
+            f(&reports, manual);
+        }
+        if manual
+            || reports
+                .iter()
+                .any(|(_, r)| r.as_ref().map_or(true, PruneReport::changed))
+        {
+            self.wake_ui();
+        }
+    }
+
     fn run(&self) {
         self.store.prepare();
         self.wake_ui();
@@ -345,6 +449,8 @@ impl Shared {
                 2 => self.poll_local(),
                 _ => {}
             }
+            // after the first poll, so start-up shows numbers first
+            self.prune_if_due();
             let st = lock(&self.state);
             if st.stopped {
                 return;
@@ -360,7 +466,7 @@ impl Shared {
             let (mut st, _) = self
                 .cv
                 .wait_timeout_while(st, Duration::from_secs_f64(wait), |s| {
-                    !s.wake && !s.poll_now && !s.stopped
+                    !s.wake && !s.poll_now && !s.stopped && !s.prune_now
                 })
                 .unwrap_or_else(|e| e.into_inner());
             st.wake = false;

@@ -282,6 +282,8 @@ fn open_window(data: PathBuf) {
     app.set_claude_detect(Arc::new(|| {
         aitrack::detect::claude_present(&aitrack::sources::Env::from_process())
     }));
+    // usage history is kept for 90 days (checked after loading, then daily)
+    app.enable_auto_prune();
     app.start();
     if let Err(e) = aitrack::ui::run(app) {
         attach_console();
