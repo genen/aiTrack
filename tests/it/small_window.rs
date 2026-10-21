@@ -103,6 +103,11 @@ fn hours_and_minutes_format() {
     assert_eq!(view::hours_minutes(0.75), "45m");
     assert_eq!(view::hours_minutes(3.0 + 5.0 / 60.0), "3h 05m");
     assert_eq!(view::hours_minutes(49.5), "49h 30m");
+    assert_eq!(view::hours_minutes(99.0 + 59.0 / 60.0), "99h 59m");
+    // three hour digits would crowd the % beside it: days and hours instead
+    assert_eq!(view::hours_minutes(100.0), "4d 4h");
+    assert_eq!(view::hours_minutes(121.0 + 18.0 / 60.0), "5d 1h");
+    assert_eq!(view::hours_minutes(144.0), "6d 0h");
 }
 
 #[test]

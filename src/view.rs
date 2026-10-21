@@ -213,13 +213,16 @@ pub struct RowTime {
 /// Shown when the pace would last past the reset.
 pub const INFINITY: &str = "\u{221e}";
 
-/// `45m`, `3h 05m`, `33h 10m`: hours and minutes, never days.
+/// `45m`, `3h 05m`, `99h 59m`: hours and minutes up to 100 hours, then days and hours (`5d 1h`,
+/// as in the header warning) so the small window's time column never takes a third hour digit.
 pub fn hours_minutes(hours: f64) -> String {
     let mins = js_round(hours.max(0.0) * 60.0) as i64;
     if mins < 60 {
         format!("{}m", mins.max(1))
-    } else {
+    } else if mins < 100 * 60 {
         format!("{}h {:02}m", mins / 60, mins % 60)
+    } else {
+        format!("{}d {}h", mins / 1440, (mins % 1440) / 60)
     }
 }
 
