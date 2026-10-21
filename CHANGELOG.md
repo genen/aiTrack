@@ -3,6 +3,12 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.5-beta] - 2026-10-21
+
+### Changed
+- Small window: a run-out time of 100 hours or more is shown in days and hours (`5d 1h`, as in the header warning)
+  instead of `121h 18m`, which crowded the percentage beside it.
+
 ## [0.5.4-beta] - 2026-10-20
 
 ### Added

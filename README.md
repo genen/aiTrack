@@ -459,7 +459,8 @@ the always-on-top note in Settings).
 
 Beside each bar is how long that window will last at your current pace:
 
-- **hours and minutes in red**, for example `1h 24m`, when you would run out before the window resets;
+- **the time in red**, for example `1h 24m` (or days and hours from 100 hours on, like `5d 1h`), when you would
+  run out before the window resets;
 - **∞** when your pace lasts past the reset;
 - nothing when there is no pace yet, or the reading is more than 60 minutes old (see [Old data](#old-data)).
 
