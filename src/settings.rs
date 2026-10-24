@@ -105,8 +105,8 @@ impl Sections {
 }
 
 /// Whether a vendor's panel is shown: follow the detection of its tool, or always / never.
-/// (Stored as `null` / `true` / `false` in `claude_enabled` and `grok_enabled`; the older Grok-only
-/// "Track Grok" values keep their meaning: `true` = On, `false` = Off, missing = Auto.)
+/// (Stored as `null` / `true` / `false` in `claude_enabled`, `grok_enabled` and `codex_enabled`; the
+/// older Grok-only "Track Grok" values keep their meaning: `true` = On, `false` = Off, missing = Auto.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Track {
     Auto,
@@ -274,6 +274,8 @@ pub struct Values {
     /// Show Claude. `None` = automatic: on when the Claude desktop app's data or Claude Code's
     /// config folder exists.
     pub claude_enabled: Option<bool>,
+    /// Track Codex usage. `None` = automatic: on when Codex's folder (`~/.codex`) exists.
+    pub codex_enabled: Option<bool>,
     /// Warning / limit / predictive toasts play a reminder sound.
     pub alert_sounds: bool,
     /// Look of the vendor badges.
@@ -299,6 +301,7 @@ impl Default for Values {
             notifications: true,
             grok_enabled: None,
             claude_enabled: None,
+            codex_enabled: None,
             alert_sounds: true,
             badge_style: BadgeVariant::Auto,
             theme: ThemeChoice::Dark,
@@ -313,6 +316,11 @@ impl Values {
     /// Is Grok tracking on, given whether the Grok CLI's folder exists?
     pub fn grok_on(&self, detected: bool) -> bool {
         self.grok_enabled.unwrap_or(detected)
+    }
+
+    /// Is Codex tracking on, given whether Codex's folder exists?
+    pub fn codex_on(&self, detected: bool) -> bool {
+        self.codex_enabled.unwrap_or(detected)
     }
 
     /// Is Claude shown, given whether its tools were detected?
@@ -334,6 +342,7 @@ impl Values {
             "notifications": self.notifications,
             "grok_enabled": self.grok_enabled,
             "claude_enabled": self.claude_enabled,
+            "codex_enabled": self.codex_enabled,
             "alert_sounds": self.alert_sounds,
             "badge_style": self.badge_style.as_str(),
             "theme": self.theme.as_str(),
@@ -410,6 +419,11 @@ impl Values {
         match new.get("grok_enabled") {
             Some(Value::Bool(b)) => self.grok_enabled = Some(*b),
             Some(Value::Null) => self.grok_enabled = None,
+            _ => {}
+        }
+        match new.get("codex_enabled") {
+            Some(Value::Bool(b)) => self.codex_enabled = Some(*b),
+            Some(Value::Null) => self.codex_enabled = None,
             _ => {}
         }
     }
@@ -522,6 +536,9 @@ impl Settings {
     }
     pub fn set_grok_track(&self, t: Track) -> Values {
         self.update(&json!({"grok_enabled": t.to_opt()}), true)
+    }
+    pub fn set_codex_track(&self, t: Track) -> Values {
+        self.update(&json!({"codex_enabled": t.to_opt()}), true)
     }
     pub fn set_grok_enabled(&self, on: bool) -> Values {
         self.update(&json!({"grok_enabled": on}), true)

@@ -43,7 +43,8 @@ fn nothing_installed_means_nothing_present() {
             detect(&env(os, d.path())),
             Presence {
                 claude: false,
-                grok: false
+                grok: false,
+                codex: false
             },
             "{os:?}"
         );
@@ -123,7 +124,14 @@ fn all_four_combinations() {
         if grok {
             mkdir(d.join(".grok"));
         }
-        assert_eq!(detect(&env(Os::Linux, d.path())), Presence { claude, grok });
+        assert_eq!(
+            detect(&env(Os::Linux, d.path())),
+            Presence {
+                claude,
+                grok,
+                codex: false
+            }
+        );
     }
 }
 

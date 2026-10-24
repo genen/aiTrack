@@ -1,6 +1,6 @@
 # aiTrack
 
-aiTrack is a small window for **Windows**, **macOS** and **Linux** that shows how much of your **Claude** and **Grok** plan
+aiTrack is a small window for **Windows**, **macOS** and **Linux** that shows how much of your **Claude**, **Grok** and **Codex** (ChatGPT) plan
 limits you have used. It stays on top of your other windows, updates by itself, and warns you with a normal system
 notification before a limit runs out. The Mac version is for Apple silicon. Linux (new) is a first release for Ubuntu.
 Where this guide names Windows, Mac or Linux, it applies to that system only.
@@ -35,8 +35,9 @@ This guide is for people who just want to run it. Deeper technical notes are at 
 
 ## 1. What aiTrack is
 
-Claude and Grok limit how much you can use them. Claude has a **5-hour session** limit and a **7-day weekly**
-limit. Grok has one **weekly** credit pool. Each tool shows its own numbers in its own place, and it is easy to
+Claude, Grok and Codex limit how much you can use them. Claude has a **5-hour session** limit and a **7-day weekly**
+limit. Grok has one **weekly** credit pool. Codex (OpenAI's coding agent, part of a ChatGPT plan) has a **5-hour**
+and a **weekly** limit. Each tool shows its own numbers in its own place, and it is easy to
 hit a limit without seeing it coming.
 
 aiTrack puts those numbers in one small window:
@@ -47,7 +48,7 @@ aiTrack puts those numbers in one small window:
 - a Stats view with your token use and cost per project;
 - notifications (Windows toasts, Mac banners or Linux desktop notifications) at 75 %, 90 % and 100 %.
 
-It runs on your computer and reads files that Claude and Grok already keep there. It only talks to the internet when
+It runs on your computer and reads files that Claude, Grok and Codex already keep there. It only talks to the internet when
 those files have nothing recent (see [Files and privacy](#12-files-and-privacy)). A tool's block appears only
 when that tool is installed.
 
@@ -71,6 +72,7 @@ License, version 3 or later (see `LICENSE`).
 - At least one of the tools it tracks, already installed and signed in:
   - **Claude**: the Claude desktop app, or Claude Code.
   - **Grok**: the Grok command-line tool (the "Grok CLI"). See [section 5](#5-grok-needs-the-grok-cli).
+  - **Codex**: the Codex app or the Codex CLI, signed in with your ChatGPT account (see [Codex](#codex)).
 - To build it yourself: Git and Rust (steps below; on a Mac also the Xcode command line tools; on Linux the build tools and the X11 and Wayland development packages). You do not need Rust to run a downloaded copy.
 
 ## 3. Install and run
@@ -339,6 +341,27 @@ Known limits:
 
 Clicking the Grok Bot bar opens its weekly pane: the current value, when it resets, how old the reading is (dimmed with a note when it is more than 60 minutes old), a history chart with 24h, 7d, 30d and All, and the Windows, Avg peak, Max peak and Hit rate numbers.
 
+### Codex
+
+Codex is OpenAI's coding agent (the Codex app, the Codex CLI and the IDE extension), included in ChatGPT plans. Its
+block shows the **Codex work limits**, the same numbers as Codex's own Settings > Usage page: a **Session** bar (the
+5-hour window) and a **Weekly** bar. They are not the limits of ordinary ChatGPT chats, which ChatGPT does not show
+anywhere. If your plan has only a weekly limit, the block shows one Weekly row.
+
+aiTrack uses:
+
+1. **Live usage.** It asks ChatGPT's usage service (the one the Codex Usage page uses) with the sign-in Codex
+   stored in `~/.codex/auth.json` (`C:\Users\<you>\.codex` on Windows).
+2. **Codex's session logs.** Codex writes the current limits into its session files in `~/.codex/sessions` each
+   time it works. aiTrack reads the newest one. It is only as fresh as the last time you used Codex.
+
+The tooltips show your plan, your credit balance and banked resets when the service reports them, and limits for a
+single model (for example a separate Codex model limit) under **By model**. The Stats view and the history chart work
+as for Claude, and the Stats view counts Codex tokens and cost per project from the session logs.
+
+The Codex block appears when the folder `~/.codex` (or the folder in `CODEX_HOME`) has a sign-in or session logs. If
+it says **Codex login expired**, open Codex once so it renews the sign-in.
+
 ## 5. Grok needs the Grok CLI
 
 aiTrack reads Grok usage from the folder of the Grok **command-line tool** (`~/.grok`, which is
@@ -422,7 +445,7 @@ The window has a header with three buttons, one block per tool, and a status lin
 
 ### The bars
 
-Each bar has 20 segments in the tool's colour (Claude amber, Grok light grey). Read it left to right:
+Each bar has 20 segments in the tool's colour (Claude amber, Grok light grey, Codex green). Read it left to right:
 
 - **bright**: what you have used so far;
 - **medium**: the extra use expected by the time the window resets if you keep your current pace;
@@ -433,7 +456,7 @@ what is left instead.
 
 ### Session and weekly
 
-Claude's **Session** window lasts 5 hours. Its **Weekly** window lasts 7 days. Each has its own reset time. Grok has only a **Weekly** window (your billing period).
+Claude's **Session** window lasts 5 hours. Its **Weekly** window lasts 7 days. Each has its own reset time. Grok has only a **Weekly** window (your billing period). Codex has a 5-hour **Session** window and a **Weekly** window.
 
 ### Hovering and clicking a row
 
@@ -611,7 +634,7 @@ At the bottom: **Back**, a **Help** link (it opens this page), and the build lin
 **General**
 
 - **Update frequency**: **1 min**, **5 min**, **15 min** (the default) or **1 hour**. This is how often the online
-  check runs. The online check is the Claude usage service and Grok billing, and it is only asked when no file on
+  check runs. The online check is the Claude usage service, Grok billing and Codex usage, and it is only asked when no file on
   your PC has a recent reading. Every minute may hit rate limits.
 - **Custom (minutes)**: any number of minutes, 1 to 1440.
 - **Local refresh (seconds)**: how often aiTrack re-reads the files of the Claude app. Default 60, allowed 15 to 600.
@@ -629,7 +652,7 @@ At the bottom: **Back**, a **Help** link (it opens this page), and the build lin
 - **Window position**: the window reopens where you left it. **Reset** forgets the position.
 - **Always on top**: keep the window above other windows (on by default). On Linux under native Wayland it shows
   "Not available on native Wayland" (see [Install on Linux](#install-on-linux-new)).
-- **Show Claude** and **Show Grok**: **Auto** (show it when the tool is found on this PC; the line under the name says
+- **Show Claude**, **Show Grok** and **Show Codex**: **Auto** (show it when the tool is found on this PC; the line under the name says
   "Found on this PC", on a Mac "Found on this Mac", or "Not found"), **On** (always show it) or **Off** (never).
 - **Refresh Grok now**: starts the Grok CLI in the background to fetch fresh Grok usage. This row only appears when
   the Grok CLI is found. Under the button it shows the result, for example "Refreshed 19:42: weekly 8%", and it
@@ -644,8 +667,8 @@ At the bottom: **Back**, a **Help** link (it opens this page), and the build lin
 
 **Data**
 
-- **90-day usage cycling**: aiTrack keeps 90 days of usage history for every tool it tracks (Claude, Grok and the
-  Grok Bot). Once a day, while it runs, older readings are deleted. Readings from a limit window that ended less than
+- **90-day usage cycling**: aiTrack keeps 90 days of usage history for every tool it tracks (Claude, Grok, the
+  Grok Bot and Codex). Once a day, while it runs, older readings are deleted. Readings from a limit window that ended less than
   90 days ago stay until the whole window is older.
 - The history files and their sizes.
 - **Prune now** runs the cleanup at once and says what it removed.
@@ -669,20 +692,24 @@ If a link cannot be opened the status bar says so.
 ## 11. Clicking the logos
 
 Clicking a tool's logo in the window opens that tool. Hover the logo to see "Open Claude desktop" or
-"Open Grok".
+"Open Grok" or "Open Codex".
 
 - **Claude logo**: tries the `claude://` link, then the Microsoft Store app, then the classic install in
   `%LOCALAPPDATA%\AnthropicClaude` or `%LOCALAPPDATA%\Programs\Claude`.
 - **Grok logo**: tries the **Grok Bot** app from your Start menu first, then the Store app **Grok**, then the Grok CLI in
   a new terminal window (Windows Terminal if you have it, otherwise a normal console window) in your home folder. It
   only opens the terminal; it never types anything.
+- **Codex logo**: opens the **Codex** app (the Microsoft Store app, as the Start menu lists it), else the Codex CLI in
+  a new terminal window in your home folder.
 
 **On a Mac** the same order is used, started with `open -a`: the Claude app, and for Grok the Grok Bot app, then the
-Grok app, then the Grok CLI in a new Terminal window in your home folder.
+Grok app, then the Grok CLI in a new Terminal window in your home folder; for Codex the Codex app, then the ChatGPT app,
+then the Codex CLI in a new Terminal window.
 
 **On Linux** the Claude badge tries `xdg-open claude://`, then the `claude-desktop` command, then a `claude*.desktop`
 entry (through `gio` or `gtk-launch`). The Grok badge runs the Grok CLI in a terminal (`$TERMINAL`,
-`x-terminal-emulator`, `gnome-terminal`, `konsole`, then `xterm`). It only opens the terminal; it never types anything.
+`x-terminal-emulator`, `gnome-terminal`, `konsole`, then `xterm`); the Codex badge does the same with the Codex CLI. It
+only opens the terminal; it never types anything.
 
 If nothing could be started, the status bar says "Could not launch Claude desktop" or "Could not launch Grok". What was
 tried is written to `~/.aitrack/launch.log`.
@@ -697,11 +724,12 @@ aiTrack keeps its own files in `C:\Users\<you>\.aitrack\` (written `~/.aitrack`)
 |---|---|
 | `usage.jsonl` | Claude readings, one line per poll, including failed polls |
 | `usage-grok.jsonl` | Grok readings |
+| `usage-codex.jsonl` | Codex readings |
 | `usage-grok-bot.jsonl` | Grok Bot weekly readings (records with a `bot_weekly` field), appended when the value changes and at most every 15 minutes otherwise |
 | `*.jsonl.bak` | the history file as it was before the last cleanup (replaced at the next one) |
 | `*.jsonl.corrupt` | unreadable lines set aside by a cleanup, if there were any |
 | `settings.json` | your settings |
-| `alerts.json`, `alerts-grok.json` | which alerts were already sent |
+| `alerts.json`, `alerts-grok.json`, `alerts-codex.json` | which alerts were already sent |
 | `transcript-index.json` | a summary of the transcript files for the Stats view |
 | `pricing-cache.json` | the downloaded price list |
 | `pricing-overrides.json` | optional: your own prices (you create it) |
@@ -714,28 +742,30 @@ On a Mac the folder is `/Users/<you>/.aitrack` and on Linux `/home/<you>/.aitrac
 Deleting a file while aiTrack is closed resets what it holds. For example, deleting `usage.jsonl` removes your Claude
 history.
 
-**90-day usage cycling:** the three `usage*.jsonl` files keep 90 days of history. Once a day aiTrack deletes older
+**90-day usage cycling:** the `usage*.jsonl` files keep 90 days of history. Once a day aiTrack deletes older
 readings (also when the window stays open for weeks), and **Settings > Data > Prune now** does it at once. The file as
 it was before each cleanup is kept as `.bak` until the next one, and a line that cannot be read is moved to `.corrupt`,
 never dropped.
 
 What a reading holds: the percentages, reset times, spend and per-model limits from the Claude usage answer, plus
 the whole answer from the Claude usage service. It does **not** hold your sign-in token, your organisation id,
-your email or anything you wrote. The Grok record holds only the percentage, the reset time and your plan name.
+your email or anything you wrote. The Grok record holds only the percentage, the reset time and your plan name. The Codex record holds the
+percentages, reset times, plan name, credit balance and per-model limits, never your account id or sign-in.
 
-aiTrack only **reads** the folders of Claude and Grok. It never changes them.
+aiTrack only **reads** the folders of Claude, Grok and Codex. It never changes them.
 
 ### What leaves your PC
 
 - To `api.anthropic.com`: the Claude usage question, with your Claude Code sign-in. Only when no file on your PC
   has a recent reading.
 - To `cli-chat-proxy.grok.com`: the Grok billing question, with the sign-in the Grok CLI stored.
+- To `chatgpt.com`: the Codex usage question, with the sign-in Codex stored.
 - To `raw.githubusercontent.com`: a download of the public price list, about once a day.
 - Clicking **Help** opens this page (https://github.com/genen/aiTrack#readme) in your browser.
 - Starting the Grok CLI (Refresh) makes the CLI contact xAI as it always does.
 
 Nothing else is sent. There is no account, no analytics and no crash reporting. Sign-in tokens go only to those
-two hosts above, over HTTPS, and are never written to any file or log by aiTrack.
+three hosts above, over HTTPS, and are never written to any file or log by aiTrack.
 
 ### License, notices and policies
 
@@ -847,17 +877,16 @@ Limits you should know about:
   signed with a developer identity or notarized, so macOS asks you to approve it once.
 - **Mac:** Apple silicon only (M1 and later); Intel Macs are not built. An unanswered macOS Keychain access dialog
   stalls that one read for about 10 seconds only; the other Claude sources keep working.
-- **It relies on files and services that Claude and Grok do not document.** If Claude or Grok change them, a number
+- **It relies on files and services that Claude, Grok and Codex do not document.** If one of them changes them, a number
   can disappear until aiTrack is updated. `aitrack --sources` helps to see what changed.
 - **Claude's desktop cache can only be read when it is plain, gzip, deflate or zstd.** A cache entry compressed
   with brotli cannot be read.
 - **Grok needs the Grok CLI** (section 5). The Grok desktop apps alone are not enough.
 - **Costs in the Stats view are estimates** at list prices.
-- The history files are never trimmed.
-- Only Claude and Grok are supported.
+- Only Claude, Grok and Codex are supported. For ChatGPT, aiTrack shows the Codex limits, not chat message caps.
 
 Roadmap, in this order: the Windows release (done), the Mac version (done), the Linux version (new, first release),
-then more tools (Gemini, ChatGPT).
+then more tools (Codex is in; Gemini next).
 
 ---
 
@@ -1116,6 +1145,30 @@ file and statistics are untouched). Tracking is automatic when the Grok folder e
 "Track Grok" (`grok_enabled` in settings.json) overrides it. Toast alerts (75/90/100 %, recovery) work for Grok
 too (`alerts-grok.json`). `aitrack --sources` has a Grok section (structure only). Headless `--collect` does not
 collect Grok.
+
+### Codex (third vendor)
+
+If `~/.codex` (or `$CODEX_HOME`) holds `auth.json` or session logs, a Codex block appears with a **Session** row
+(the 5-hour window) and a **Weekly** row; windows are told apart by their length (a week or more is weekly), so a
+plan with only a weekly limit gets one row. Two sources, live first:
+
+1. **codex-usage**: `GET https://chatgpt.com/backend-api/wham/usage`, the endpoint behind Codex's Usage page, with
+   the ChatGPT sign-in Codex stored in `auth.json` (`tokens.access_token` as the bearer and the account id header).
+   API-key logins are not used. The token is read fresh on each poll and never stored or logged; a 401/403 says
+   "Codex login expired: open Codex once". The answer also gives the plan, the credit balance, banked resets and
+   extra limits per model (shown under **By model** in the tooltips).
+2. **codex-log**: the newest `token_count` events in `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (and
+   `archived_sessions`, `.jsonl.zst` included), which carry the same `rate_limits`. Only as fresh as your last Codex
+   turn. An old reading stays visible, dimmed with the age chip; only a weekly window that has ended shows dashes.
+
+Readings go to `usage-codex.jsonl` (records carry `"vendor": "codex"`). Settings > Display > "Show Codex"
+(`codex_enabled` in settings.json) overrides detection. Alerts work as for Claude (`alerts-codex.json`). The Stats
+view computes Codex tokens and cost per project from the session logs (`token_count` totals, priced from the live
+LiteLLM list with built-in fallbacks for the GPT-5 family). `aitrack --sources` has a Codex section (counts only).
+
+**Opening Codex.** On Windows the badge opens the Store app as the Start menu lists it (entry "Codex" or an
+`OpenAI.Codex_*` AppID, started with `explorer.exe shell:AppsFolder\<AppID>`), else `codex` in a new terminal.
+Only with neither is the package folder's `<family>!App` tried.
 
 ## Development
 

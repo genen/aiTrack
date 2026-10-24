@@ -25,6 +25,13 @@
 //!   `completion_tokens`), the model from the last `model changed` event of the session (else the
 //!   `[models] default` of `config.toml`), the folder from `session created`. That path has tokens
 //!   only: **cost unknown** (never guessed from Claude prices).
+//! * **Codex** (OpenAI): `~/.codex` (or `$CODEX_HOME`), `sessions/YYYY/MM/DD/rollout-*.jsonl` and
+//!   `archived_sessions/` (plain or `.jsonl.zst`). The first line (`session_meta`) has the session
+//!   `id` and `cwd`; `turn_context` lines name the `model` (and `cwd`); every model turn writes an
+//!   `event_msg` of `payload.type: "token_count"` whose `info.total_token_usage` is the session's
+//!   running total (`input_tokens` including `cached_input_tokens`, `output_tokens` including
+//!   reasoning). A request is the growth of that total since the previous line, so repeated lines
+//!   add nothing; it is priced at the API list price of its model, like Claude.
 //!
 //! Anything unreadable or oddly shaped is skipped, never fatal: lines are read with a size cap,
 //! huge files and runaway directory trees are bounded, nothing panics. Message content is never
@@ -40,7 +47,8 @@
 //!
 //! # Aggregation
 //!
-//! [`aggregate`] de-duplicates, prices (Claude through [`PriceTable`], Grok from its ticks) and
+//! [`aggregate`] de-duplicates, prices (Claude and Codex through [`PriceTable`], Grok from its
+//! ticks) and
 //! groups by (vendor, project) for Today (local calendar day), 7 days, 30 days and all time.
 
 use crate::pricing::{PriceTable, TokenUsage};
@@ -81,12 +89,15 @@ pub enum Origin {
     GrokUpdate,
     /// A Grok `unified.jsonl` inference event (tokens only).
     GrokLog,
+    /// A Codex session-log turn (priced like Claude).
+    Codex,
 }
 
 impl Origin {
     pub fn vendor(self) -> VendorId {
         match self {
             Origin::Claude => VendorId::Claude,
+            Origin::Codex => VendorId::Codex,
             _ => VendorId::Grok,
         }
     }
@@ -96,6 +107,7 @@ impl Origin {
             Origin::Claude => 0,
             Origin::GrokUpdate => 1,
             Origin::GrokLog => 2,
+            Origin::Codex => 3,
         }
     }
 
@@ -104,6 +116,7 @@ impl Origin {
             0 => Origin::Claude,
             1 => Origin::GrokUpdate,
             2 => Origin::GrokLog,
+            3 => Origin::Codex,
             _ => return None,
         })
     }
@@ -628,6 +641,210 @@ fn parse_grok_unified(path: &Path, config: &Path) -> Vec<Request> {
     out
 }
 
+// ---- Codex ----------------------------------------------------------------------------------
+
+/// The token counts of a Codex `*_token_usage` object.
+fn codex_counts(v: &Value) -> [u64; 3] {
+    let n = |k: &str| v.get(k).map(as_u64).unwrap_or(0);
+    [
+        n("input_tokens"),
+        n("cached_input_tokens"),
+        n("output_tokens"),
+    ]
+}
+
+/// Feeds every line of one session file to the callback it is given.
+type LineFeed<'a> = dyn FnMut(&mut dyn FnMut(&[u8])) + 'a;
+
+fn parse_codex_lines(lines: &mut LineFeed<'_>, stem: &str) -> Vec<Request> {
+    let mut out = Vec::new();
+    let (mut sid, mut cwd, mut model) = (stem.to_owned(), String::new(), String::from("unknown"));
+    let mut prev = [0u64; 3];
+    lines(&mut |line| {
+        let text = text_of(line);
+        let meta = text.contains("\"session_meta\"") || text.contains("\"turn_context\"");
+        if !meta && !text.contains("\"token_count\"") {
+            return;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(&text) else {
+            return;
+        };
+        let p = v.get("payload").unwrap_or(&Value::Null);
+        match v.get("type").and_then(Value::as_str) {
+            Some("session_meta") => {
+                if let Some(id) = p
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                {
+                    sid = id.to_owned();
+                }
+                if let Some(c) = p.get("cwd").and_then(Value::as_str) {
+                    cwd = c.to_owned();
+                }
+                return;
+            }
+            Some("turn_context") => {
+                if let Some(m) = p
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                {
+                    model = m.to_owned();
+                }
+                if let Some(c) = p.get("cwd").and_then(Value::as_str) {
+                    cwd = c.to_owned();
+                }
+                return;
+            }
+            _ => {}
+        }
+        if p.get("type").and_then(Value::as_str) != Some("token_count") {
+            return;
+        }
+        let Some(total) = p
+            .get("info")
+            .and_then(|i| i.get("total_token_usage"))
+            .filter(|t| t.is_object())
+        else {
+            return;
+        };
+        let Some(at) = v
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(parse_ts)
+        else {
+            return;
+        };
+        let cur = codex_counts(total);
+        // a repeated line adds nothing
+        if cur[0] + cur[2] == prev[0] + prev[2] {
+            return;
+        }
+        let d = if cur[0] + cur[2] < prev[0] + prev[2] {
+            // the running total started again (a resumed session): count this turn only
+            let last = p
+                .get("info")
+                .and_then(|i| i.get("last_token_usage"))
+                .map(codex_counts)
+                .unwrap_or_default();
+            if last[0] + last[2] > 0 {
+                last
+            } else {
+                cur
+            }
+        } else {
+            [
+                cur[0].saturating_sub(prev[0]),
+                cur[1].saturating_sub(prev[1]),
+                cur[2].saturating_sub(prev[2]),
+            ]
+        };
+        prev = cur;
+        let cached = d[1].min(d[0]);
+        out.push(Request {
+            at: at.timestamp(),
+            origin: Origin::Codex,
+            project: project_name(&cwd),
+            session: sid.clone(),
+            model: model.clone(),
+            usage: TokenUsage {
+                input: d[0] - cached,
+                output: d[2],
+                cache_read: cached,
+                cache_write_5m: 0,
+                cache_write_1h: 0,
+            },
+            cost_ticks: None,
+            sidechain: false,
+            // the same running total of the same session (a resumed copy) is one request
+            key: fnv(&format!("codex:{sid}:{}:{}", cur[0], cur[2])),
+        });
+    });
+    out
+}
+
+/// The requests of one Codex session file (plain `.jsonl` or `.jsonl.zst`).
+fn parse_codex_file(path: &Path) -> Vec<Request> {
+    let name = path
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let stem = name
+        .trim_end_matches(".zst")
+        .trim_end_matches(".jsonl")
+        .to_owned();
+    if name.ends_with(".zst") {
+        let Ok(f) = File::open(path) else {
+            return Vec::new();
+        };
+        let Ok(mut d) = ruzstd::decoding::StreamingDecoder::new_with_max_window_size(
+            BufReader::new(f),
+            8 * 1024 * 1024,
+        ) else {
+            return Vec::new();
+        };
+        let mut buf = Vec::new();
+        if (&mut d).take(MAX_FILE_BYTES).read_to_end(&mut buf).is_err() {
+            return Vec::new();
+        }
+        return parse_codex_lines(
+            &mut |f| {
+                for l in buf.split(|b| *b == b'\n') {
+                    if l.len() <= MAX_LINE_BYTES {
+                        f(l);
+                    }
+                }
+            },
+            &stem,
+        );
+    }
+    parse_codex_lines(&mut |f| for_each_line(path, 0, f), &stem)
+}
+
+fn discover_codex(home: &Path, found: &mut Vec<Found>) -> SourceInfo {
+    let sessions = home.join("sessions");
+    let mut info = SourceInfo {
+        label: "Codex sessions".into(),
+        path: sessions.clone(),
+        exists: sessions.is_dir(),
+        files: 0,
+        note: String::new(),
+    };
+    let mut stack: Vec<(PathBuf, usize)> = vec![(sessions, 0), (home.join("archived_sessions"), 0)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let Ok(ft) = e.file_type() else { continue };
+            let path = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if ft.is_dir() {
+                if depth < 4 {
+                    stack.push((path, depth + 1));
+                }
+            } else if ft.is_file()
+                && name.starts_with("rollout-")
+                && (name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"))
+                && found.len() < MAX_FILES
+            {
+                let Ok(meta) = e.metadata() else { continue };
+                if meta.len() > MAX_FILE_BYTES {
+                    continue;
+                }
+                info.files += 1;
+                found.push(Found {
+                    path,
+                    kind: FileKind::Codex,
+                    sig: (mtime_nanos(&meta), meta.len()),
+                });
+            }
+        }
+    }
+    info
+}
+
 // ---- discovery ------------------------------------------------------------------------------
 
 /// Where the transcripts are.
@@ -637,6 +854,8 @@ pub struct Roots {
     pub claude_projects: PathBuf,
     /// The Grok CLI's folder.
     pub grok_home: PathBuf,
+    /// Codex's folder (`~/.codex`).
+    pub codex_home: PathBuf,
     /// Where the per-file index is persisted (`None` = memory only).
     pub index: Option<PathBuf>,
 }
@@ -651,6 +870,7 @@ impl Roots {
                 .map(|d| d.join("projects"))
                 .unwrap_or_else(|| home.join(".claude").join("projects")),
             grok_home: crate::grok::grok_home(env),
+            codex_home: crate::codex::codex_home(env),
             index,
         }
     }
@@ -661,6 +881,7 @@ enum FileKind {
     Claude { fallback: String, subagent: bool },
     GrokUpdates { cwd: String, sid: String },
     GrokUnified { config: PathBuf },
+    Codex,
 }
 
 #[derive(Debug, Clone)]
@@ -854,6 +1075,7 @@ impl Scanner {
         let mut found = Vec::new();
         let mut sources = vec![discover_claude(&self.roots.claude_projects, &mut found)];
         sources.extend(discover_grok(&self.roots.grok_home, &mut found));
+        sources.push(discover_codex(&self.roots.codex_home, &mut found));
         self.sources = sources;
 
         let mut sum = ScanSummary {
@@ -875,6 +1097,7 @@ impl Scanner {
                 }
                 FileKind::GrokUpdates { cwd, sid } => parse_grok_updates(&f.path, cwd, sid),
                 FileKind::GrokUnified { config } => parse_grok_unified(&f.path, config),
+                FileKind::Codex => parse_codex_file(&f.path),
             };
             self.files.insert(
                 f.path.clone(),
@@ -1223,10 +1446,20 @@ pub fn aggregate<'a>(
     for r in kept {
         let cost = match r.origin {
             Origin::Claude => Some(prices.cost(&r.model, &r.usage)),
+            // a turn whose model the log never named has no known price
+            Origin::Codex => match prices.price_for(&r.model) {
+                // no table entry for the model: unknown, not Claude's default rates
+                (_, crate::pricing::Source::Default) => None,
+                (rates, _) => Some(crate::pricing::cost_at(&rates, &r.usage)),
+            },
             _ => r.cost_ticks.map(|t| t as f64 * COST_USD_PER_TICK),
         };
         let vendor = r.origin.vendor();
-        let vkey = u8::from(vendor == VendorId::Grok);
+        let vkey: u8 = match vendor {
+            VendorId::Grok => 1,
+            VendorId::Codex => 2,
+            _ => 0,
+        };
         for (i, start) in starts.iter().enumerate() {
             if r.at < *start {
                 continue;
@@ -1252,10 +1485,10 @@ pub fn aggregate<'a>(
             .into_iter()
             .map(|((v, name), a)| ProjectUsage {
                 name: name.to_owned(),
-                vendor: if v == 1 {
-                    VendorId::Grok
-                } else {
-                    VendorId::Claude
+                vendor: match v {
+                    1 => VendorId::Grok,
+                    2 => VendorId::Codex,
+                    _ => VendorId::Claude,
                 },
                 total_tokens: a.tokens.total(),
                 tokens: a.tokens,
@@ -1338,13 +1571,14 @@ pub fn fmt_cost(cost: f64, messages: usize, unpriced: usize) -> String {
     }
 }
 
-/// Name column of `--projects`: Grok rows end in " (Grok)" so they are not mistaken for Claude
+/// Name column of `--projects`: Grok and Codex rows end in " (Grok)" / " (Codex)" so they are not mistaken for Claude
 /// projects of the same name. A long name is cut before the label, never after it.
 pub fn cli_project_label(p: &ProjectUsage) -> String {
     const MAX_NAME: usize = 40;
     let name: String = p.name.chars().take(MAX_NAME).collect();
     match p.vendor {
         VendorId::Grok => format!("{name} (Grok)"),
+        VendorId::Codex => format!("{name} (Codex)"),
         _ => name,
     }
 }

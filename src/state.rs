@@ -31,13 +31,33 @@ pub struct State {
     pub grok: Option<GrokState>,
     /// Claude's panel is shown (setting, or automatic because a Claude tool was detected).
     pub claude_on: bool,
+    /// Codex (separate history and collector); `None` when the Codex part is not set up.
+    pub codex: Option<CodexState>,
 }
 
 impl State {
     /// No vendor is shown at all: nothing installed (or everything switched off).
     pub fn nothing_to_track(&self) -> bool {
-        !self.claude_on && !self.grok.as_ref().is_some_and(|g| g.enabled)
+        !self.claude_on
+            && !self.grok.as_ref().is_some_and(|g| g.enabled)
+            && !self.codex.as_ref().is_some_and(|c| c.enabled)
     }
+}
+
+/// Codex's part of the state: two windows like Claude's, plus plan, credits and per-model buckets.
+#[derive(Debug, Clone)]
+pub struct CodexState {
+    pub plan: Option<Plan>,
+    pub collector: Status,
+    /// Newest first (Codex polls only).
+    pub diagnostics: Vec<Diag>,
+    pub tier: Option<String>,
+    /// Per-model buckets of the newest reading that has them, in the current weekly window.
+    pub models: Vec<ModelLimit>,
+    pub credits: Option<crate::reading::CreditBalance>,
+    pub banked_resets: Option<u64>,
+    /// Tracking is switched on (setting, or automatic because the Codex folder exists).
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +77,31 @@ pub struct GrokState {
     pub bot_gauge: Option<crate::analysis::Gauge>,
 }
 
+/// The per-model limits of the newest reading that reports them, from the current weekly window.
+/// Newest by time, not by file position (backfilled history is appended after newer records),
+/// among the readings that report per-model limits: a newer history sample has none and must not
+/// blank the "By model" block; and only from the current weekly window: last week's per-model
+/// figures are not this week's.
+fn current_models(
+    readings: &[Reading],
+    plan: Option<&Plan>,
+    now: DateTime<Utc>,
+) -> Vec<ModelLimit> {
+    let week_start = plan
+        .and_then(|p| p.weekly.as_ref())
+        .and_then(|w| w.resets_at.as_deref())
+        .and_then(crate::util::parse_ts)
+        .map(|r| r - chrono::Duration::days(7))
+        .unwrap_or(now - chrono::Duration::days(7));
+    readings
+        .iter()
+        .filter(|r| r.ok && !r.limits.is_empty())
+        .filter(|r| r.t.is_some_and(|t| t >= week_start && t <= now))
+        .max_by_key(|r| r.t)
+        .map(|r| r.limits.clone())
+        .unwrap_or_default()
+}
+
 pub fn build_state(
     readings: &[Reading],
     settings: Values,
@@ -64,24 +109,7 @@ pub fn build_state(
     now: DateTime<Utc>,
 ) -> State {
     let plan = analyze(readings, now);
-    // newest by time, not by file position (backfilled history is appended after newer records),
-    // among the readings that report per-model limits: a newer history sample has none and must not
-    // blank the "By model" block
-    // and only from the current weekly window: last week's per-model figures are not this week's
-    let week_start = plan
-        .as_ref()
-        .and_then(|p| p.weekly.as_ref())
-        .and_then(|w| w.resets_at.as_deref())
-        .and_then(crate::util::parse_ts)
-        .map(|r| r - chrono::Duration::days(7))
-        .unwrap_or(now - chrono::Duration::days(7));
-    let models = readings
-        .iter()
-        .filter(|r| r.ok && !r.limits.is_empty())
-        .filter(|r| r.t.is_some_and(|t| t >= week_start && t <= now))
-        .max_by_key(|r| r.t)
-        .map(|r| r.limits.clone())
-        .unwrap_or_default();
+    let models = current_models(readings, plan.as_ref(), now);
     let diagnostics = readings
         .iter()
         .rev()
@@ -114,6 +142,7 @@ pub fn build_state(
         loading: false,
         grok: None,
         claude_on: true,
+        codex: None,
     }
 }
 
@@ -129,6 +158,7 @@ impl State {
             loading: true,
             grok: None,
             claude_on: true,
+            codex: None,
         }
     }
 }
@@ -136,7 +166,13 @@ impl State {
 /// Claude's and Grok's poll rows in one list, newest first, at most [`DIAG_LEN`] (Grok rows start
 /// with `Grok:`).
 pub fn merged_diagnostics(claude: &[Diag], grok: &[Diag]) -> Vec<Diag> {
-    let mut all: Vec<Diag> = claude.iter().chain(grok).cloned().collect();
+    merged_diagnostics_of(&[claude, grok])
+}
+
+/// Several vendors' poll rows in one list, newest first, at most [`DIAG_LEN`]; equal times keep
+/// the order of `lists`.
+pub fn merged_diagnostics_of(lists: &[&[Diag]]) -> Vec<Diag> {
+    let mut all: Vec<Diag> = lists.iter().flat_map(|l| l.iter()).cloned().collect();
     // stable: equal times keep Claude first
     all.sort_by_key(|d| std::cmp::Reverse(crate::util::parse_ts(&d.ts)));
     all.truncate(DIAG_LEN);
@@ -156,11 +192,15 @@ pub fn reading_is_current(plan: &Plan, settings: &Values, now: DateTime<Utc>) ->
     let age_min = (now - t).num_milliseconds() as f64 / 60000.0;
     let network = SNAPSHOT_MAX_AGE_MIN.max(settings.interval_min * 2.5 + 2.0);
     let limit = match plan.last_source.as_deref() {
-        Some("oauth") | Some("grok-billing") | None => network,
+        Some("oauth") | Some("grok-billing") | Some("codex-usage") | None => network,
         Some(_) => SNAPSHOT_MAX_AGE_MIN,
     };
-    // a Grok log snapshot of a billing period that has ended is last week's number
-    if plan.last_source.as_deref() == Some("grok-log") && weekly_period_ended(plan, now) {
+    // a Grok or Codex log snapshot of a weekly period that has ended is last week's number
+    if matches!(
+        plan.last_source.as_deref(),
+        Some("grok-log") | Some("codex-log")
+    ) && weekly_period_ended(plan, now)
+    {
         return false;
     }
     age_min <= limit
@@ -234,5 +274,51 @@ pub fn build_grok_state(
         bot: None,
         bot_stats: None,
         bot_gauge: None,
+    }
+}
+
+/// Codex's part of the state, from its own readings.
+pub fn build_codex_state(
+    readings: &[Reading],
+    collector: Status,
+    enabled: bool,
+    now: DateTime<Utc>,
+) -> CodexState {
+    let plan = analyze(readings, now);
+    let newest = readings.iter().filter(|r| r.ok).max_by_key(|r| r.t);
+    let models = current_models(readings, plan.as_ref(), now);
+    let diagnostics = readings
+        .iter()
+        .rev()
+        .filter(|r| !r.backfill)
+        .take(DIAG_LEN)
+        .map(|r| Diag {
+            ts: r.ts.clone(),
+            ok: r.ok,
+            text: format!(
+                "Codex: {}",
+                if r.ok {
+                    // which source supplied it: tells a live reading from an old log line
+                    let src = r
+                        .source
+                        .as_deref()
+                        .map(|s| format!(" \u{b7} {s}"))
+                        .unwrap_or_default();
+                    format!("{}{src}", r.describe())
+                } else {
+                    r.error.clone().unwrap_or_else(|| "failed".into())
+                }
+            ),
+        })
+        .collect();
+    CodexState {
+        plan,
+        collector,
+        diagnostics,
+        tier: newest.and_then(|r| r.tier.clone()),
+        models,
+        credits: newest.and_then(|r| r.credits.clone()),
+        banked_resets: newest.and_then(|r| r.banked_resets),
+        enabled,
     }
 }

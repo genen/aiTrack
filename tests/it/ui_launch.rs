@@ -134,14 +134,12 @@ fn clicking_the_claude_badge_launches_once_with_a_pointer_cursor() {
 }
 
 #[test]
-fn other_vendors_badges_are_not_clickable() {
+fn antigravity_badge_is_not_clickable() {
     let (l, n) = counting();
     let mut w = Win::new(true, Some(l));
-    for v in [VendorId::Codex, VendorId::Antigravity] {
-        let p = w.badge(v);
-        assert_ne!(w.hover(p), CursorIcon::PointingHand, "{v:?} badge");
-        w.click(p);
-    }
+    let p = w.badge(VendorId::Antigravity);
+    assert_ne!(w.hover(p), CursorIcon::PointingHand, "Antigravity badge");
+    w.click(p);
     assert_eq!(n.load(Ordering::SeqCst), 0);
 }
 
@@ -189,6 +187,24 @@ fn clicking_the_grok_badge_opens_grok_not_claude() {
     assert_ne!(w.hover(grok), CursorIcon::PointingHand);
     w.click(grok);
     assert_eq!(gn.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn clicking_the_codex_badge_opens_codex_not_claude() {
+    let (claude_l, claude_n) = counting();
+    let (codex_l, codex_n) = counting();
+    let mut w = Win::new(true, Some(claude_l));
+    w.ui.codex_launcher = codex_l;
+    let codex = w.badge(VendorId::Codex);
+    assert_eq!(w.hover(codex), CursorIcon::PointingHand);
+    assert_eq!(
+        codex_n.load(Ordering::SeqCst),
+        0,
+        "hovering must not launch"
+    );
+    w.click(codex);
+    assert_eq!(codex_n.load(Ordering::SeqCst), 1);
+    assert_eq!(claude_n.load(Ordering::SeqCst), 0);
 }
 
 #[test]

@@ -50,8 +50,51 @@ pub struct Reading {
     pub backfill: bool,
     /// Why this source supplied the reading (sources skipped ahead of it, ...), for the diagnostics.
     pub note: Option<String>,
-    /// Subscription tier when the source reported one (`raw.tier`, Grok).
+    /// Subscription tier when the source reported one (`raw.tier`, Grok and Codex).
     pub tier: Option<String>,
+    /// Codex: the credits balance (`raw.credits`).
+    pub credits: Option<CreditBalance>,
+    /// Codex: banked early resets still available (`raw.banked_resets`).
+    pub banked_resets: Option<u64>,
+}
+
+/// A credits balance (Codex): unlimited, or a number of credits left.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreditBalance {
+    pub unlimited: bool,
+    pub has_credits: bool,
+    pub balance: Option<f64>,
+}
+
+impl CreditBalance {
+    fn from_value(v: &Value) -> Option<Self> {
+        let o = v.as_object()?;
+        Some(CreditBalance {
+            unlimited: o.get("unlimited").and_then(Value::as_bool).unwrap_or(false),
+            has_credits: o
+                .get("has_credits")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            balance: o
+                .get("balance")
+                .and_then(Value::as_f64)
+                .filter(|b| b.is_finite()),
+        })
+    }
+
+    /// The tooltip line (`Credits  unlimited`, `Credits  120 left`), or `None` when there are none.
+    pub fn text(&self) -> Option<String> {
+        if self.unlimited {
+            return Some("Credits  unlimited".into());
+        }
+        let b = self.balance.filter(|b| *b > 0.0)?;
+        let n = if b.fract() == 0.0 {
+            format!("{}", b as i64)
+        } else {
+            format!("{b:.2}")
+        };
+        Some(format!("Credits  {n} left"))
+    }
 }
 
 fn bucket(v: Option<&Value>) -> Option<Bucket> {
@@ -78,12 +121,18 @@ pub fn model_limits(limits: &Value) -> Vec<ModelLimit> {
             .get("scope")
             .and_then(|s| s.get("model"))
             .and_then(Value::as_object);
+        // Claude: `scope.model.display_name` / `id`; Codex buckets carry a plain `name`
         let name = model
             .and_then(|m| {
                 ["display_name", "id"]
                     .iter()
                     .filter_map(|k| m.get(*k).and_then(Value::as_str))
                     .find(|s| !s.is_empty())
+            })
+            .or_else(|| {
+                lim.get("name")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
             })
             .map(str::to_owned);
         let pct = match lim.get("percent") {
@@ -136,6 +185,14 @@ impl Reading {
                 .and_then(|r| r.get("tier"))
                 .and_then(Value::as_str)
                 .map(str::to_owned),
+            credits: v
+                .get("raw")
+                .and_then(|r| r.get("credits"))
+                .and_then(CreditBalance::from_value),
+            banked_resets: v
+                .get("raw")
+                .and_then(|r| r.get("banked_resets"))
+                .and_then(Value::as_u64),
         }
     }
 

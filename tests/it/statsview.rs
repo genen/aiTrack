@@ -64,6 +64,7 @@ fn plan_of(readings: &[Reading]) -> PlanData {
             .collect(),
         grok: None,
         grok_bot: None,
+        codex: None,
     }
 }
 
@@ -320,6 +321,7 @@ fn the_service_scans_off_thread_wakes_the_window_and_rescans_on_request() {
         roots: Roots {
             claude_projects: dir.join("claude/projects"),
             grok_home: dir.join("grok"),
+            codex_home: dir.join("codex"),
             index: Some(dir.join("idx.json")),
         },
         prices: Paths::in_dir(dir.path()),
@@ -327,6 +329,7 @@ fn the_service_scans_off_thread_wakes_the_window_and_rescans_on_request() {
         claude: Some(history),
         grok: None,
         grok_bot: None,
+        codex: None,
         rescan_every: StdDuration::from_secs(3600),
     };
     let svc = StatsService::new(cfg);
@@ -508,6 +511,7 @@ fn the_service_reads_the_grok_bot_history_file() {
         roots: Roots {
             claude_projects: dir.join("claude/projects"),
             grok_home: dir.join("grok"),
+            codex_home: dir.join("codex"),
             index: Some(dir.join("idx.json")),
         },
         prices: Paths::in_dir(dir.path()),
@@ -515,6 +519,7 @@ fn the_service_reads_the_grok_bot_history_file() {
         claude: None,
         grok: None,
         grok_bot: Some(tracker),
+        codex: None,
         rescan_every: StdDuration::from_secs(3600),
     };
     let svc = StatsService::new(cfg);

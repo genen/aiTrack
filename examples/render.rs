@@ -450,6 +450,7 @@ fn stats_snapshot(app: &Arc<App>, populated: bool) -> aitrack::statsview::Snapsh
             .collect(),
         grok_bot: None,
         grok: None,
+        codex: None,
     });
     let src = |label: &str, path: &str, exists: bool, files: usize| SourceInfo {
         label: label.into(),

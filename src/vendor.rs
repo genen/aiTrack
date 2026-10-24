@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Vendors: one block per provider on the main view. Only Claude has a real data source today;
-//! the others exist so more providers can be added later (and as mock data for screenshots).
+//! Vendors: one block per provider on the main view. Claude, Grok and Codex have real data
+//! sources; Antigravity exists only as mock data for screenshots.
 
 use crate::analysis::{Gauge, Plan, WindowStats};
 use crate::reading::{Kind, ModelLimit};
@@ -77,6 +77,10 @@ pub struct Vendor {
     pub bot_stats: Option<WindowStats>,
     /// The Grok Bot's weekly gauge from its saved readings: the pace for its row.
     pub bot_gauge: Option<Gauge>,
+    /// Codex: the credits line of the weekly tooltip (`Credits  120 left`).
+    pub credit_note: Option<String>,
+    /// Codex: banked early resets still available.
+    pub banked_resets: Option<u64>,
 }
 
 impl Vendor {
@@ -101,6 +105,8 @@ impl Vendor {
             bot: None,
             bot_stats: None,
             bot_gauge: None,
+            credit_note: None,
+            banked_resets: None,
         }
     }
 
@@ -189,8 +195,42 @@ pub fn from_state_at(s: &State, now: DateTime<Utc>) -> Vec<Vendor> {
         }
         out.push(v);
     }
+    if let Some(c) = s.codex.as_ref().filter(|c| c.enabled) {
+        out.push(codex(c, now));
+    }
     out.retain(Vendor::has_data);
     out
+}
+
+/// The Codex block: two windows like Claude's, kept however old (dimmed, with the chip) like
+/// Grok's, because its session logs only change when Codex is used.
+pub fn codex(c: &crate::state::CodexState, now: DateTime<Utc>) -> Vendor {
+    let mut v = Vendor::new(VendorId::Codex);
+    v.error = c.collector.error.clone();
+    match &c.plan {
+        Some(p) => {
+            v.session = p.session.clone();
+            v.weekly = p.weekly.clone();
+            v.session_stats = Some(p.session_stats.clone());
+            v.weekly_stats = Some(p.weekly_stats.clone());
+            // a plan with a weekly limit only shows one bar, not a row of dashes
+            v.weekly_only = p.session.is_none() && p.weekly.is_some();
+            v.models = c.models.clone();
+            v.history = true;
+            v.source = p.last_source.clone();
+            v.observed_at = crate::util::parse_ts(&p.last);
+            v.tier = c.tier.clone();
+            v.credit_note = c.credits.as_ref().and_then(|b| b.text());
+            v.banked_resets = c.banked_resets.filter(|n| *n > 0);
+            v.current = crate::state::grok_reading_is_shown(p, now);
+        }
+        None => {
+            // tracked but nothing yet: a placeholder row with the reason, never a number
+            v.placeholder = true;
+            v.current = false;
+        }
+    }
+    v
 }
 
 fn demo_gauge(now: DateTime<Utc>, kind: Kind, pct: f64, hours_left: f64, rate: f64) -> Gauge {
@@ -224,6 +264,11 @@ pub fn demo_vendors(now: DateTime<Utc>) -> Vec<Vendor> {
             v.session = Some(demo_gauge(now, Kind::Session, s, sh, sr));
         }
         v.weekly = Some(demo_gauge(now, Kind::Weekly, w, wh, wr));
+        if id == VendorId::Codex {
+            v.tier = Some("Plus".into());
+            v.source = Some("codex-usage".into());
+            v.observed_at = Some(now);
+        }
         if id == VendorId::Grok {
             v.tier = Some("SuperGrok Heavy".into());
             v.source = Some("grok-billing".into());

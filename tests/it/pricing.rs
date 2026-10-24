@@ -224,9 +224,13 @@ fn live_list_parsing_maps_ids_and_skips_junk() {
             "claude-3-opus",
             "claude-haiku-4-5",
             "claude-opus-4-8",
-            "claude-sonnet-5-5"
+            "claude-sonnet-5-5",
+            "gpt-4o"
         ]
     );
+    // OpenAI models (Codex) are read too, with derived cache fields
+    assert_eq!(m["gpt-4o"].input, 2.5);
+    assert_eq!(m["gpt-4o"].output, 10.0);
 }
 
 #[test]
@@ -262,7 +266,7 @@ fn network_load_writes_cache_and_live_beats_fallback() {
     assert_eq!(info.fetched_at, Some(now()));
     assert_eq!(info.age_secs, Some(0));
     assert!(!info.stale);
-    assert_eq!(info.live_models, 5);
+    assert_eq!(info.live_models, 6);
     assert!(info.fetch_error.is_none());
     // the live list beats the fallback ...
     let (r, s) = t.price_for("claude-opus-4-8-20261001");
@@ -382,7 +386,7 @@ fn unusable_downloads_are_failures() {
         "not json",
         "[]",
         "{}",
-        r#"{"gpt-4o":{"input_cost_per_token":1e-6,"output_cost_per_token":1e-6}}"#,
+        r#"{"llama-4":{"input_cost_per_token":1e-6,"output_cost_per_token":1e-6}}"#,
     ] {
         let dir = TempDir::new();
         let paths = Paths::in_dir(dir.path());

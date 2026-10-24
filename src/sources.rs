@@ -71,6 +71,8 @@ pub struct Env {
     /// `$AITRACK_GROK_BOT_DIR`: the Grok Bot app's `sand-client-persistence` folder, for tests and
     /// odd setups (used on any platform; without it only macOS has a default, see `grok_bot`).
     pub grok_bot_dir: Option<PathBuf>,
+    /// `$CODEX_HOME`
+    pub codex_home: Option<PathBuf>,
 }
 
 impl Env {
@@ -84,6 +86,7 @@ impl Env {
             claude_config_dir: None,
             grok_home: None,
             grok_bot_dir: None,
+            codex_home: None,
         }
     }
 
@@ -108,6 +111,10 @@ impl Env {
                 .filter(|v| !v.is_empty())
                 .map(|v| crate::util::expand_user(&v)),
             grok_bot_dir: std::env::var("AITRACK_GROK_BOT_DIR")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .map(|v| crate::util::expand_user(&v)),
+            codex_home: std::env::var("CODEX_HOME")
                 .ok()
                 .filter(|v| !v.is_empty())
                 .map(|v| crate::util::expand_user(&v)),
@@ -1280,6 +1287,7 @@ pub fn diagnose(env: &Env, now: DateTime<Utc>) -> String {
     line(String::new());
     o.push_str(&crate::grok::diagnose(env, now));
     o.push_str(&crate::grok_bot::diagnose(env, now));
+    o.push_str(&crate::codex::diagnose(env, now));
     o
 }
 

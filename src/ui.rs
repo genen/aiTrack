@@ -62,6 +62,19 @@ fn real_grok_launcher() -> Launcher {
     })
 }
 
+fn real_codex_launcher() -> Launcher {
+    Arc::new(|ctx, msg| {
+        let (ctx, msg) = (ctx.clone(), msg.clone());
+        crate::launch::launch_codex_async(crate::launch::log_path(), move |ok| {
+            if !ok {
+                *msg.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(("Could not launch Codex".into(), Instant::now()));
+            }
+            ctx.request_repaint();
+        });
+    })
+}
+
 struct ChartCache {
     version: u64,
     vendor: VendorId,
@@ -114,6 +127,8 @@ pub struct AitrackUi {
     pub launcher: Launcher,
     /// What a click on the Grok badge does (the real launcher by default; tests inject a fake).
     pub grok_launcher: Launcher,
+    /// What a click on the Codex badge does (the real launcher by default; tests inject a fake).
+    pub codex_launcher: Launcher,
     /// Screen rect of the Grok block's Refresh control from the last frame, when shown.
     pub refresh_rect: Option<Rect>,
     /// Screen rect of the "Refresh Grok now" button in Settings, when shown.
@@ -149,7 +164,7 @@ pub struct AitrackUi {
     /// Stats view: the selected ranges, and the readings versions the plan numbers were asked for.
     pub proj_range: ProjRange,
     pub plan_range: StatsRange,
-    plan_versions: Option<(u64, u64)>,
+    plan_versions: Option<(u64, u64, u64)>,
     /// Screen rect of each range choice of the Stats view (for tests / the render tool).
     pub stats_rects: Vec<(String, Rect)>,
     /// Screen rect of the header's shrink button from the last frame (tests / the render tool).
@@ -217,6 +232,7 @@ impl AitrackUi {
             track_rects: vec![],
             launcher: real_launcher(),
             grok_launcher: real_grok_launcher(),
+            codex_launcher: real_codex_launcher(),
             refresh_rect: None,
             settings_refresh_rect: None,
             mock_refresh: None,
@@ -887,13 +903,13 @@ impl AitrackUi {
                     // in the small window a click does nothing (the window is dragged by any part)
                     let launchable = !small
                         && self.launch_enabled
-                        && matches!(vv.id, VendorId::Claude | VendorId::Grok);
+                        && matches!(vv.id, VendorId::Claude | VendorId::Grok | VendorId::Codex);
                     let variant = st.settings.badge_style;
                     if vendor_header(ui, pal, vv, launchable, variant, &mut self.badge_rects) {
-                        let launcher = if vv.id == VendorId::Grok {
-                            self.grok_launcher.clone()
-                        } else {
-                            self.launcher.clone()
+                        let launcher = match vv.id {
+                            VendorId::Grok => self.grok_launcher.clone(),
+                            VendorId::Codex => self.codex_launcher.clone(),
+                            _ => self.launcher.clone(),
                         };
                         launcher(ui.ctx(), &self.launch_msg);
                     }
@@ -1245,7 +1261,7 @@ impl AitrackUi {
                         ui,
                         pal,
                         "Custom (minutes)",
-                        "Online check: Claude usage service and Grok billing",
+                        "Online check: Claude usage service, Grok billing and Codex usage",
                         |ui| {
                             let r = ui.add(
                                 egui::TextEdit::singleline(&mut self.custom)
@@ -1405,8 +1421,18 @@ impl AitrackUi {
                             Track::from_opt(v.grok_enabled),
                             false,
                         ),
+                        (
+                            "Show Codex",
+                            self.app.codex_detected(),
+                            Track::from_opt(v.codex_enabled),
+                            false,
+                        ),
                     ] {
-                        if !is_claude && self.app.grok.is_none() {
+                        let codex = name == "Show Codex";
+                        if !is_claude && !codex && self.app.grok.is_none() {
+                            continue;
+                        }
+                        if codex && self.app.codex.is_none() {
                             continue;
                         }
                         divider(ui, pal);
@@ -1423,6 +1449,8 @@ impl AitrackUi {
                                     if r.clicked() {
                                         if is_claude {
                                             self.app.set_claude_track(t);
+                                        } else if codex {
+                                            self.app.set_codex_track(t);
                                         } else {
                                             self.app.set_grok_track(t);
                                         }
@@ -1629,6 +1657,7 @@ impl AitrackUi {
         self.url_opener = Arc::new(|_| Ok(()));
         self.launcher = Arc::new(|_, _| {});
         self.grok_launcher = Arc::new(|_, _| {});
+        self.codex_launcher = Arc::new(|_, _| {});
     }
 
     // ------------------------------------------------------------ about
@@ -1709,6 +1738,7 @@ impl AitrackUi {
         let versions = (
             self.app.history.version(),
             self.app.grok.as_ref().map_or(0, |g| g.history.version()),
+            self.app.codex.as_ref().map_or(0, |c| c.history.version()),
         );
         if self.plan_versions != Some(versions) {
             self.plan_versions = Some(versions);
@@ -2676,6 +2706,7 @@ fn badge_painter(v: VendorId) -> Option<BadgePainter> {
     match v {
         VendorId::Claude => Some(paint_claude_mark),
         VendorId::Grok => Some(paint_grok_mark),
+        VendorId::Codex => Some(paint_codex_mark),
         _ => None,
     }
 }
@@ -2861,6 +2892,29 @@ fn paint_grok_mark(p: &Painter, badge: Rect, ink: Color32) {
     );
 }
 
+/// The Codex mark: a terminal prompt, a chevron and an underscore (`>_`), in round-ended strokes.
+fn paint_codex_mark(p: &Painter, badge: Rect, ink: Color32) {
+    let c = badge.center();
+    let size = badge.width();
+    let w = size * 0.055;
+    let flat = |_: f32| w;
+    let (l, mid, top, bottom) = (
+        c.x - size * 0.24,
+        c.x - size * 0.03,
+        c.y - size * 0.2,
+        c.y + size * 0.2,
+    );
+    taper(p, Pos2::new(l, top), Pos2::new(mid, c.y), flat, ink);
+    taper(p, Pos2::new(mid, c.y), Pos2::new(l, bottom), flat, ink);
+    taper(
+        p,
+        Pos2::new(c.x + size * 0.04, bottom),
+        Pos2::new(c.x + size * 0.25, bottom),
+        flat,
+        ink,
+    );
+}
+
 /// Vendor badge + name, and (when a window would run out before it resets) the red warning right
 /// after the name. Fixed height: the warning picks the longest text that fits, never wraps.
 /// Returns true when the (clickable) badge was clicked.
@@ -2886,10 +2940,10 @@ fn vendor_header(
         let r = ui
             .interact(badge, ui.id().with(("badge", v.id)), Sense::click())
             .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text(if v.id == VendorId::Grok {
-                "Open Grok"
-            } else {
-                "Open Claude desktop"
+            .on_hover_text(match v.id {
+                VendorId::Grok => "Open Grok",
+                VendorId::Codex => "Open Codex",
+                _ => "Open Claude desktop",
             });
         clicked = r.clicked();
     }

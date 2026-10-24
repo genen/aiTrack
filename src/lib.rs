@@ -13,6 +13,7 @@ pub mod app;
 pub mod appicon;
 pub mod buildinfo;
 pub mod cache;
+pub mod codex;
 pub mod collector;
 pub mod detect;
 pub mod endpoints;

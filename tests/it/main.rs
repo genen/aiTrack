@@ -19,6 +19,7 @@ mod carry;
 mod chart_gaps;
 mod chip;
 mod cli;
+mod codex;
 mod collector;
 mod detect;
 mod grok;

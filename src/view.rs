@@ -266,14 +266,15 @@ pub struct VendorView {
 }
 
 /// Sources that read a file on this PC (an app or CLI has to write it).
-const LOCAL_SOURCES: [&str; 4] = [
+const LOCAL_SOURCES: [&str; 5] = [
     "desktop-cache",
     "desktop-history",
     "claude-json",
     "grok-log",
+    "codex-log",
 ];
 /// Sources that ask a service over the network.
-const NETWORK_SOURCES: [&str; 2] = ["oauth", "grok-billing"];
+const NETWORK_SOURCES: [&str; 3] = ["oauth", "grok-billing", "codex-usage"];
 
 /// A reading from a local-file source older than this (minutes) gets the data-age chip.
 pub const CHIP_LOCAL_MIN: f64 = 15.0;
@@ -369,6 +370,12 @@ pub fn age_chip(v: &Vendor, interval_min: f64, now: DateTime<Utc>) -> Option<Age
         "grok-billing" => format!(
             "Grok billing has not answered since {long}. Check your connection or press refresh."
         ),
+        "codex-log" => format!(
+            "Live usage failed, so this comes from Codex's local session logs, last updated {long}. Use Codex or press refresh to update."
+        ),
+        "codex-usage" => format!(
+            "Codex usage has not answered since {long}. Check your connection or press refresh."
+        ),
         "oauth" => format!(
             "The usage service has not answered since {long}. Check your connection or press refresh."
         ),
@@ -409,6 +416,10 @@ pub fn stale_warning(v: &Vendor, now: DateTime<Utc>) -> Option<String> {
             "Grok figures come from the CLI's local log, which only updates when you use the CLI."
         }
         "grok-billing" => "Grok billing has not answered recently.",
+        "codex-log" => {
+            "Codex figures come from its local session logs, which only update when you use Codex."
+        }
+        "codex-usage" => "Codex usage has not answered recently.",
         "oauth" => "the usage service has not answered recently.",
         "claude-json" => "Claude Code has not refreshed its saved usage.",
         "desktop-cache" | "desktop-history" => "the Claude app has not refreshed its usage cache.",
@@ -688,6 +699,8 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
     }
     if v.source.as_deref() == Some("grok-billing") {
         t.push(tip("Live from Grok billing", Tone::Muted));
+    } else if v.source.as_deref() == Some("codex-usage") {
+        t.push(tip("Live from Codex usage", Tone::Muted));
     } else if let Some(label) = v.source.as_deref().and_then(source_label) {
         let age = v
             .observed_at
@@ -700,18 +713,32 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
             .unwrap_or_default();
         t.push(tip(format!("From {label}{age}"), Tone::Muted));
     }
-    if kind == Kind::Weekly {
+    // per-model limits: Claude's are weekly; Codex buckets say which window they are
+    let models: Vec<&crate::reading::ModelLimit> = v
+        .models
+        .iter()
+        .filter(|m| (m.kind == "session") == (kind == Kind::Session))
         // a model whose own reset time has passed belongs to the window that just ended
-        let models: Vec<&crate::reading::ModelLimit> = v
-            .models
-            .iter()
-            .filter(|m| {
-                m.resets_at
-                    .as_deref()
-                    .and_then(parse_ts)
-                    .is_none_or(|r| r > now)
-            })
-            .collect();
+        .filter(|m| {
+            m.resets_at
+                .as_deref()
+                .and_then(parse_ts)
+                .is_none_or(|r| r > now)
+        })
+        .collect();
+    if kind == Kind::Session && !models.is_empty() {
+        t.push(tip("By model", Tone::Muted));
+        for m in models.iter() {
+            let reset = resets_in(m.resets_at.as_deref(), now)
+                .map(|r| format!(" \u{b7} resets in {r}"))
+                .unwrap_or_default();
+            t.push(tip(
+                format!("{}  {}{reset}", m.name, pct_text_for(m.pct, remaining)),
+                Tone::Normal,
+            ));
+        }
+    }
+    if kind == Kind::Weekly {
         if !models.is_empty() {
             t.push(tip("By model", Tone::Muted));
             for m in models {
@@ -730,6 +757,12 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
                 None => format!("Credits  ${:.2}", c.used),
             };
             t.push(tip(text, Tone::Normal));
+        }
+        if let Some(c) = &v.credit_note {
+            t.push(tip(c.clone(), Tone::Normal));
+        }
+        if let Some(n) = v.banked_resets {
+            t.push(tip(format!("Banked resets  {n} available"), Tone::Normal));
         }
     }
     if let Some(w) = stale_warning(v, now) {
@@ -892,7 +925,7 @@ pub fn build_home_for(s: &State, vendors: &[Vendor], now: DateTime<Utc>) -> Home
         v.empty = Some(if s.nothing_to_track() {
             Empty {
                 title: "Nothing to track yet".into(),
-                body: "aiTrack reads usage from the Claude desktop app or Claude Code, and from the Grok CLI. Install and sign in to one of them, then press refresh.".into(),
+                body: "aiTrack reads usage from the Claude desktop app or Claude Code, the Grok CLI and Codex. Install and sign in to one of them, then press refresh.".into(),
                 help: true,
             }
         } else if s.loading {
@@ -1119,13 +1152,15 @@ pub fn source_label(source: &str) -> Option<&'static str> {
     match source {
         "desktop-cache" | "desktop-history" => Some("Claude desktop app"),
         "grok-log" => Some("Grok CLI log"),
+        "codex-log" => Some("Codex session logs"),
         "claude-json" => Some("~/.claude.json cache"),
         _ => None,
     }
 }
 
 pub fn status_line(s: &State, now: DateTime<Utc>) -> StatusLine {
-    // Show Claude = Off: the line speaks about what is shown (Grok), not about hidden Claude data
+    // Show Claude = Off: the line speaks about what is shown (Grok, else Codex), not about hidden
+    // Claude data
     if !s.claude_on {
         if let Some(g) = s.grok.as_ref().filter(|g| g.enabled) {
             let mut grok_view = s.clone();
@@ -1134,19 +1169,26 @@ pub fn status_line(s: &State, now: DateTime<Utc>) -> StatusLine {
             grok_view.claude_on = true;
             return status_line_of(&grok_view, now, true);
         }
+        if let Some(c) = s.codex.as_ref().filter(|c| c.enabled) {
+            let mut codex_view = s.clone();
+            codex_view.plan = c.plan.clone();
+            codex_view.collector = c.collector.clone();
+            codex_view.claude_on = true;
+            return status_line_of(&codex_view, now, true);
+        }
     }
     status_line_of(s, now, false)
 }
 
-/// The line for the plan and collector of `s`; `grok` says they are Grok's (its last value stays
-/// shown however old, until its billing period ends).
+/// The line for the plan and collector of `s`; `grok` says they are Grok's or Codex's (the last
+/// value stays shown however old, until its weekly period ends).
 fn status_line_of(s: &State, now: DateTime<Utc>, grok: bool) -> StatusLine {
     if s.nothing_to_track() {
         return StatusLine {
             dot: Dot::Stale,
             text: "No supported tools found".into(),
             full: Some(format!(
-                "Neither the Claude desktop app / Claude Code nor the Grok CLI was found on this {}.",
+                "None of the Claude desktop app / Claude Code, the Grok CLI or Codex was found on this {}.",
                 crate::util::this_machine()
             )),
         };
@@ -1158,7 +1200,7 @@ fn status_line_of(s: &State, now: DateTime<Utc>, grok: bool) -> StatusLine {
         .as_ref()
         .map(|i| i.source.as_str())
         .or_else(|| plan.and_then(|p| p.last_source.as_deref()));
-    let snapshot = source.is_some_and(|x| x != "oauth" && x != "grok-billing");
+    let snapshot = source.is_some_and(|x| !NETWORK_SOURCES.contains(&x));
     let observed = c
         .sample
         .as_ref()
