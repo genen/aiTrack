@@ -3,6 +3,12 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.6-beta] - 2026-10-24
+
+### Removed
+- `CLAUDE.md` (agent working rules). Public repositories do not carry one; the owner's rules live in
+  `genen/claude-setup`. `docs/MAC-HANDOFF.md` now points there.
+
 ## [0.5.5-beta] - 2026-10-21
 
 ### Changed
