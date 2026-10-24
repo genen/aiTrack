@@ -1169,25 +1169,31 @@ pub const CODEX_NAME: &str = "Codex";
 /// macOS app names, tried in order (`open -a`): the Codex app, then the ChatGPT app that bundles it.
 pub const CODEX_MAC_APP_NAMES: [&str; 2] = ["Codex", "ChatGPT"];
 
-/// The `shell:AppsFolder` targets of the Codex Store app: a Start entry named exactly "Codex"
-/// (`OpenAI.Codex` ones first), then each `OpenAI.Codex_*` package folder (`<family>!App`).
-pub fn codex_store_targets(localappdata: Option<&Path>, apps: &[StartApp]) -> Vec<String> {
+/// The `shell:AppsFolder` targets of the Codex Store app that Windows itself lists: Start entries
+/// named exactly "Codex" or whose AppID is in an `OpenAI.Codex_*` family (those first).
+pub fn codex_store_targets(apps: &[StartApp]) -> Vec<String> {
+    let in_family = |id: &str| id.to_ascii_lowercase().starts_with(CODEX_STORE_PREFIX);
     let mut ids: Vec<String> = apps
         .iter()
-        .filter(|a| a.name.eq_ignore_ascii_case(CODEX_NAME))
+        .filter(|a| a.name.eq_ignore_ascii_case(CODEX_NAME) || in_family(&a.app_id))
         .map(|a| a.app_id.clone())
         .collect();
-    ids.sort_by_key(|id| !id.to_ascii_lowercase().starts_with(CODEX_STORE_PREFIX));
-    if let Some(l) = localappdata {
-        for fam in families_with_prefix(l, CODEX_STORE_PREFIX) {
-            let id = format!("{fam}!{CODEX_STORE_APP_ID}");
-            if !ids.iter().any(|i| i.eq_ignore_ascii_case(&id)) {
-                ids.push(id);
-            }
-        }
-    }
+    ids.sort_by_key(|id| !in_family(id));
+    ids.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     ids.into_iter()
         .map(|id| format!("shell:AppsFolder\\{id}"))
+        .collect()
+}
+
+/// Guessed targets from `OpenAI.Codex_*` package folders (`<family>!App`). Explorer reports
+/// success even for a target that does not exist, so these are tried only when Windows lists no
+/// Codex entry and there is no `codex` CLI to fall back to.
+pub fn codex_guessed_targets(localappdata: Option<&Path>) -> Vec<String> {
+    localappdata
+        .map(|l| families_with_prefix(l, CODEX_STORE_PREFIX))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|fam| format!("shell:AppsFolder\\{fam}!{CODEX_STORE_APP_ID}"))
         .collect()
 }
 
@@ -1213,8 +1219,8 @@ pub struct CodexLaunchEnv {
     pub wt: Option<PathBuf>,
 }
 
-/// Windows: 1. the Codex Store app, 2. the `codex` CLI in a new terminal window. Stops at the first
-/// that starts. Nothing is typed into the CLI.
+/// Windows: 1. the Codex Store app as Windows lists it, 2. the `codex` CLI in a new terminal window,
+/// 3. only without either, a guessed package target. Stops at the first that starts. Nothing is typed into the CLI.
 pub fn launch_codex(env: &CodexLaunchEnv, spawner: &dyn Spawner) -> Vec<Attempt> {
     let mut tried = Vec::new();
     let push = |method: String, r: Result<(), String>, tried: &mut Vec<Attempt>| -> bool {
@@ -1238,7 +1244,11 @@ pub fn launch_codex(env: &CodexLaunchEnv, spawner: &dyn Spawner) -> Vec<Attempt>
         Ok(t) => parse_start_apps(&t),
         Err(_) => Vec::new(),
     };
-    for t in codex_store_targets(env.localappdata.as_deref(), &apps) {
+    let mut targets = codex_store_targets(&apps);
+    if targets.is_empty() && env.cli.is_none() {
+        targets = codex_guessed_targets(env.localappdata.as_deref());
+    }
+    for t in targets {
         let r = spawner.run(Path::new("explorer.exe"), std::slice::from_ref(&t));
         if push(format!("Codex app {t}"), r, &mut tried) {
             return tried;

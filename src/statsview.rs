@@ -531,11 +531,14 @@ pub fn build_page(
                 .codex_at(plan_range)
                 .filter(|s| s.coverage.readings > 0)
             {
-                page.plan.push(PlanBlock {
-                    vendor: VendorId::Codex,
-                    title: "Codex session (5 h)".into(),
-                    rows: plan_rows(st, Kind::Session, now),
-                });
+                // a weekly-only plan has no session windows
+                if !st.session.peaks.is_empty() || st.session.current.is_some() {
+                    page.plan.push(PlanBlock {
+                        vendor: VendorId::Codex,
+                        title: "Codex session (5 h)".into(),
+                        rows: plan_rows(st, Kind::Session, now),
+                    });
+                }
                 page.plan.push(PlanBlock {
                     vendor: VendorId::Codex,
                     title: "Codex weekly (7 d)".into(),

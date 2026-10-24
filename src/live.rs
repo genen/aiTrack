@@ -293,7 +293,10 @@ pub fn fetch_usage(url: &str, token: &str, timeout: Duration) -> Result<Value, C
             });
         }
         Err(ureq::Error::Transport(t)) => {
-            return Err(CollectError::new(format!("network error: {t}")))
+            return Err(CollectError::new(format!(
+                "network error: {}",
+                crate::endpoints::transport_text(&t)
+            )))
         }
     };
     if resp.status() >= 300 {

@@ -71,9 +71,9 @@ pub fn archived_dir(env: &Env) -> PathBuf {
     codex_home(env).join("archived_sessions")
 }
 
-/// Is Codex installed for this user (its data folder exists)?
+/// Is Codex in use for this user (its data folder holds a sign-in or session logs)?
 pub fn detected(env: &Env) -> bool {
-    codex_home(env).is_dir()
+    auth_path(env).is_file() || sessions_dir(env).is_dir() || archived_dir(env).is_dir()
 }
 
 // ---------------------------------------------------------------- shared parsing
@@ -501,7 +501,12 @@ impl UsageSource for CodexUsage {
         }
         let resp = match req.call() {
             Ok(r) => r,
-            Err(ureq::Error::Status(401 | 403, _)) => return Err(CollectError::new(EXPIRED)),
+            Err(ureq::Error::Status(401, _)) => return Err(CollectError::new(EXPIRED)),
+            Err(ureq::Error::Status(403, _)) => {
+                return Err(CollectError::new(
+                    "Codex usage refused (HTTP 403): the service did not accept the request",
+                ))
+            }
             Err(ureq::Error::Status(code, resp)) => {
                 let retry_after = resp
                     .header("Retry-After")
@@ -511,9 +516,11 @@ impl UsageSource for CodexUsage {
                     retry_after,
                 });
             }
-            // the transport error text never contains request headers
             Err(ureq::Error::Transport(t)) => {
-                return Err(CollectError::new(format!("Codex usage network error: {t}")))
+                return Err(CollectError::new(format!(
+                    "Codex usage network error: {}",
+                    crate::endpoints::transport_text(&t)
+                )))
             }
         };
         if resp.status() >= 300 {

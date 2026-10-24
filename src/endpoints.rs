@@ -58,9 +58,21 @@ pub fn check_strict(url: &str, host: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// A header value must not carry control characters (no CR/LF smuggling of extra headers).
+/// A header value must be printable ASCII (no CR/LF smuggling of extra headers). The HTTP
+/// client rejects anything else with an error that repeats the whole header, token included, so
+/// a value that fails here is never handed to it.
 pub fn header_value_ok(v: &str) -> bool {
-    !v.is_empty() && !v.bytes().any(|b| b < 0x20 || b == 0x7f)
+    !v.is_empty() && v.bytes().all(|b| (0x20..=0x7e).contains(&b) || b == b'\t')
+}
+
+/// The text of a transport error, safe to store and show: a rejected header is reported without
+/// the header itself (which would carry the token).
+pub fn transport_text(t: &ureq::Transport) -> String {
+    if t.kind() == ureq::ErrorKind::BadHeader {
+        "a request header was refused".into()
+    } else {
+        t.to_string()
+    }
 }
 
 /// Upper bound for a usage / billing / credentials body (bytes).

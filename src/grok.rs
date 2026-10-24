@@ -465,10 +465,10 @@ impl UsageSource for GrokBilling {
                     retry_after,
                 });
             }
-            // the transport error text never contains request headers
             Err(ureq::Error::Transport(t)) => {
                 return Err(CollectError::new(format!(
-                    "Grok billing network error: {t}"
+                    "Grok billing network error: {}",
+                    crate::endpoints::transport_text(&t)
                 )))
             }
         };

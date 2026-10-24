@@ -717,15 +717,29 @@ fn parse_codex_lines(lines: &mut LineFeed<'_>, stem: &str) -> Vec<Request> {
             return;
         };
         let cur = codex_counts(total);
-        // a repeated line (or a lower total after a replay) adds nothing
-        if cur[0] + cur[2] <= prev[0] + prev[2] {
+        // a repeated line adds nothing
+        if cur[0] + cur[2] == prev[0] + prev[2] {
             return;
         }
-        let d = [
-            cur[0].saturating_sub(prev[0]),
-            cur[1].saturating_sub(prev[1]),
-            cur[2].saturating_sub(prev[2]),
-        ];
+        let d = if cur[0] + cur[2] < prev[0] + prev[2] {
+            // the running total started again (a resumed session): count this turn only
+            let last = p
+                .get("info")
+                .and_then(|i| i.get("last_token_usage"))
+                .map(codex_counts)
+                .unwrap_or_default();
+            if last[0] + last[2] > 0 {
+                last
+            } else {
+                cur
+            }
+        } else {
+            [
+                cur[0].saturating_sub(prev[0]),
+                cur[1].saturating_sub(prev[1]),
+                cur[2].saturating_sub(prev[2]),
+            ]
+        };
         prev = cur;
         let cached = d[1].min(d[0]);
         out.push(Request {
@@ -1433,8 +1447,11 @@ pub fn aggregate<'a>(
         let cost = match r.origin {
             Origin::Claude => Some(prices.cost(&r.model, &r.usage)),
             // a turn whose model the log never named has no known price
-            Origin::Codex if r.model == "unknown" => None,
-            Origin::Codex => Some(prices.cost(&r.model, &r.usage)),
+            Origin::Codex => match prices.price_for(&r.model) {
+                // no table entry for the model: unknown, not Claude's default rates
+                (_, crate::pricing::Source::Default) => None,
+                (rates, _) => Some(crate::pricing::cost_at(&rates, &r.usage)),
+            },
             _ => r.cost_ticks.map(|t| t as f64 * COST_USD_PER_TICK),
         };
         let vendor = r.origin.vendor();

@@ -743,8 +743,14 @@ fn show_codex_follows_detection_unless_set() {
 }
 
 #[test]
-fn codex_is_detected_by_its_folder() {
+fn codex_is_detected_by_its_login_or_session_logs() {
     let h = home();
+    // an empty leftover folder is not Codex in use
+    assert!(!aitrack::detect::codex_present(&h.env));
+    write_auth(&h, "x");
+    assert!(aitrack::detect::codex_present(&h.env));
+    std::fs::remove_file(h.dir.join("codexhome/auth.json")).unwrap();
+    std::fs::create_dir_all(h.dir.join("codexhome/sessions")).unwrap();
     assert!(aitrack::detect::codex_present(&h.env));
     let mut e = h.env.clone();
     e.codex_home = Some(h.dir.join("missing"));
@@ -796,6 +802,7 @@ fn codex_sessions_feed_the_projects_view_without_double_counting() {
             tc(1, 1000, 200, 100),
             tc(2, 1000, 200, 100), // a repeated line adds nothing
             tc(3, 3000, 1200, 300),
+            tc(4, 500, 0, 50), // the running total started again (resumed session)
         ],
     );
     let roots = Roots {
@@ -811,13 +818,13 @@ fn codex_sessions_feed_the_projects_view_without_double_counting() {
     assert_eq!(r.projects.len(), 1);
     let p = &r.projects[0];
     assert_eq!((p.name.as_str(), p.vendor), ("aiTrack", VendorId::Codex));
-    assert_eq!(p.messages, 2);
-    // 3000 input (1200 of it cached) and 300 output in all
-    assert_eq!(p.tokens.input, 1800);
+    assert_eq!(p.messages, 3);
+    // 3500 input (1200 of it cached) and 350 output in all
+    assert_eq!(p.tokens.input, 2300);
     assert_eq!(p.tokens.cache_read, 1200);
-    assert_eq!(p.tokens.output, 300);
+    assert_eq!(p.tokens.output, 350);
     // gpt-5 list prices: 1.25 / 10 / 0.125 per million
-    let want = (1800.0 * 1.25 + 300.0 * 10.0 + 1200.0 * 0.125) / 1e6;
+    let want = (2300.0 * 1.25 + 350.0 * 10.0 + 1200.0 * 0.125) / 1e6;
     assert!((p.cost - want).abs() < 1e-9, "{} vs {want}", p.cost);
     assert!(sc
         .sources()
@@ -855,4 +862,104 @@ fn stats_has_codex_session_and_weekly_blocks() {
     let titles: Vec<&str> = page.plan.iter().map(|b| b.title.as_str()).collect();
     assert_eq!(titles, ["Codex session (5 h)", "Codex weekly (7 d)"]);
     assert!(page.plan.iter().all(|b| b.vendor == VendorId::Codex));
+}
+
+#[test]
+fn a_login_with_unusable_characters_is_never_sent_or_repeated() {
+    let h = home();
+    let token = jwt(Utc::now() + Duration::days(9)) + "\u{e9}";
+    write_auth(&h, &token);
+    let mock = Mock::start(usage_body());
+    let store = JsonlStore::new(h.dir.join("u.jsonl"));
+    let e = live_chain(&h, &mock.url).poll_once(&store).unwrap_err();
+    assert!(e.message.contains("unusable characters"), "{}", e.message);
+    assert!(!e.message.contains(TOKEN_SECRET) && !e.message.contains(ACCOUNT));
+    assert!(mock.seen.lock().unwrap().is_empty());
+    let text = std::fs::read_to_string(h.dir.join("u.jsonl")).unwrap_or_default();
+    assert!(!text.contains(TOKEN_SECRET));
+    assert!(!aitrack::endpoints::header_value_ok("ab\u{e9}"));
+    assert!(aitrack::endpoints::header_value_ok("Bearer abc.DEF-_~"));
+}
+
+#[test]
+fn a_403_is_reported_as_refused_not_as_an_expired_login() {
+    let h = home();
+    write_auth(&h, &jwt(Utc::now() + Duration::days(9)));
+    let mock = Mock::start(usage_body());
+    mock.status.store(403, Ordering::SeqCst);
+    let store = JsonlStore::new(h.dir.join("u.jsonl"));
+    let e = live_chain(&h, &mock.url).poll_once(&store).unwrap_err();
+    assert!(e.message.contains("HTTP 403"), "{}", e.message);
+    assert!(!e.message.contains("expired"), "{}", e.message);
+}
+
+mod launching {
+    use aitrack::launch::{launch_codex, CodexLaunchEnv, Spawner};
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+
+    struct Fake {
+        apps: String,
+        calls: Mutex<Vec<String>>,
+    }
+    impl Spawner for Fake {
+        fn open_uri(&self, uri: &str) -> Result<(), String> {
+            self.calls.lock().unwrap().push(format!("open {uri}"));
+            Ok(())
+        }
+        fn run(&self, program: &Path, args: &[String]) -> Result<(), String> {
+            self.calls.lock().unwrap().push(format!(
+                "run {} {}",
+                program.display(),
+                args.join(" ")
+            ));
+            Ok(())
+        }
+        fn capture(&self, _: &Path, _: &[String]) -> Result<String, String> {
+            Ok(self.apps.clone())
+        }
+    }
+
+    fn env(local: &Path, cli: bool) -> CodexLaunchEnv {
+        CodexLaunchEnv {
+            localappdata: Some(local.to_path_buf()),
+            home: Some(PathBuf::from("home")),
+            cli: cli.then(|| PathBuf::from("codex.exe")),
+            wt: None,
+        }
+    }
+
+    fn first_call(apps: &str, cli: bool) -> String {
+        let t = crate::common::TempDir::new();
+        std::fs::create_dir_all(t.join("Packages/OpenAI.Codex_2p2nqsd0c76g0")).unwrap();
+        let f = Fake {
+            apps: apps.into(),
+            calls: Mutex::default(),
+        };
+        let tried = launch_codex(&env(&t.join(""), cli), &f);
+        assert!(tried.last().unwrap().ok);
+        let first = f.calls.lock().unwrap()[0].clone();
+        first
+    }
+
+    #[test]
+    fn the_listed_codex_app_comes_first() {
+        let c = first_call("Codex\tOpenAI.Codex_2p2nqsd0c76g0!Real\n", true);
+        assert!(
+            c.contains("shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!Real"),
+            "{c}"
+        );
+    }
+
+    #[test]
+    fn an_unlisted_package_folder_does_not_hide_the_cli() {
+        let c = first_call("Other\tSomething!App\n", true);
+        assert!(c.contains("codex.exe"), "{c}");
+    }
+
+    #[test]
+    fn a_package_folder_is_guessed_only_without_the_cli() {
+        let c = first_call("", false);
+        assert!(c.contains("OpenAI.Codex_2p2nqsd0c76g0!App"), "{c}");
+    }
 }

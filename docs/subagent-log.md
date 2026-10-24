@@ -36,3 +36,4 @@ line to both files for every subagent.
 | 2026-10-17 | macOS review fixes subagent: alert delivery, Keychain timeout, Grok refresh group kill (0.3.8-beta) | claude-sonnet-5-5 | subagent transcript (model field) |
 | 2026-10-17 | Review fixes subagent: release notes merge, poll clock, Windows no-spawn, raw whitelist, env tests (0.3.9-beta) | claude-sonnet-5-5 | subagent transcript (model field) |
 | 2026-10-18 | Grok Bot weekly section on the stats page (0.3.13-beta) | claude-sonnet-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-10-24 | reviewer-Nadia: Opus review of the Codex panel (PR #23, heavy on new code, light pass on the rest; read only) | claude-opus-5-5 | subagent report (harness) and model parameter set at launch |

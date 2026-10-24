@@ -699,8 +699,8 @@ Clicking a tool's logo in the window opens that tool. Hover the logo to see "Ope
 - **Grok logo**: tries the **Grok Bot** app from your Start menu first, then the Store app **Grok**, then the Grok CLI in
   a new terminal window (Windows Terminal if you have it, otherwise a normal console window) in your home folder. It
   only opens the terminal; it never types anything.
-- **Codex logo**: opens the **Codex** app (the Microsoft Store app), else the Codex CLI in a new terminal window in
-  your home folder.
+- **Codex logo**: opens the **Codex** app (the Microsoft Store app, as the Start menu lists it), else the Codex CLI in
+  a new terminal window in your home folder.
 
 **On a Mac** the same order is used, started with `open -a`: the Claude app, and for Grok the Grok Bot app, then the
 Grok app, then the Grok CLI in a new Terminal window in your home folder; for Codex the Codex app, then the ChatGPT app,
@@ -1166,8 +1166,9 @@ Readings go to `usage-codex.jsonl` (records carry `"vendor": "codex"`). Settings
 view computes Codex tokens and cost per project from the session logs (`token_count` totals, priced from the live
 LiteLLM list with built-in fallbacks for the GPT-5 family). `aitrack --sources` has a Codex section (counts only).
 
-**Opening Codex.** On Windows the badge opens the Store app (Start-menu entry "Codex", or package family
-`OpenAI.Codex_*`, started with `explorer.exe shell:AppsFolder\<family>!App`), else `codex` in a new terminal.
+**Opening Codex.** On Windows the badge opens the Store app as the Start menu lists it (entry "Codex" or an
+`OpenAI.Codex_*` AppID, started with `explorer.exe shell:AppsFolder\<AppID>`), else `codex` in a new terminal.
+Only with neither is the package folder's `<family>!App` tried.
 
 ## Development
 
