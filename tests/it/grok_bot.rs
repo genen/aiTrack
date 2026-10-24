@@ -231,6 +231,32 @@ fn scan_finds_the_reading() {
 }
 
 #[test]
+fn the_plan_label_comes_with_the_newest_reading() {
+    let read = now() - Duration::minutes(2);
+    let body = cache_json(1.0, resets(), read, read + Duration::hours(2));
+    assert_eq!(
+        grok_bot::parse_plan(body.as_bytes()).as_deref(),
+        Some("SuperGrok")
+    );
+    let mut v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    for bad in [json!(""), json!(null), json!(3), json!("x".repeat(33))] {
+        v["value"]["reading"]["usage"]["grokPlanLabel"] = bad.clone();
+        assert_eq!(
+            grok_bot::parse_plan(v.to_string().as_bytes()),
+            None,
+            "{bad}"
+        );
+    }
+    let f = Fx::new();
+    f.fresh(5.0);
+    assert_eq!(
+        grok_bot::scan_dir(&f.persistence()).plan.as_deref(),
+        Some("SuperGrok")
+    );
+    assert!(grok_bot::diagnose(&f.env(), now()).contains("plan label: SuperGrok"));
+}
+
+#[test]
 fn with_two_accounts_the_newest_read_wins() {
     let f = Fx::new();
     let old = now() - Duration::hours(5);
@@ -704,6 +730,12 @@ fn the_app_reads_the_cache_after_a_grok_poll_and_the_view_gets_the_row() {
             let rows = &home.vendors[0].rows;
             assert_eq!(rows.len(), 2);
             assert_eq!((rows[0].label, rows[1].label), ("Weekly", "Grok Bot"));
+            // the billing log names no tier, so the Grok Bot app's plan label fills in
+            assert!(
+                lines(&rows[0]).contains(&"Plan: SuperGrok"),
+                "{:?}",
+                lines(&rows[0])
+            );
             break;
         }
         assert!(t.elapsed().as_secs() < 10, "timed out");

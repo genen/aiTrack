@@ -10,6 +10,10 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
   field of Claude Code's `~/.claude/.credentials.json` (nothing else from that file), and `aitrack --sources` lists
   it. The macOS Keychain is not asked, so on a Mac without that file the line is left out.
 
+### Fixed
+- Grok's tooltip now shows your plan ("Plan: SuperGrok") when the Grok billing reply names none, taken from the plan
+  label in the Grok Bot app's usage cache. `aitrack --sources` lists that label.
+
 ## [0.5.11-beta] - 2026-10-24
 
 ### Added

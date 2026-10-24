@@ -328,6 +328,8 @@ own "Weekly Grok Bot Limit", a separate meter from the SuperGrok weekly pool (th
 aiTrack reads the small cache file the app keeps in its data folder: `~/Library/Application Support/Grok Bot/` on a
 Mac, `%APPDATA%\Grok Bot\` on Windows (the subfolder `sand-client-persistence`). It opens only the one file that holds
 the weekly usage, never the app's login or secrets files, and it records no account id or file name anywhere.
+The same file names your plan ("SuperGrok"), which the Grok tooltips show as "Plan: SuperGrok" when the Grok billing
+reply does not name one.
 
 Known limits:
 

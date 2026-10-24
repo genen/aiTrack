@@ -1240,6 +1240,8 @@ impl App {
         let g = self.grok.as_ref()?;
         let (status, enabled) = (g.collector.status(), settings.grok_on(g.detected()));
         let bot = g.bot.get().and_then(|b| b.latest());
+        // the Grok Bot app's plan label stands in when the billing reply names no tier
+        let bot_tier = g.bot.get().and_then(|b| b.plan());
         // the Grok Bot's saved readings get the same analysis as Grok's: window stats and a pace
         let bot_plan = g
             .bot
@@ -1251,6 +1253,7 @@ impl App {
             Some(r) => {
                 let mut s = build_grok_state(&r, status, enabled, now);
                 s.bot = bot;
+                s.tier = s.tier.or_else(|| bot_tier.clone());
                 s.bot_stats = bot_stats.clone();
                 s.bot_gauge = bot_gauge.clone();
                 Some((s, true))
@@ -1261,6 +1264,7 @@ impl App {
                     p.collector = status;
                     p.enabled = enabled;
                     p.bot = bot;
+                    p.tier = p.tier.or_else(|| bot_tier.clone());
                     p.bot_stats = bot_stats.clone();
                     p.bot_gauge = bot_gauge.clone();
                     (p, false)
@@ -1268,6 +1272,7 @@ impl App {
                 None => {
                     let mut s = build_grok_state(&[], status, enabled, now);
                     s.bot = bot;
+                    s.tier = s.tier.or_else(|| bot_tier.clone());
                     s.bot_stats = bot_stats.clone();
                     s.bot_gauge = bot_gauge.clone();
                     (s, false)

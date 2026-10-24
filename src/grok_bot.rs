@@ -176,6 +176,20 @@ pub fn parse(bytes: &[u8]) -> Option<BotReading> {
     })
 }
 
+/// The plan the app shows (`value.reading.usage.grokPlanLabel`, for example "SuperGrok").
+/// `None` when absent, empty or implausibly long.
+pub fn parse_plan(bytes: &[u8]) -> Option<String> {
+    let v: Value = serde_json::from_slice(bytes).ok()?;
+    let label = v
+        .get("value")?
+        .get("reading")?
+        .get("usage")?
+        .get("grokPlanLabel")?
+        .as_str()?
+        .trim();
+    (!label.is_empty() && label.chars().count() <= 32).then(|| label.to_owned())
+}
+
 impl BotReading {
     pub fn age_min(&self, now: DateTime<Utc>) -> f64 {
         (now - self.read_at).num_milliseconds() as f64 / 60000.0
@@ -202,6 +216,8 @@ pub struct Scan {
     pub unusable: usize,
     /// The usable reading with the newest `readAtMs`.
     pub reading: Option<BotReading>,
+    /// The plan label stored with that reading.
+    pub plan: Option<String>,
 }
 
 /// List `dir` and open only the files whose decoded name matches. Never reads anything else.
@@ -231,6 +247,7 @@ pub fn scan_dir(dir: &Path) -> Scan {
             Some(r) => {
                 if out.reading.is_none_or(|b| r.read_at > b.read_at) {
                     out.reading = Some(r);
+                    out.plan = parsed.as_deref().and_then(parse_plan);
                 }
             }
             None => out.unusable += 1,
@@ -283,6 +300,11 @@ pub fn diagnose(env: &Env, now: DateTime<Utc>) -> String {
         }
     };
     o.push_str(&format!("   {SOURCE}: {state}\n"));
+    if let Some(dir) = persistence_dir(env) {
+        if let Some(plan) = scan_dir(&dir).plan {
+            o.push_str(&format!("   plan label: {plan}\n"));
+        }
+    }
     if env.os == Os::Linux {
         // names and counts only: no file names are listed, nothing is opened
         let ud = linux_user_data_dir(env);
@@ -321,6 +343,7 @@ pub struct BotTracker {
     env: Env,
     store: Box<dyn Store>,
     latest: Mutex<Option<BotReading>>,
+    plan: Mutex<Option<String>>,
     saved: Mutex<Option<Saved>>,
     seeded: Mutex<bool>,
     version: AtomicU64,
@@ -342,6 +365,7 @@ impl BotTracker {
             env,
             store,
             latest: Mutex::new(None),
+            plan: Mutex::new(None),
             saved: Mutex::new(None),
             seeded: Mutex::new(false),
             version: AtomicU64::new(0),
@@ -394,9 +418,16 @@ impl BotTracker {
         *self.latest.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// The plan label of the newest reading, if the app stores one.
+    pub fn plan(&self) -> Option<String> {
+        self.plan.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     /// Read the file now. `now` stamps the history record.
     pub fn refresh(&self, now: DateTime<Utc>) {
-        let new = read(&self.env);
+        let scan = persistence_dir(&self.env).map(|d| scan_dir(&d));
+        let new = scan.as_ref().and_then(|s| s.reading);
+        *self.plan.lock().unwrap_or_else(|e| e.into_inner()) = scan.and_then(|s| s.plan);
         let changed = {
             let mut l = self.latest.lock().unwrap_or_else(|e| e.into_inner());
             let changed = *l != new;
