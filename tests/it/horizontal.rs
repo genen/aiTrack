@@ -93,7 +93,7 @@ mod window {
         app: Arc<App>,
         width: f32,
         t: f64,
-        /// Inner sizes the window asked for.
+        /// Inner sizes the window asked for (the last one of a frame is what the window gets).
         sizes: Vec<egui::Vec2>,
         _d: TempDir,
     }
@@ -112,16 +112,13 @@ mod window {
             let mut ui = AitrackUi::new(&ctx, app.clone());
             ui.sandbox();
             ui.mock = Some(vendor::demo_vendors(Utc::now()));
-            let n = ui.mock.as_ref().unwrap().len();
             let mut w = Win {
                 ctx,
                 ui,
                 app,
-                width: if horizontal {
-                    view::horizontal_width(n, view::BLOCK_W)
-                } else {
-                    310.0
-                },
+                // a horizontal start too opens at the vertical width (see `run`); the first frame
+                // widens it
+                width: 310.0,
                 t: 0.0,
                 sizes: vec![],
                 _d: d,
@@ -149,6 +146,8 @@ mod window {
                 for c in &v.commands {
                     if let ViewportCommand::InnerSize(s) = c {
                         self.sizes.push(*s);
+                        // like the OS: the last request of the frame wins
+                        self.width = s.x;
                     }
                 }
             }
@@ -190,12 +189,12 @@ mod window {
             );
             assert!(pair[1].1.left() > pair[0].1.right() + 100.0, "{badges:?}");
         }
-        // the window asked for the width of its blocks
+        // the window, opened at the vertical width, ends as wide as its blocks (no later size
+        // request of the frame, such as the height fit, takes the old width back)
         let n = badges.len();
-        assert!(
-            w.sizes
-                .iter()
-                .any(|s| (s.x - view::horizontal_width(n, view::BLOCK_W)).abs() < 0.5),
+        assert_eq!(
+            w.width,
+            view::horizontal_width(n, view::BLOCK_W),
             "{:?}",
             w.sizes
         );
@@ -208,12 +207,8 @@ mod window {
         for pair in badges.windows(2) {
             assert!(pair[1].1.top() > pair[0].1.bottom(), "{badges:?}");
         }
-        // the first frame of a vertical window leaves its saved width alone
-        assert!(
-            w.sizes.iter().all(|s| (s.x - 310.0).abs() < 0.5),
-            "{:?}",
-            w.sizes
-        );
+        // the first frame of a vertical window leaves its width alone
+        assert_eq!(w.width, 310.0, "{:?}", w.sizes);
     }
 
     #[test]
@@ -252,19 +247,15 @@ mod window {
                 .find(|(h, _)| *h)
                 .map(|(_, r)| *r)
                 .expect("the Layout row is in Appearance");
-        w.sizes.clear();
         w.click(horizontal.center());
         assert!(w.app.settings.get().horizontal);
         let n = vendor::demo_vendors(Utc::now()).len();
-        assert!(
-            w.sizes
-                .iter()
-                .any(|s| (s.x - view::horizontal_width(n, view::BLOCK_W)).abs() < 0.5),
+        assert_eq!(
+            w.width,
+            view::horizontal_width(n, view::BLOCK_W),
             "{:?}",
             w.sizes
         );
-        // and back: the vertical window's width again
-        w.width = view::horizontal_width(n, view::BLOCK_W);
         w.frame(vec![]);
         let vertical =
             w.ui.layout_rects
@@ -272,29 +263,29 @@ mod window {
                 .find(|(h, _)| !*h)
                 .map(|(_, r)| *r)
                 .unwrap();
-        w.sizes.clear();
         w.click(vertical.center());
         assert!(!w.app.settings.get().horizontal);
-        let back = view::default_inner_size_pt().0;
-        assert!(
-            w.sizes.iter().any(|s| (s.x - back).abs() < 0.5),
-            "{:?}",
-            w.sizes
-        );
+        // the vertical width again, and the wide one was not saved as the vertical window's
+        assert_eq!(w.width, view::default_inner_size_pt().0, "{:?}", w.sizes);
+        let saved = w.app.settings.get().window.and_then(|p| p.width);
+        assert!(saved.is_none_or(|s| s < 400.0), "{saved:?}");
     }
 
     #[test]
     fn the_small_window_follows_the_layout() {
         let mut w = Win::new(true);
         let n = vendor::demo_vendors(Utc::now()).len();
-        w.sizes.clear();
         w.app.settings.set_small(true);
         w.frame(vec![]);
         w.frame(vec![]);
-        assert!(
-            w.sizes
-                .iter()
-                .any(|s| (s.x - view::small_width(true, n)).abs() < 0.5),
+        assert_eq!(w.width, view::small_width(true, n), "{:?}", w.sizes);
+        // and back to the full row
+        w.app.settings.set_small(false);
+        w.frame(vec![]);
+        w.frame(vec![]);
+        assert_eq!(
+            w.width,
+            view::horizontal_width(n, view::BLOCK_W),
             "{:?}",
             w.sizes
         );

@@ -178,6 +178,9 @@ pub struct AitrackUi {
     layout_sent: Option<(bool, bool, usize)>,
     /// The title bar state last set up (`false` while small).
     decor_sent: Option<bool>,
+    /// A width `apply_layout` asked for that the window has not reached yet, and when: the height
+    /// auto-fit keeps it in its own size requests, which would otherwise undo it.
+    width_sent: Option<(f32, Instant)>,
     /// The inner height last requested for the small window.
     small_h_sent: Option<f32>,
     /// Horizontal layout: the tallest vendor block's own height in the last frame, which every
@@ -277,7 +280,8 @@ impl AitrackUi {
             logo_rect: None,
             // the window was built for the saved mode (see `run`); the first frame sets the width
             layout_sent: None,
-            decor_sent: Some(first.small),
+            decor_sent: Some(!first.small),
+            width_sent: None,
             small_h_sent: None,
             strip_h: 0.0,
             strip_h_next: 0.0,
@@ -386,6 +390,7 @@ impl AitrackUi {
     /// Save the window place once more on exit (if it changed since the last save).
     pub fn flush_window(&mut self) {
         if let Some(s) = self.tracker.flush() {
+            self.save_block_width(&s);
             self.app
                 .settings
                 .set_window(Some(self.keep_full_width(s.to_pos())));
@@ -444,6 +449,8 @@ impl AitrackUi {
         let first = self.layout_sent.is_none();
         self.layout_sent = Some(key);
         self.small_h_sent = None;
+        // the small and the full row differ in height: measured afresh
+        self.strip_h = 0.0;
         if self.decor_sent != Some(!small) {
             self.decor_sent = Some(!small);
             ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(!small));
@@ -469,10 +476,13 @@ impl AitrackUi {
             } else {
                 ctx.screen_rect().height()
             };
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(
-                view::horizontal_width(n, block),
-                h,
-            )));
+            // never wider than the screen (the OS would cut it down and the cut width be saved)
+            let monitor_w = ctx.input(|i| i.viewport().monitor_size).map(|m| m.x);
+            let w = view::horizontal_width(n, block)
+                .min(monitor_w.unwrap_or(f32::INFINITY))
+                .max(view::horizontal_min_width(n));
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(w, h)));
+            self.width_sent = Some((w, Instant::now()));
             self.fits.remove(&Screen::Home);
             self.size_for = None;
         } else if !first {
@@ -485,6 +495,7 @@ impl AitrackUi {
                 w,
                 view::default_inner_size_pt().1,
             )));
+            self.width_sent = Some((w, Instant::now()));
             // the home view fits itself again
             self.fits.remove(&Screen::Home);
             self.size_for = None;
@@ -690,10 +701,10 @@ impl AitrackUi {
                 ui.add_space(4.0);
                 content_bottom = match self.screen {
                     Screen::Home => self.home(ui, &pal, &st, &home, &vendors),
-                    // in the wide horizontal window these keep their usual width, centred
+                    // in the wide horizontal window these keep their usual width, centered
                     Screen::Settings | Screen::Stats if horizontal => {
                         let w = self.vertical_width() - view::FULL_MARGIN_X;
-                        centred_column(ui, w, |ui| match self.screen {
+                        centered_column(ui, w, |ui| match self.screen {
                             Screen::Settings => self.settings(ui, &pal, &st),
                             _ => self.stats_view(ui, &pal, now),
                         })
@@ -706,6 +717,13 @@ impl AitrackUi {
         // Fit the window to its content, up to a cap (see `view::height_cap`); beyond it the content
         // scrolls. Only re-sent when the fit changes, and never for a view whose height the user
         // changed by hand (a size that differs from the one we commanded, once it has settled).
+        // a commanded width is kept in the fit's requests until the window has it (or the OS
+        // settled on another one)
+        if self.width_sent.is_some_and(|(w, at)| {
+            (ctx.screen_rect().width() - w).abs() < 1.0 || at.elapsed() > Duration::from_secs(2)
+        }) {
+            self.width_sent = None;
+        }
         let monitor_h = ctx.input(|i| i.viewport().monitor_size).map(|m| m.y);
         let cap = view::height_cap(self.screen != Screen::Home, monitor_h);
         // measured from the layout (empty strip above the pinned panels), not from summed heights:
@@ -736,7 +754,7 @@ impl AitrackUi {
         match action {
             view::FitAction::Request(h) => {
                 self.size_sent_at = Some(Instant::now());
-                let w = ctx.screen_rect().width();
+                let w = self.width_sent.map_or(ctx.screen_rect().width(), |(w, _)| w);
                 // safe diagnostics: sizes only
                 crate::alerts::log_line(&format!(
                     "window fit: requested inner height {h:.0} pt (window {actual_h:.0} x {:.0} pt, {:.2} px/pt, monitor {:?}, retry {})",
@@ -2008,7 +2026,7 @@ impl AitrackUi {
 /// Cut `text` with an ellipsis so it fits `max_w` in `font`.
 /// Lay `add` out in a column `w` points wide in the middle of the space left (all of it when that
 /// is narrower).
-fn centred_column<R>(ui: &mut Ui, w: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+fn centered_column<R>(ui: &mut Ui, w: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     let avail = ui.available_rect_before_wrap();
     if avail.width() <= w + 1.0 {
         return add(ui);
