@@ -40,3 +40,4 @@ line to both files for every subagent.
 | 2026-10-24 | coder-Tomas: show the Codex tool as ChatGPT in visible labels (0.5.8-beta) | claude-sonnet-5-5 | model parameter set when the subagent was launched (this session) |
 | 2026-10-24 | coder-Ines: hold back the weekly pace until 12 h or 3 points (shared pace code) | claude-sonnet-5-5 | model parameter set when the subagent was launched (this session) |
 | 2026-10-24 | reviewer-Tamsin: Opus review of the Grok refresh fixes (PR #25, heavy on changed lines; read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-10-24 | designer-Lena: ChatGPT interlaced knot badge mark (0.5.10-beta) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |

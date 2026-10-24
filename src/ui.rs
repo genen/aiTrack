@@ -2892,27 +2892,37 @@ fn paint_grok_mark(p: &Painter, badge: Rect, ink: Color32) {
     );
 }
 
-/// The Codex mark: a terminal prompt, a chevron and an underscore (`>_`), in round-ended strokes.
+/// The ChatGPT (Codex) mark: a round rosette of six curved links, each an arc of its own circle
+/// (the six circles sit evenly round the centre). Each link starts over the one before it, sweeps
+/// round the outside and ends tucked under the next, so the ring reads as woven; round-ended
+/// strokes of even width. A plain likeness of an interlaced knot, not the OpenAI logo.
 fn paint_codex_mark(p: &Painter, badge: Rect, ink: Color32) {
+    use std::f32::consts::{FRAC_PI_6, TAU};
     let c = badge.center();
     let size = badge.width();
-    let w = size * 0.055;
-    let flat = |_: f32| w;
-    let (l, mid, top, bottom) = (
-        c.x - size * 0.24,
-        c.x - size * 0.03,
-        c.y - size * 0.2,
-        c.y + size * 0.2,
-    );
-    taper(p, Pos2::new(l, top), Pos2::new(mid, c.y), flat, ink);
-    taper(p, Pos2::new(mid, c.y), Pos2::new(l, bottom), flat, ink);
-    taper(
-        p,
-        Pos2::new(c.x + size * 0.04, bottom),
-        Pos2::new(c.x + size * 0.25, bottom),
-        flat,
-        ink,
-    );
+    let (d, rho, w) = (size * 0.24, size * 0.16, size * 0.04);
+    // how far a link reaches past the previous one, in towards the centre
+    let tail = 50.0_f32.to_radians();
+    // where a link's circle meets the next one's on the outside, as an angle round its own centre
+    let h = (rho * rho - d * d / 4.0).sqrt();
+    let r = d * FRAC_PI_6.cos() + h;
+    let meet = (r * FRAC_PI_6.sin()).atan2(r * FRAC_PI_6.cos() - d);
+    // the head stops short of that point, clear of the next link's stroke and its own cap
+    let crossing = 2.0 * (d / (2.0 * rho)).asin();
+    let gap = (2.0 * w + size * 0.02) / crossing.sin() / rho;
+    let (from, to) = (-meet - tail, meet - gap);
+    let n = ((to - from) * rho / (size * 0.02)).ceil().max(1.0) as usize;
+    for k in 0..6 {
+        let axis = k as f32 * TAU / 6.0;
+        let centre = c + vec2(axis.cos(), axis.sin()) * d;
+        let pts: Vec<(Pos2, f32)> = (0..=n)
+            .map(|i| {
+                let a = axis + from + (to - from) * i as f32 / n as f32;
+                (centre + vec2(a.cos(), a.sin()) * rho, w)
+            })
+            .collect();
+        strip(p, &pts, ink);
+    }
 }
 
 /// Vendor badge + name, and (when a window would run out before it resets) the red warning right
