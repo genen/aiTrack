@@ -569,7 +569,7 @@ fn read_simple(data: &[u8], file_time: Option<DateTime<Utc>>, file: &str) -> Opt
     let body = if layout_ok {
         Ok(data[24 + key_len..body_eof].to_vec())
     } else {
-        Err("unrecognised simple-cache layout".to_string())
+        Err("unrecognized simple-cache layout".to_string())
     };
     finish(org, parse_response_info(meta), body, found)
 }

@@ -1692,6 +1692,39 @@ pub fn fit_height(
     (window_h - slack).clamp(min_h, cap.max(min_h))
 }
 
+// ---------------------------------------------------------------- horizontal layout
+
+/// Width of one vendor block in the horizontal layout (points): the vertical window's default
+/// width, so the meters keep their size.
+pub const BLOCK_W: f32 = 310.0;
+/// Narrowest a vendor block gets when the user drags the horizontal window narrower (points).
+pub const BLOCK_W_MIN: f32 = 270.0;
+/// Left + right margin of the full window around its content (points).
+pub const FULL_MARGIN_X: f32 = 20.0;
+
+/// Inner width of the full horizontal window for `n` vendor blocks of `block_w` points each.
+/// No vendors (the empty state) counts as one.
+pub fn horizontal_width(n: usize, block_w: f32) -> f32 {
+    n.max(1) as f32 * block_w.max(BLOCK_W_MIN) + FULL_MARGIN_X
+}
+
+/// Narrowest the full horizontal window may be dragged for `n` vendor blocks.
+pub fn horizontal_min_width(n: usize) -> f32 {
+    horizontal_width(n, BLOCK_W_MIN)
+}
+
+/// The block width a full horizontal window of `inner_w` points gives each of `n` blocks.
+pub fn block_width_for(inner_w: f32, n: usize) -> f32 {
+    ((inner_w - FULL_MARGIN_X) / n.max(1) as f32).max(BLOCK_W_MIN)
+}
+
+/// Inner width of the small window: [`SMALL_WINDOW_W`] when vertical, that once per vendor block
+/// when horizontal.
+pub fn small_width(horizontal: bool, n: usize) -> f32 {
+    let blocks = if horizontal { n.max(1) } else { 1 };
+    blocks as f32 * SMALL_WINDOW_W
+}
+
 /// Starting window (inner size, logical points) on Windows and Linux.
 pub const DEFAULT_INNER_PT: (f32, f32) = (310.0, 240.0);
 /// Starting window on macOS: the owner's chosen size, the home view with the 5-hour detail pane
