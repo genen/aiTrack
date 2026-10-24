@@ -9,6 +9,7 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 - Horizontal layout (Settings > Appearance > Layout): the tool blocks side by side in one row, the detail pane
   under the row, Settings and Stats centered at their usual width. The small window follows the setting. The
   window is 310 points wide per tool; a width dragged by hand is kept per block.
+- Clicking the aiTrack logo in the header opens the project page on GitHub.
 
 ### Changed
 - American spelling in the app and the README ("Window colors", "license").

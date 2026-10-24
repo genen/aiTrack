@@ -306,4 +306,21 @@ mod window {
             "{badges:?}"
         );
     }
+
+    #[test]
+    fn the_logo_opens_the_project_page_in_both_layouts() {
+        for horizontal in [false, true] {
+            let mut w = Win::new(horizontal);
+            let calls = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+            let c = calls.clone();
+            w.ui.url_opener = Arc::new(move |u| {
+                c.lock().unwrap().push(u.to_owned());
+                Ok(())
+            });
+            let logo = w.ui.logo_rect.expect("the header logo is drawn");
+            w.click(logo.center());
+            assert_eq!(*calls.lock().unwrap(), ["https://github.com/genen/aiTrack"]);
+            assert_eq!(w.ui.screen, Screen::Home);
+        }
+    }
 }

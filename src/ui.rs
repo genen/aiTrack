@@ -169,6 +169,8 @@ pub struct AitrackUi {
     plan_versions: Option<(u64, u64, u64)>,
     /// Screen rect of each range choice of the Stats view (for tests / the render tool).
     pub stats_rects: Vec<(String, Rect)>,
+    /// Screen rect of the header's logo from the last frame (tests / the render tool).
+    pub logo_rect: Option<Rect>,
     /// Screen rect of the header's shrink button from the last frame (tests / the render tool).
     pub shrink_rect: Option<Rect>,
     /// The window shape last set up: small or full, horizontal or vertical, and the number of
@@ -272,6 +274,7 @@ impl AitrackUi {
             plan_versions: None,
             stats_rects: vec![],
             shrink_rect: None,
+            logo_rect: None,
             // the window was built for the saved mode (see `run`); the first frame sets the width
             layout_sent: None,
             decor_sent: Some(first.small),
@@ -774,7 +777,16 @@ impl AitrackUi {
     /// be decoded the old drawn logo is used. Same footprint either way.
     fn header_logo(&mut self, ui: &mut Ui, pal: &Palette) {
         const LOGO: f32 = 24.0;
-        let (r, _) = ui.allocate_exact_size(vec2(LOGO, LOGO), Sense::hover());
+        let (r, resp) = ui.allocate_exact_size(vec2(LOGO, LOGO), Sense::click());
+        self.logo_rect = Some(r);
+        // a click opens the project page
+        if resp
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text("aiTrack on GitHub")
+            .clicked()
+        {
+            self.open_about_link(crate::launch::REPO_URL, "Could not open the project page");
+        }
         let ppp = ui.ctx().pixels_per_point();
         let (size, bytes) = crate::appicon::dial_for(!pal.dark, LOGO * ppp);
         let key = (!pal.dark, size);
@@ -1869,7 +1881,7 @@ impl AitrackUi {
         }
     }
 
-    /// Settings > About: project link, developer and contact, licence.
+    /// Settings > About: project link, developer and contact, license.
     fn about_body(&mut self, ui: &mut Ui, pal: &Palette, rects: &mut Vec<(String, Rect)>) {
         // (the build line is at the bottom of Settings; here the name links to the project)
         let mut open_repo = false;
