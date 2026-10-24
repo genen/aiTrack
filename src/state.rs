@@ -296,7 +296,7 @@ pub fn build_codex_state(
             ts: r.ts.clone(),
             ok: r.ok,
             text: format!(
-                "Codex: {}",
+                "ChatGPT: {}",
                 if r.ok {
                     // which source supplied it: tells a live reading from an old log line
                     let src = r

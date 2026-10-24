@@ -544,7 +544,7 @@ impl App {
                     inner: notifier.as_ref(),
                     raise: &up,
                 };
-                alerts.evaluate("Codex", &plan, now, &raising);
+                alerts.evaluate("ChatGPT", &plan, now, &raising);
             });
         }
         collector.set_on_prune(prune_reporter(self.prune_result.clone()));

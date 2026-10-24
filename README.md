@@ -1,6 +1,6 @@
 # aiTrack
 
-aiTrack is a small window for **Windows**, **macOS** and **Linux** that shows how much of your **Claude**, **Grok** and **Codex** (ChatGPT) plan
+aiTrack is a small window for **Windows**, **macOS** and **Linux** that shows how much of your **Claude**, **Grok** and **ChatGPT** plan
 limits you have used. It stays on top of your other windows, updates by itself, and warns you with a normal system
 notification before a limit runs out. The Mac version is for Apple silicon. Linux (new) is a first release for Ubuntu.
 Where this guide names Windows, Mac or Linux, it applies to that system only.
@@ -35,8 +35,8 @@ This guide is for people who just want to run it. Deeper technical notes are at 
 
 ## 1. What aiTrack is
 
-Claude, Grok and Codex limit how much you can use them. Claude has a **5-hour session** limit and a **7-day weekly**
-limit. Grok has one **weekly** credit pool. Codex (OpenAI's coding agent, part of a ChatGPT plan) has a **5-hour**
+Claude, Grok and ChatGPT limit how much you can use them. Claude has a **5-hour session** limit and a **7-day weekly**
+limit. Grok has one **weekly** credit pool. ChatGPT (its Codex limits) has a **5-hour**
 and a **weekly** limit. Each tool shows its own numbers in its own place, and it is easy to
 hit a limit without seeing it coming.
 
@@ -72,7 +72,7 @@ License, version 3 or later (see `LICENSE`).
 - At least one of the tools it tracks, already installed and signed in:
   - **Claude**: the Claude desktop app, or Claude Code.
   - **Grok**: the Grok command-line tool (the "Grok CLI"). See [section 5](#5-grok-needs-the-grok-cli).
-  - **Codex**: the Codex app or the Codex CLI, signed in with your ChatGPT account (see [Codex](#codex)).
+  - **ChatGPT**: the Codex app or the Codex CLI, signed in with your ChatGPT account (see [ChatGPT (Codex)](#chatgpt-codex)).
 - To build it yourself: Git and Rust (steps below; on a Mac also the Xcode command line tools; on Linux the build tools and the X11 and Wayland development packages). You do not need Rust to run a downloaded copy.
 
 ## 3. Install and run
@@ -341,10 +341,9 @@ Known limits:
 
 Clicking the Grok Bot bar opens its weekly pane: the current value, when it resets, how old the reading is (dimmed with a note when it is more than 60 minutes old), a history chart with 24h, 7d, 30d and All, and the Windows, Avg peak, Max peak and Hit rate numbers.
 
-### Codex
+### ChatGPT (Codex)
 
-Codex is OpenAI's coding agent (the Codex app, the Codex CLI and the IDE extension), included in ChatGPT plans. Its
-block shows the **Codex work limits**, the same numbers as Codex's own Settings > Usage page: a **Session** bar (the
+The ChatGPT block shows the Codex limits of your ChatGPT plan. Codex is OpenAI's coding agent (the Codex app, the Codex CLI and the IDE extension), included in ChatGPT plans, and it shares one usage pool with ChatGPT. The block shows the **Codex work limits**, the same numbers as Codex's own Settings > Usage page: a **Session** bar (the
 5-hour window) and a **Weekly** bar. They are not the limits of ordinary ChatGPT chats, which ChatGPT does not show
 anywhere. If your plan has only a weekly limit, the block shows one Weekly row.
 
@@ -359,7 +358,7 @@ The tooltips show your plan, your credit balance and banked resets when the serv
 single model (for example a separate Codex model limit) under **By model**. The Stats view and the history chart work
 as for Claude, and the Stats view counts Codex tokens and cost per project from the session logs.
 
-The Codex block appears when the folder `~/.codex` (or the folder in `CODEX_HOME`) has a sign-in or session logs. If
+The ChatGPT block appears when the folder `~/.codex` (or the folder in `CODEX_HOME`) has a sign-in or session logs. If
 it says **Codex login expired**, open Codex once so it renews the sign-in.
 
 ## 5. Grok needs the Grok CLI
@@ -445,7 +444,7 @@ The window has a header with three buttons, one block per tool, and a status lin
 
 ### The bars
 
-Each bar has 20 segments in the tool's colour (Claude amber, Grok light grey, Codex green). Read it left to right:
+Each bar has 20 segments in the tool's colour (Claude amber, Grok light grey, ChatGPT green). Read it left to right:
 
 - **bright**: what you have used so far;
 - **medium**: the extra use expected by the time the window resets if you keep your current pace;
@@ -456,7 +455,7 @@ what is left instead.
 
 ### Session and weekly
 
-Claude's **Session** window lasts 5 hours. Its **Weekly** window lasts 7 days. Each has its own reset time. Grok has only a **Weekly** window (your billing period). Codex has a 5-hour **Session** window and a **Weekly** window.
+Claude's **Session** window lasts 5 hours. Its **Weekly** window lasts 7 days. Each has its own reset time. Grok has only a **Weekly** window (your billing period). ChatGPT has a 5-hour **Session** window and a **Weekly** window.
 
 ### Hovering and clicking a row
 
@@ -504,6 +503,8 @@ then shows dashes with "its reset time has passed, waiting for a new reading" un
 aiTrack compares your use so far with the time that has passed in the window. If you would run out **before the
 window resets**, a red line appears after the tool's name, for example `Empty in ~2h 19m · resets in 3h 19m`. The
 row tooltip says "Limit in ~1.4h at this pace".
+
+For the 7-day window there is no pace, projection or warning until 12 hours of it have passed or 3 points are used.
 
 The warning is held back when it would be noise:
 
@@ -634,7 +635,7 @@ At the bottom: **Back**, a **Help** link (it opens this page), and the build lin
 **General**
 
 - **Update frequency**: **1 min**, **5 min**, **15 min** (the default) or **1 hour**. This is how often the online
-  check runs. The online check is the Claude usage service, Grok billing and Codex usage, and it is only asked when no file on
+  check runs. The online check is the Claude usage service, Grok billing and ChatGPT usage, and it is only asked when no file on
   your PC has a recent reading. Every minute may hit rate limits.
 - **Custom (minutes)**: any number of minutes, 1 to 1440.
 - **Local refresh (seconds)**: how often aiTrack re-reads the files of the Claude app. Default 60, allowed 15 to 600.
@@ -652,7 +653,7 @@ At the bottom: **Back**, a **Help** link (it opens this page), and the build lin
 - **Window position**: the window reopens where you left it. **Reset** forgets the position.
 - **Always on top**: keep the window above other windows (on by default). On Linux under native Wayland it shows
   "Not available on native Wayland" (see [Install on Linux](#install-on-linux-new)).
-- **Show Claude**, **Show Grok** and **Show Codex**: **Auto** (show it when the tool is found on this PC; the line under the name says
+- **Show Claude**, **Show Grok** and **Show ChatGPT**: **Auto** (show it when the tool is found on this PC; the line under the name says
   "Found on this PC", on a Mac "Found on this Mac", or "Not found"), **On** (always show it) or **Off** (never).
 - **Refresh Grok now**: starts the Grok CLI in the background to fetch fresh Grok usage. This row only appears when
   the Grok CLI is found. Under the button it shows the result, for example "Refreshed 19:42: weekly 8%", and it
@@ -759,7 +760,7 @@ aiTrack only **reads** the folders of Claude, Grok and Codex. It never changes t
 - To `api.anthropic.com`: the Claude usage question, with your Claude Code sign-in. Only when no file on your PC
   has a recent reading.
 - To `cli-chat-proxy.grok.com`: the Grok billing question, with the sign-in the Grok CLI stored.
-- To `chatgpt.com`: the Codex usage question, with the sign-in Codex stored.
+- To `chatgpt.com`: the ChatGPT usage question, with the sign-in Codex stored.
 - To `raw.githubusercontent.com`: a download of the public price list, about once a day.
 - Clicking **Help** opens this page (https://github.com/genen/aiTrack#readme) in your browser.
 - Starting the Grok CLI (Refresh) makes the CLI contact xAI as it always does.
@@ -883,7 +884,7 @@ Limits you should know about:
   with brotli cannot be read.
 - **Grok needs the Grok CLI** (section 5). The Grok desktop apps alone are not enough.
 - **Costs in the Stats view are estimates** at list prices.
-- Only Claude, Grok and Codex are supported. For ChatGPT, aiTrack shows the Codex limits, not chat message caps.
+- Only Claude, Grok and ChatGPT are supported. For ChatGPT, aiTrack shows the Codex limits of your plan, not chat message caps.
 
 Roadmap, in this order: the Windows release (done), the Mac version (done), the Linux version (new, first release),
 then more tools (Codex is in; Gemini next).
@@ -1146,9 +1147,9 @@ file and statistics are untouched). Tracking is automatic when the Grok folder e
 too (`alerts-grok.json`). `aitrack --sources` has a Grok section (structure only). Headless `--collect` does not
 collect Grok.
 
-### Codex (third vendor)
+### ChatGPT (third vendor)
 
-If `~/.codex` (or `$CODEX_HOME`) holds `auth.json` or session logs, a Codex block appears with a **Session** row
+If `~/.codex` (or `$CODEX_HOME`) holds `auth.json` or session logs, a ChatGPT block appears with a **Session** row
 (the 5-hour window) and a **Weekly** row; windows are told apart by their length (a week or more is weekly), so a
 plan with only a weekly limit gets one row. Two sources, live first:
 
@@ -1161,10 +1162,10 @@ plan with only a weekly limit gets one row. Two sources, live first:
    `archived_sessions`, `.jsonl.zst` included), which carry the same `rate_limits`. Only as fresh as your last Codex
    turn. An old reading stays visible, dimmed with the age chip; only a weekly window that has ended shows dashes.
 
-Readings go to `usage-codex.jsonl` (records carry `"vendor": "codex"`). Settings > Display > "Show Codex"
+Readings go to `usage-codex.jsonl` (records carry `"vendor": "codex"`). Settings > Display > "Show ChatGPT"
 (`codex_enabled` in settings.json) overrides detection. Alerts work as for Claude (`alerts-codex.json`). The Stats
 view computes Codex tokens and cost per project from the session logs (`token_count` totals, priced from the live
-LiteLLM list with built-in fallbacks for the GPT-5 family). `aitrack --sources` has a Codex section (counts only).
+LiteLLM list with built-in fallbacks for the GPT-5 family). `aitrack --sources` has a ChatGPT section (counts only).
 
 **Opening Codex.** On Windows the badge opens the Store app as the Start menu lists it (entry "Codex" or an
 `OpenAI.Codex_*` AppID, started with `explorer.exe shell:AppsFolder\<AppID>`), else `codex` in a new terminal.

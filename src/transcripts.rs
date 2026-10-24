@@ -1571,14 +1571,14 @@ pub fn fmt_cost(cost: f64, messages: usize, unpriced: usize) -> String {
     }
 }
 
-/// Name column of `--projects`: Grok and Codex rows end in " (Grok)" / " (Codex)" so they are not mistaken for Claude
+/// Name column of `--projects`: Grok and Codex rows end in " (Grok)" / " (ChatGPT)" so they are not mistaken for Claude
 /// projects of the same name. A long name is cut before the label, never after it.
 pub fn cli_project_label(p: &ProjectUsage) -> String {
     const MAX_NAME: usize = 40;
     let name: String = p.name.chars().take(MAX_NAME).collect();
     match p.vendor {
         VendorId::Grok => format!("{name} (Grok)"),
-        VendorId::Codex => format!("{name} (Codex)"),
+        VendorId::Codex => format!("{name} (ChatGPT)"),
         _ => name,
     }
 }

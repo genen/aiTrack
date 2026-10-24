@@ -3,6 +3,17 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.8-beta] - 2026-10-24
+
+### Changed
+- The tool shown as Codex is now called **ChatGPT**: Codex and ChatGPT share one usage pool, and ChatGPT is the
+  better-known name. The block, tooltips, status texts, Stats blocks, Diagnostics, `--sources` and Settings >
+  Display > **Show ChatGPT** use the new name. Where the text means the Codex app or CLI (the sign-in message, the
+  logo hover "Open Codex", the session logs), it still says Codex. Colour, badge and settings files are unchanged.
+- A 7-day window no longer shows a pace, "On pace for" note, projection or time to limit until 12 hours of it have
+  passed or 3 points are used (1 % at 1.6 hours in used to read "On pace for ~98%"). The 5-hour session is unchanged.
+  The rule is the same for Claude, Grok, Grok Bot and ChatGPT.
+
 ## [0.5.7-beta] - 2026-10-24
 
 ### Added

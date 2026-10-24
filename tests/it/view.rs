@@ -367,7 +367,7 @@ fn limit_warning_tone_and_detail_without_history() {
 fn demo_vendors_cover_all_four() {
     let v = vendor::demo_vendors(Utc::now());
     let names: Vec<&str> = v.iter().map(|v| v.name.as_str()).collect();
-    assert_eq!(names, ["Claude", "Codex", "Antigravity", "Grok"]);
+    assert_eq!(names, ["Claude", "ChatGPT", "Antigravity", "Grok"]);
     assert!(v.iter().all(|v| v.has_data()));
 }
 

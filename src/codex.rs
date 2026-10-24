@@ -284,7 +284,7 @@ pub fn parse_usage(body: &Value, now: DateTime<Utc>) -> Result<Sample, String> {
     let rl = body
         .get("rate_limit")
         .filter(|r| r.is_object())
-        .ok_or("unexpected Codex usage response (no rate_limit)")?;
+        .ok_or("unexpected ChatGPT usage response (no rate_limit)")?;
     let mut r = Report::default();
     for key in ["primary_window", "secondary_window"] {
         if let Some(w) = rl.get(key).and_then(|w| live_window(w, now)) {
@@ -292,7 +292,7 @@ pub fn parse_usage(body: &Value, now: DateTime<Utc>) -> Result<Sample, String> {
         }
     }
     if r.session.is_none() && r.weekly.is_none() {
-        return Err("Codex usage response has no limit windows".into());
+        return Err("ChatGPT usage response has no limit windows".into());
     }
     r.plan = body
         .get("plan_type")
@@ -504,7 +504,7 @@ impl UsageSource for CodexUsage {
             Err(ureq::Error::Status(401, _)) => return Err(CollectError::new(EXPIRED)),
             Err(ureq::Error::Status(403, _)) => {
                 return Err(CollectError::new(
-                    "Codex usage refused (HTTP 403): the service did not accept the request",
+                    "ChatGPT usage refused (HTTP 403): the service did not accept the request",
                 ))
             }
             Err(ureq::Error::Status(code, resp)) => {
@@ -512,27 +512,27 @@ impl UsageSource for CodexUsage {
                     .header("Retry-After")
                     .and_then(crate::live::parse_retry_after);
                 return Err(CollectError {
-                    message: format!("Codex usage HTTP {code}"),
+                    message: format!("ChatGPT usage HTTP {code}"),
                     retry_after,
                 });
             }
             Err(ureq::Error::Transport(t)) => {
                 return Err(CollectError::new(format!(
-                    "Codex usage network error: {}",
+                    "ChatGPT usage network error: {}",
                     crate::endpoints::transport_text(&t)
                 )))
             }
         };
         if resp.status() >= 300 {
             return Err(CollectError::new(format!(
-                "Codex usage unexpected HTTP {} (redirects are not followed)",
+                "ChatGPT usage unexpected HTTP {} (redirects are not followed)",
                 resp.status()
             )));
         }
         let bytes = crate::endpoints::read_capped(&mut resp.into_reader())
-            .map_err(|e| CollectError::new(format!("Codex usage: {e}")))?;
+            .map_err(|e| CollectError::new(format!("ChatGPT usage: {e}")))?;
         let body: Value = serde_json::from_slice(&bytes)
-            .map_err(|_| CollectError::new("unexpected (non-JSON) Codex usage response"))?;
+            .map_err(|_| CollectError::new("unexpected (non-JSON) ChatGPT usage response"))?;
         let sample = parse_usage(&body, now).map_err(CollectError::new)?;
         Ok(Observation {
             latest: sample,
@@ -832,7 +832,7 @@ pub fn diagnose(env: &Env, now: DateTime<Utc>) -> String {
     let yn = |b: bool| if b { "yes" } else { "no" };
     let home = codex_home(env);
     line(
-        "Codex (5-hour and weekly limits; tried in this order: live usage, then the session logs)"
+        "ChatGPT (Codex: 5-hour and weekly limits; tried in this order: live usage, then the session logs)"
             .into(),
     );
     line(format!(

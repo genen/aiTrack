@@ -22,7 +22,7 @@ use std::path::PathBuf;
 #[cfg(feature = "gui")]
 use std::sync::Arc;
 
-const USAGE: &str = "aiTrack - Claude, Grok and Codex plan usage tracker
+const USAGE: &str = "aiTrack - Claude, Grok and ChatGPT plan usage tracker
 
 USAGE:
     aitrack [OPTIONS]

@@ -165,6 +165,20 @@ fn recent_evidence(points: &[(DateTime<Utc>, f64)]) -> Evidence {
         .map_or(Evidence::Insufficient, Evidence::Trend)
 }
 
+/// A weekly window shows no pace until this many hours of it have passed ...
+pub const MIN_WEEKLY_ELAPSED_H: f64 = 12.0;
+/// ... or this many points are used: one early point is no basis for a pace over seven days.
+pub const MIN_WEEKLY_PACE_PCT: f64 = 3.0;
+
+/// Too early in a weekly window to believe a pace (see [`MIN_WEEKLY_ELAPSED_H`]). Needs the reset
+/// time; without it the elapsed time is unknown and nothing is held back.
+fn weekly_too_early(kind: Kind, pct: f64, hours_left: Option<f64>) -> bool {
+    let Some(left) = hours_left.filter(|h| *h > 0.0) else {
+        return false;
+    };
+    kind == Kind::Weekly && pct < MIN_WEEKLY_PACE_PCT && kind.hours() - left < MIN_WEEKLY_ELAPSED_H
+}
+
 /// The pace to project with, and where it came from.
 ///
 /// * `points` are the readings of the current evidence window (older ones, before a reset or plan
@@ -175,12 +189,18 @@ fn recent_evidence(points: &[(DateTime<Utc>, f64)]) -> Evidence {
 ///   six minutes of heavy use) still raises the pace well above the average, but one noisy step
 ///   cannot make it absurd, and a calm stretch never lowers it below the average.
 /// * Nothing reliable: no pace (and so no projection and no warning).
+/// * Early in a weekly window (see [`MIN_WEEKLY_ELAPSED_H`], [`MIN_WEEKLY_PACE_PCT`]) there is no
+///   pace either, except a flat hour of idleness (pace 0).
 pub fn pace_for(
     kind: Kind,
     pct: f64,
     hours_left: Option<f64>,
     points: &[(DateTime<Utc>, f64)],
 ) -> Option<(f64, PaceMethod)> {
+    if weekly_too_early(kind, pct, hours_left) {
+        return matches!(recent_evidence(points), Evidence::Idle)
+            .then_some((0.0, PaceMethod::Recent));
+    }
     let avg = elapsed_pace(kind, pct, hours_left);
     match (recent_evidence(points), avg) {
         (Evidence::Idle, _) => Some((0.0, PaceMethod::Recent)),

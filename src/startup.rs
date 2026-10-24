@@ -134,7 +134,7 @@ pub fn desktop_entry(exe: &Path) -> String {
             "[Desktop Entry]\n",
             "Type=Application\n",
             "Name=aiTrack\n",
-            "Comment=Claude, Grok and Codex plan usage meter\n",
+            "Comment=Claude, Grok and ChatGPT plan usage meter\n",
             "Exec={exec}\n",
             "Icon=aitrack\n",
             "Terminal=false\n",
