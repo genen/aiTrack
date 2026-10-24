@@ -553,6 +553,10 @@ pub fn series(readings: &[Reading]) -> Vec<SeriesPoint> {
 pub const MIN_WARN_PCT_SESSION: f64 = 10.0;
 /// ... the same for the 7-day window.
 pub const MIN_WARN_PCT_WEEKLY: f64 = 25.0;
+/// The 7-day window's "average pace would exhaust it" exception to [`MIN_WARN_PCT_WEEKLY`] applies only
+/// once this many hours of the window have passed: a few hours in, the average is a short burst, not a
+/// week of use at that pace.
+pub const MIN_WEEKLY_WARN_ELAPSED_H: f64 = 24.0;
 
 /// A window that would run out before it resets.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -593,8 +597,9 @@ pub fn empty_before_reset(g: &Gauge) -> Option<EmptyInfo> {
         Kind::Session => MIN_WARN_PCT_SESSION,
         Kind::Weekly => MIN_WARN_PCT_WEEKLY,
     };
-    let avg_exhausts = elapsed_pace(kind, g.pct, Some(left))
-        .is_some_and(|a| a > 0.0 && (100.0 - g.pct) / a < left);
+    let avg_exhausts = (kind != Kind::Weekly || kind.hours() - left >= MIN_WEEKLY_WARN_ELAPSED_H)
+        && elapsed_pace(kind, g.pct, Some(left))
+            .is_some_and(|a| a > 0.0 && (100.0 - g.pct) / a < left);
     (g.pct >= min || avg_exhausts).then_some(EmptyInfo {
         empty_in_h: empty_in,
         resets_in_h: left,

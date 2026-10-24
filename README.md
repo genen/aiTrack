@@ -510,7 +510,7 @@ The warning is held back when it would be noise:
 
 - there is no reset time;
 - the usage is still low (under 10 % for the session, under 25 % for the week) unless even your average pace would
-  use up the window;
+  use up the window (for the week, that average counts only after 24 hours of the window have passed);
 - the reading is more than 60 minutes old (see below).
 
 ### Old data

@@ -3,6 +3,12 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.11-beta] - 2026-10-24
+
+### Changed
+- The "Weekly: empty in ..." warning below 25 % now needs at least 24 hours of the week to have passed before the
+  average pace can trigger it, so a short burst early in the week no longer looks like 24/7 use.
+
 ## [0.5.10-beta] - 2026-10-24
 
 ### Changed

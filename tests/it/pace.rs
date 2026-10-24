@@ -275,6 +275,29 @@ fn low_usage_needs_the_average_to_agree_before_it_warns() {
     );
 }
 
+#[test]
+fn early_week_burst_does_not_warn_below_the_weekly_threshold() {
+    // 5% four hours into the week (164 h left) at a fast 3 pts/h: the average (1.25 pts/h) would
+    // exhaust it, but 4 h is a burst, not a week of use
+    assert_eq!(empty_before_reset(&gauge(5.0, 164.0, 3.0, 168.0)), None);
+    // 20% thirty hours in (138 h left): the average (0.67 pts/h) exhausts it before the reset
+    assert!(empty_before_reset(&gauge(20.0, 138.0, 3.0, 168.0)).is_some());
+    // exactly 24 h in, the exception applies
+    assert!(empty_before_reset(&gauge(20.0, 144.0, 3.0, 168.0)).is_some());
+    // just under 24 h in it does not
+    assert_eq!(empty_before_reset(&gauge(20.0, 144.5, 3.0, 168.0)), None);
+    // 30% four hours in is at the threshold: warns as before
+    assert!(empty_before_reset(&gauge(30.0, 164.0, 3.0, 168.0)).is_some());
+    // a session window is unchanged: 9% fifteen minutes in still warns
+    assert!(empty_before_reset(&gauge(9.0, 4.75, 36.0, 5.0)).is_some());
+    // at the limit early in the week is unchanged
+    assert!(
+        empty_before_reset(&gauge(100.0, 164.0, 0.0, 168.0))
+            .unwrap()
+            .at_limit
+    );
+}
+
 // ------------------------------------------------------------ alerts use the same rule
 
 #[test]
