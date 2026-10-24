@@ -3,7 +3,7 @@
 For the agent that builds the macOS version of aiTrack. The Windows version (0.3.0, the first official release) is
 finished and a different agent keeps developing it. This file holds what the source and the README do not say:
 decisions, history, owner preferences that matter for a port, what was and was not verified, and traps found on the
-Windows side. Read `CLAUDE.md` first (owner preferences and rules), then this file, then the README.
+Windows side. Read the owner's rules in `genen/claude-setup` (`CLAUDE.general.md`) first, then this file, then the README.
 
 Written 2026-10-15 at version 0.3.0 (commit 3dbbbed). Where a statement is a guess it is marked **unverified**.
 
@@ -29,7 +29,7 @@ Grok, vendor blocks flush together, tooltips for detail, light and dark themes b
 
 Claude, in order: the Claude desktop app's Chromium HTTP cache, then its `plan-usage-history.json`, then
 `~/.claude.json`, then the OAuth usage endpoint. Grok: live billing from `cli-chat-proxy.grok.com` (token from
-`~/.grok/auth.json`), falling back to `~/.grok/logs/unified.jsonl`. Details are in README section 5 and `CLAUDE.md`.
+`~/.grok/auth.json`), falling back to `~/.grok/logs/unified.jsonl`. Details are in README section 5.
 Points a port agent will not find in the code:
 
 - **Claude's numbers only update while the Claude desktop app is running.** The cache is written when the app talks to
@@ -142,7 +142,7 @@ These each cost CI cycles. Build the macOS CI job knowing them.
   notifications) for GPLv3 compatibility.
 - Owner style: short answers (they read on a phone and in Windows terminals); say what was and was not verified;
   never claim something ran on their machine unless it did; ask before irreversible or outward-facing steps; give the
-  exact test command. For a Windows test they use `D:\git\aiTrack` and a fixed pull-and-run line (in `CLAUDE.md`). **A
+  exact test command. For a Windows test they use `D:\git\aiTrack` and a fixed pull-and-run line. **A
   Mac equivalent does not exist yet; ask what Mac the owner has, or whether they have one at all.**
 - Subagent rules: ask for a progress note every 5 minutes while one runs; every summary names the model each subagent
   ran on and each is recorded in `docs/subagent-log.md`. The code review by an Opus-model subagent happens **only when
@@ -165,7 +165,7 @@ These each cost CI cycles. Build the macOS CI job knowing them.
 
 ## 8. Where things are
 
-- `CLAUDE.md`: owner preferences and the rules above, in full. **Authoritative.**
+- `genen/claude-setup` (`CLAUDE.general.md`): the owner's rules for every project. **Authoritative.**
 - `README.md`: user guide; section 5 covers data sources, the last sections cover internals and the roadmap.
 - `CHANGELOG.md`: what each version changed.
 - `docs/subagent-log.md`: which model each subagent ran on.
