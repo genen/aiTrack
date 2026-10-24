@@ -20,6 +20,8 @@ pub struct Diag {
 #[derive(Debug, Clone)]
 pub struct State {
     pub plan: Option<Plan>,
+    /// Claude's plan name from Claude Code's login file, when it has one.
+    pub tier: Option<String>,
     pub models: Vec<ModelLimit>,
     pub settings: Values,
     pub collector: Status,
@@ -135,6 +137,7 @@ pub fn build_state(
         .collect();
     State {
         plan,
+        tier: None,
         models,
         settings,
         collector,
@@ -151,6 +154,7 @@ impl State {
     pub fn loading(settings: Values, collector: Status) -> State {
         State {
             plan: None,
+            tier: None,
             models: vec![],
             settings,
             collector,

@@ -20,6 +20,8 @@ use std::time::{Duration, Instant};
 
 /// Recompute the analysis at most this often when nothing changed (countdowns drift slowly).
 const REFRESH_EVERY: Duration = Duration::from_secs(5);
+/// How often Claude's plan name is read again from Claude Code's login file.
+const PLAN_EVERY: Duration = Duration::from_secs(300);
 
 pub struct App {
     pub history: Arc<History>,
@@ -36,6 +38,8 @@ pub struct App {
     /// Is Claude's tool installed? (stat only; `true` until the window installs the real check)
     claude_detect: Arc<Mutex<Detect>>,
     claude_seen: Remembered,
+    /// Claude's plan name and when it was read (the login file is read again after [`PLAN_EVERY`]).
+    claude_plan: Mutex<Option<(Instant, Option<String>)>>,
     /// The Stats view's background service (transcripts + plan statistics), when set up.
     stats: std::sync::OnceLock<Arc<crate::statsview::StatsService>>,
     /// What the last prune asked for in Settings did (shown under the "Prune now" button).
@@ -389,6 +393,7 @@ impl App {
             stats: std::sync::OnceLock::new(),
             claude_detect,
             claude_seen: Remembered::new(),
+            claude_plan: Mutex::new(None),
             prune_result: Arc::new(Mutex::new(None)),
         }
         .with_prune_reporting()
@@ -1096,6 +1101,19 @@ impl App {
         self.grok.as_ref().and_then(|g| g.bot.get().cloned())
     }
 
+    /// Claude's plan name, read from Claude Code's login file at most every [`PLAN_EVERY`].
+    fn claude_plan(&self) -> Option<String> {
+        let mut c = self.claude_plan.lock().unwrap_or_else(|e| e.into_inner());
+        match c.as_ref() {
+            Some((at, plan)) if at.elapsed() < PLAN_EVERY => plan.clone(),
+            _ => {
+                let plan = crate::sources::claude_plan(&crate::sources::Env::from_process());
+                *c = Some((Instant::now(), plan.clone()));
+                plan
+            }
+        }
+    }
+
     /// Current view state. Never blocks on I/O: while the history is loading it returns a
     /// "loading" state; otherwise the analysis is reused unless the data changed or is a few
     /// seconds old. Settings and collector status are always live.
@@ -1138,6 +1156,8 @@ impl App {
         match built {
             Some(mut state) => {
                 state.claude_on = claude_on;
+                // the login file is not opened while Claude is off
+                state.tier = claude_on.then(|| self.claude_plan()).flatten();
                 let prev = cache.as_ref().and_then(|c| c.state.grok.clone());
                 let (grok, grok_real) = match self.build_grok(settings, now, prev.as_ref()) {
                     Some((g, real)) => (Some(g), real),
@@ -1220,6 +1240,8 @@ impl App {
         let g = self.grok.as_ref()?;
         let (status, enabled) = (g.collector.status(), settings.grok_on(g.detected()));
         let bot = g.bot.get().and_then(|b| b.latest());
+        // the Grok Bot app's plan label stands in when the billing reply names no tier
+        let bot_tier = g.bot.get().and_then(|b| b.plan());
         // the Grok Bot's saved readings get the same analysis as Grok's: window stats and a pace
         let bot_plan = g
             .bot
@@ -1231,6 +1253,7 @@ impl App {
             Some(r) => {
                 let mut s = build_grok_state(&r, status, enabled, now);
                 s.bot = bot;
+                s.tier = s.tier.or_else(|| bot_tier.clone());
                 s.bot_stats = bot_stats.clone();
                 s.bot_gauge = bot_gauge.clone();
                 Some((s, true))
@@ -1241,6 +1264,7 @@ impl App {
                     p.collector = status;
                     p.enabled = enabled;
                     p.bot = bot;
+                    p.tier = p.tier.or_else(|| bot_tier.clone());
                     p.bot_stats = bot_stats.clone();
                     p.bot_gauge = bot_gauge.clone();
                     (p, false)
@@ -1248,6 +1272,7 @@ impl App {
                 None => {
                     let mut s = build_grok_state(&[], status, enabled, now);
                     s.bot = bot;
+                    s.tier = s.tier.or_else(|| bot_tier.clone());
                     s.bot_stats = bot_stats.clone();
                     s.bot_gauge = bot_gauge.clone();
                     (s, false)

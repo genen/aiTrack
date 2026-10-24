@@ -94,6 +94,35 @@ pub fn parse_credentials(bytes: &[u8]) -> Option<Credential> {
     })
 }
 
+/// The plan Claude Code saved with its login (`claudeAiOauth.subscriptionType`), as people know it
+/// (`max` -> `Max`). Only that field is read; the token is not kept. `rateLimitTier` (5x/20x) is
+/// left out: it is known to be wrong on some accounts.
+pub fn parse_subscription(bytes: &[u8]) -> Option<String> {
+    let data: Value = serde_json::from_slice(bytes).ok()?;
+    let plan = data
+        .get("claudeAiOauth")?
+        .get("subscriptionType")?
+        .as_str()?
+        .trim();
+    // an empty, placeholder or implausibly long value is not a plan name
+    if plan.is_empty() || plan.eq_ignore_ascii_case("unknown") || plan.chars().count() > 32 {
+        return None;
+    }
+    Some(match plan.to_ascii_lowercase().as_str() {
+        "free" => "Free".into(),
+        "pro" => "Pro".into(),
+        "max" => "Max".into(),
+        "team" => "Team".into(),
+        "enterprise" => "Enterprise".into(),
+        other => {
+            let mut c = other.chars();
+            c.next()
+                .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+                .unwrap_or_default()
+        }
+    })
+}
+
 /// Keychain service name Claude Code uses on macOS.
 pub const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 
@@ -182,21 +211,27 @@ pub fn default_sources_from(
     config_dir: Option<&str>,
     home: Option<PathBuf>,
 ) -> Vec<Box<dyn CredentialSource>> {
-    let mut v: Vec<Box<dyn CredentialSource>> = Vec::new();
-    if let Some(dir) = config_dir.filter(|d| !d.is_empty()) {
-        v.push(Box::new(CredentialsFile {
-            path: expand_user(dir).join(".credentials.json"),
-        }));
-    }
-    v.push(Box::new(CredentialsFile {
-        path: home
-            .unwrap_or_default()
-            .join(".claude")
-            .join(".credentials.json"),
-    }));
+    let mut v: Vec<Box<dyn CredentialSource>> = credentials_files(config_dir, home)
+        .into_iter()
+        .map(|path| Box::new(CredentialsFile { path }) as Box<dyn CredentialSource>)
+        .collect();
     if cfg!(target_os = "macos") {
         v.push(Box::new(KeychainItem));
     }
+    v
+}
+
+/// `$CLAUDE_CONFIG_DIR/.credentials.json` (if set), then `~/.claude/.credentials.json`.
+pub fn credentials_files(config_dir: Option<&str>, home: Option<PathBuf>) -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(dir) = config_dir.filter(|d| !d.is_empty()) {
+        v.push(expand_user(dir).join(".credentials.json"));
+    }
+    v.push(
+        home.unwrap_or_default()
+            .join(".claude")
+            .join(".credentials.json"),
+    );
     v
 }
 

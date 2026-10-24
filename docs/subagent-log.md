@@ -42,3 +42,4 @@ line to both files for every subagent.
 | 2026-10-24 | reviewer-Tamsin: Opus review of the Grok refresh fixes (PR #25, heavy on changed lines; read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
 | 2026-10-24 | designer-Lena: ChatGPT interlaced knot badge mark (0.5.10-beta) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
 | 2026-10-24 | reviewer-Maya: Opus review of the horizontal layout (PR #27, heavy on changed lines; read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-10-24 | reviewer-Tomas: Opus review of the Claude plan tooltip (PR #28, heavy on changed lines; read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |

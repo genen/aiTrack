@@ -292,6 +292,11 @@ is open. That is what I observed, not something Claude promises. If the bars sho
 usage page in the Claude app and press **Refresh now**. Source 4 reads `~/.claude/.credentials.json`, and on a Mac
 also the Keychain item "Claude Code-credentials" (macOS may ask you to allow it).
 
+**Your Claude plan** (Pro, Max, Team or Enterprise) shows in the row tooltips as "Plan: Max". It comes from the
+`subscriptionType` field of `~/.claude/.credentials.json`; aiTrack reads only that field, about every 5 minutes, and
+does not store it. Without that file (usual on a Mac, where Claude Code keeps its sign-in in the Keychain) the line is
+left out.
+
 **On Linux** the Claude desktop app keeps its sign-in in the system keyring (GNOME Keyring), so
 `~/.claude/.credentials.json` may be absent. That is normal: aiTrack then shows the last reading dimmed, or "no Claude
 data found", and never an error dialog. aiTrack never reads the keyring. If `aitrack --sources` says "usage entries found: 0", the reading falls
@@ -323,6 +328,8 @@ own "Weekly Grok Bot Limit", a separate meter from the SuperGrok weekly pool (th
 aiTrack reads the small cache file the app keeps in its data folder: `~/Library/Application Support/Grok Bot/` on a
 Mac, `%APPDATA%\Grok Bot\` on Windows (the subfolder `sand-client-persistence`). It opens only the one file that holds
 the weekly usage, never the app's login or secrets files, and it records no account id or file name anywhere.
+The same file names your plan ("SuperGrok"), which the Grok tooltips show as "Plan: SuperGrok" when the Grok billing
+reply does not name one.
 
 Known limits:
 
@@ -460,7 +467,7 @@ Claude's **Session** window lasts 5 hours. Its **Weekly** window lasts 7 days. E
 
 ### Hovering and clicking a row
 
-Hover a row to see a tooltip: when the window resets, the pace, and where the number came from.
+Hover a row to see a tooltip: when the window resets, the pace, your plan, and where the number came from.
 
 ![A row tooltip](docs/img/row-tooltip.png)
 
