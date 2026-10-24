@@ -564,6 +564,29 @@ fn main() {
             Box::new(|_, _, _| {}),
         ),
     ];
+    // the horizontal layout: blocks side by side, the detail pane under the row
+    let wide = aitrack::view::horizontal_width(vendor::demo_vendors(now).len(), 310.0);
+    for (name, setup) in [
+        (
+            "horizontal",
+            Box::new(move |_: &Context, ui: &mut AitrackUi, app: &Arc<App>| {
+                mock(ui);
+                app.settings.set_horizontal(true);
+            }) as Setup,
+        ),
+        (
+            "horizontal_expanded",
+            Box::new(move |_: &Context, ui: &mut AitrackUi, app: &Arc<App>| {
+                mock(ui);
+                app.settings.set_horizontal(true);
+                ui.expanded = Some((VendorId::Claude, Kind::Session));
+            }),
+        ),
+    ] {
+        let mut sc = scene(name, all4(), setup);
+        sc.width = wide;
+        scenes.push(sc);
+    }
     let mut light = scene(
         "compact_4vendors_light",
         all4(),

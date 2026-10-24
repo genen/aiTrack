@@ -27,6 +27,7 @@ mod grok_app;
 mod grok_bot;
 mod grok_bot_chart;
 mod grok_refresh;
+mod horizontal;
 mod instance;
 mod launch;
 mod linux_sources;

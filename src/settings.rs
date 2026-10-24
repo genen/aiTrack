@@ -12,6 +12,9 @@ pub const INTERVAL_MAX: f64 = 1440.0;
 /// How often the cheap local sources (desktop cache/history, ~/.claude.json) are re-read, in seconds.
 pub const LOCAL_SEC_MIN: f64 = 15.0;
 pub const LOCAL_SEC_MAX: f64 = 600.0;
+/// Range a saved horizontal block width is kept in (points).
+pub const BLOCK_W_MIN: f64 = crate::view::BLOCK_W_MIN as f64;
+pub const BLOCK_W_MAX: f64 = 1000.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
@@ -288,6 +291,11 @@ pub struct Values {
     pub window: Option<WindowPos>,
     /// Small mode: a borderless always-on-top window with only the vendor meters.
     pub small: bool,
+    /// Horizontal layout: the vendor blocks side by side in one row (vertical, stacked, by default).
+    pub horizontal: bool,
+    /// Width of one vendor block in the horizontal full window, as the user last sized it
+    /// (`None` = [`crate::view::BLOCK_W`]). The vertical window keeps its own width in `window`.
+    pub block_width: Option<f64>,
 }
 
 impl Default for Values {
@@ -308,6 +316,8 @@ impl Default for Values {
             sections: Sections::default(),
             window: None,
             small: false,
+            horizontal: false,
+            block_width: None,
         }
     }
 }
@@ -349,6 +359,8 @@ impl Values {
             "ui": {"sections": self.sections.to_json()},
             "window": self.window.map(|w| w.to_json()),
             "small": self.small,
+            "layout": if self.horizontal { "horizontal" } else { "vertical" },
+            "block_width": self.block_width,
         })
     }
 
@@ -380,6 +392,20 @@ impl Values {
         }
         if let Some(b) = new.get("small").and_then(Value::as_bool) {
             self.small = b;
+        }
+        match new.get("layout").and_then(Value::as_str) {
+            Some("horizontal") => self.horizontal = true,
+            Some("vertical") => self.horizontal = false,
+            _ => {}
+        }
+        match new.get("block_width") {
+            Some(Value::Null) => self.block_width = None,
+            Some(v) => {
+                if let Some(w) = v.as_f64().filter(|w| w.is_finite()) {
+                    self.block_width = Some(w.clamp(BLOCK_W_MIN, BLOCK_W_MAX));
+                }
+            }
+            None => {}
         }
         if let Some(b) = new.get("alert_sounds").and_then(Value::as_bool) {
             self.alert_sounds = b;
@@ -493,7 +519,7 @@ impl Settings {
     /// first. Best effort (a read-only home must not take the app down), but a failure is logged.
     fn save(&self, v: &Values) {
         let Ok(text) = serde_json::to_string_pretty(&v.to_json()) else {
-            crate::alerts::log_line("settings: could not serialise the settings; nothing written");
+            crate::alerts::log_line("settings: could not serialize the settings; nothing written");
             return;
         };
         if let Some(dir) = self.path.parent() {
@@ -572,5 +598,14 @@ impl Settings {
     }
     pub fn set_small(&self, on: bool) -> Values {
         self.update(&json!({"small": on}), true)
+    }
+    pub fn set_horizontal(&self, on: bool) -> Values {
+        self.update(
+            &json!({"layout": if on { "horizontal" } else { "vertical" }}),
+            true,
+        )
+    }
+    pub fn set_block_width(&self, w: f64) -> Values {
+        self.update(&json!({"block_width": w}), true)
     }
 }

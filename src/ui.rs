@@ -122,6 +122,8 @@ pub struct AitrackUi {
     pub variant_rects: Vec<(BadgeVariant, Rect)>,
     /// Screen rect of each Theme choice in the Settings view.
     pub theme_rects: Vec<(ThemeChoice, Rect)>,
+    /// Screen rect of each Layout choice in the Settings view (`true` = Horizontal).
+    pub layout_rects: Vec<(bool, Rect)>,
     theme_sent: Option<ThemeChoice>,
     /// What a click on the Claude badge does (the real launcher by default; tests inject a fake).
     pub launcher: Launcher,
@@ -167,12 +169,28 @@ pub struct AitrackUi {
     plan_versions: Option<(u64, u64, u64)>,
     /// Screen rect of each range choice of the Stats view (for tests / the render tool).
     pub stats_rects: Vec<(String, Rect)>,
+    /// Screen rect of the header's logo from the last frame (tests / the render tool).
+    pub logo_rect: Option<Rect>,
     /// Screen rect of the header's shrink button from the last frame (tests / the render tool).
     pub shrink_rect: Option<Rect>,
-    /// The small-window state the window was last set up for (decorations, level, size limits).
-    small_sent: Option<bool>,
+    /// The window shape last set up: small or full, horizontal or vertical, and the number of
+    /// vendor blocks in a row (0 when vertical, where the count does not change the width).
+    layout_sent: Option<(bool, bool, usize)>,
+    /// The window shows the horizontal row: the setting, on the home view or the small window.
+    horizontal_shown: bool,
+    /// The title bar state last set up (`false` while small).
+    decor_sent: Option<bool>,
+    /// A width `apply_layout` asked for that the window has not reached yet, and when: the height
+    /// auto-fit keeps it in its own size requests, which would otherwise undo it.
+    width_sent: Option<(f32, Instant)>,
     /// The inner height last requested for the small window.
     small_h_sent: Option<f32>,
+    /// Horizontal layout: the tallest vendor block's own height in the last frame, which every
+    /// block of the row is stretched to, and the same measured in this frame.
+    strip_h: f32,
+    strip_h_next: f32,
+    /// Vendor blocks shown in the last frame (the horizontal window is as wide as they need).
+    strip_n: usize,
 }
 
 fn theme_pref(t: ThemeChoice) -> egui::ThemePreference {
@@ -211,6 +229,7 @@ impl AitrackUi {
             launch_enabled: cfg!(any(windows, target_os = "macos", target_os = "linux")),
             variant_rects: vec![],
             theme_rects: vec![],
+            layout_rects: vec![],
             theme_sent: Some(first.theme),
             help_opener: Arc::new(|| {
                 crate::launch::open_help(
@@ -260,9 +279,16 @@ impl AitrackUi {
             plan_versions: None,
             stats_rects: vec![],
             shrink_rect: None,
-            // the window was built for the saved mode (see `run`)
-            small_sent: Some(first.small),
+            logo_rect: None,
+            // the window was built for the saved mode (see `run`); the first frame sets the width
+            layout_sent: None,
+            decor_sent: Some(!first.small),
+            horizontal_shown: first.horizontal,
+            width_sent: None,
             small_h_sent: None,
+            strip_h: 0.0,
+            strip_h_next: 0.0,
+            strip_n: 0,
         }
     }
 
@@ -354,6 +380,7 @@ impl AitrackUi {
             info.minimized.unwrap_or(false),
         );
         if let Some(s) = self.tracker.observe(Instant::now(), sample) {
+            self.save_block_width(&s);
             self.app
                 .settings
                 .set_window(Some(self.keep_full_width(s.to_pos())));
@@ -366,17 +393,33 @@ impl AitrackUi {
     /// Save the window place once more on exit (if it changed since the last save).
     pub fn flush_window(&mut self) {
         if let Some(s) = self.tracker.flush() {
+            self.save_block_width(&s);
             self.app
                 .settings
                 .set_window(Some(self.keep_full_width(s.to_pos())));
         }
     }
 
-    /// The small window shares the full window's place but not its width: while small, the saved
-    /// width stays the full window's.
+    /// The horizontal full window keeps its width as the width of one vendor block, so it fits
+    /// again when a vendor appears or goes.
+    fn save_block_width(&self, s: &crate::placement::Sample) {
+        let v = self.app.settings.get();
+        if self.horizontal_shown
+            && !v.small
+            && self.layout_sent == Some((false, true, self.strip_n))
+        {
+            let w = view::block_width_for(s.width as f32, self.strip_n) as f64;
+            if v.block_width.is_none_or(|b| (b - w).abs() > 0.5) {
+                self.app.settings.set_block_width(w.round());
+            }
+        }
+    }
+
+    /// The small and the horizontal windows share the vertical full window's place but not its
+    /// width: while in either, the saved width stays the vertical full window's.
     fn keep_full_width(&self, mut pos: crate::settings::WindowPos) -> crate::settings::WindowPos {
         let v = self.app.settings.get();
-        if v.small {
+        if v.small || self.horizontal_shown {
             pos.width = v.window.and_then(|w| w.width);
         }
         pos
@@ -400,41 +443,80 @@ impl AitrackUi {
         }));
     }
 
-    /// Set the window up for small or full mode when the mode changes: no title bar and a
-    /// smaller minimum while small; back to the saved width (the height re-fits) when full.
-    fn apply_small(&mut self, ctx: &Context, small: bool) {
-        if self.small_sent == Some(small) {
+    /// Set the window up when its shape changes: no title bar and a smaller minimum while small;
+    /// in the horizontal full window as wide as its blocks need (see `view::horizontal_width`);
+    /// back to the saved width when vertical and full (the height re-fits either way). `n` is the
+    /// number of vendor blocks shown.
+    fn apply_layout(&mut self, ctx: &Context, small: bool, horizontal: bool, n: usize) {
+        let key = (small, horizontal, if horizontal { n } else { 0 });
+        if self.layout_sent == Some(key) {
             return;
         }
-        self.small_sent = Some(small);
+        let first = self.layout_sent.is_none();
+        self.layout_sent = Some(key);
         self.small_h_sent = None;
-        ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(!small));
+        // the small and the full row differ in height: measured afresh
+        self.strip_h = 0.0;
+        if self.decor_sent != Some(!small) {
+            self.decor_sent = Some(!small);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(!small));
+        }
         if small {
             ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(vec2(
-                view::SMALL_WINDOW_W,
+                view::small_width(horizontal, n),
                 40.0,
             )));
-        } else {
+        } else if horizontal {
+            let block = self
+                .app
+                .settings
+                .get()
+                .block_width
+                .map_or(view::BLOCK_W, |w| w as f32);
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(vec2(
+                view::horizontal_min_width(n),
+                view::MIN_WINDOW_H,
+            )));
+            let h = if first {
+                view::default_inner_size_pt().1
+            } else {
+                ctx.screen_rect().height()
+            };
+            // never wider than the screen (the OS would cut it down and the cut width be saved)
+            let monitor_w = ctx.input(|i| i.viewport().monitor_size).map(|m| m.x);
+            let w = view::horizontal_width(n, block)
+                .min(monitor_w.unwrap_or(f32::INFINITY))
+                .max(view::horizontal_min_width(n));
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(w, h)));
+            self.width_sent = Some((w, Instant::now()));
+            self.fits.remove(&Screen::Home);
+            self.size_for = None;
+        } else if !first {
             ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(vec2(
                 MIN_WINDOW_W,
                 view::MIN_WINDOW_H,
             )));
-            let w = self
-                .app
-                .settings
-                .get()
-                .window
-                .and_then(|w| w.width)
-                .map_or(view::default_inner_size_pt().0, |w| w as f32);
+            let w = self.vertical_width();
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(
                 w,
                 view::default_inner_size_pt().1,
             )));
+            self.width_sent = Some((w, Instant::now()));
             // the home view fits itself again
             self.fits.remove(&Screen::Home);
             self.size_for = None;
         }
         ctx.request_repaint();
+    }
+
+    /// The vertical full window's width: as the user left it, or the default.
+    fn vertical_width(&self) -> f32 {
+        self.app
+            .settings
+            .get()
+            .window
+            .and_then(|w| w.width)
+            .map_or(view::default_inner_size_pt().0, |w| w as f32)
     }
 
     /// The small window: only the vendor blocks, a hair of border, no title bar. Dragging any part
@@ -485,7 +567,7 @@ impl AitrackUi {
         if self.small_h_sent.is_none_or(|s| (s - h).abs() > 1.0) {
             self.small_h_sent = Some(h);
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(
-                view::SMALL_WINDOW_W,
+                view::small_width(self.horizontal_shown, home.vendors.len()),
                 h,
             )));
         }
@@ -518,7 +600,6 @@ impl AitrackUi {
             ctx.set_theme(theme_pref(st.settings.theme));
         }
         let small = st.settings.small;
-        self.apply_small(ctx, small);
         let on_top = st.settings.on_top || small;
         if self.on_top_sent != Some(on_top) {
             self.on_top_sent = Some(on_top);
@@ -561,6 +642,11 @@ impl AitrackUi {
             }
         }
 
+        // Settings and Stats always show at one block's width: a layout picked in Settings applies
+        // once it is closed, and the wide window narrows while they are open
+        self.horizontal_shown = st.settings.horizontal && (small || self.screen == Screen::Home);
+        let horizontal = self.horizontal_shown;
+        self.apply_layout(ctx, small, horizontal, home.vendors.len());
         if small {
             self.draw_small(ctx, &pal, &st, &home, &vendors);
             return;
@@ -632,6 +718,13 @@ impl AitrackUi {
         // Fit the window to its content, up to a cap (see `view::height_cap`); beyond it the content
         // scrolls. Only re-sent when the fit changes, and never for a view whose height the user
         // changed by hand (a size that differs from the one we commanded, once it has settled).
+        // a commanded width is kept in the fit's requests until the window has it (or the OS
+        // settled on another one)
+        if self.width_sent.is_some_and(|(w, at)| {
+            (ctx.screen_rect().width() - w).abs() < 1.0 || at.elapsed() > Duration::from_secs(2)
+        }) {
+            self.width_sent = None;
+        }
         let monitor_h = ctx.input(|i| i.viewport().monitor_size).map(|m| m.y);
         let cap = view::height_cap(self.screen != Screen::Home, monitor_h);
         // measured from the layout (empty strip above the pinned panels), not from summed heights:
@@ -662,7 +755,7 @@ impl AitrackUi {
         match action {
             view::FitAction::Request(h) => {
                 self.size_sent_at = Some(Instant::now());
-                let w = ctx.screen_rect().width();
+                let w = self.width_sent.map_or(ctx.screen_rect().width(), |(w, _)| w);
                 // safe diagnostics: sizes only
                 crate::alerts::log_line(&format!(
                     "window fit: requested inner height {h:.0} pt (window {actual_h:.0} x {:.0} pt, {:.2} px/pt, monitor {:?}, retry {})",
@@ -703,7 +796,16 @@ impl AitrackUi {
     /// be decoded the old drawn logo is used. Same footprint either way.
     fn header_logo(&mut self, ui: &mut Ui, pal: &Palette) {
         const LOGO: f32 = 24.0;
-        let (r, _) = ui.allocate_exact_size(vec2(LOGO, LOGO), Sense::hover());
+        let (r, resp) = ui.allocate_exact_size(vec2(LOGO, LOGO), Sense::click());
+        self.logo_rect = Some(r);
+        // a click opens the project page
+        if resp
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text("aiTrack on GitHub")
+            .clicked()
+        {
+            self.open_about_link(crate::launch::REPO_URL, "Could not open the project page");
+        }
         let ppp = ui.ctx().pixels_per_point();
         let (size, bytes) = crate::appicon::dial_for(!pal.dark, LOGO * ppp);
         let key = (!pal.dark, size);
@@ -859,7 +961,8 @@ impl AitrackUi {
         top + out.content_size.y
     }
 
-    /// Vendor blocks stacked flush: shared 1px dividers, rounded outer corners only.
+    /// Vendor blocks joined flush: shared 1px dividers, rounded outer corners only. Stacked, or
+    /// side by side in one row with the detail pane under the whole row (horizontal layout).
     fn vendor_stack(
         &mut self,
         ui: &mut Ui,
@@ -869,7 +972,7 @@ impl AitrackUi {
         vendors: &[Vendor],
         small: bool,
     ) {
-        let remaining = st.settings.remaining();
+        let horizontal = self.horizontal_shown;
         let n = home.vendors.len();
         ui.spacing_mut().item_spacing.y = 0.0;
         let mut stack: Option<Rect> = None;
@@ -877,118 +980,39 @@ impl AitrackUi {
         self.bot_row_rect = None;
         self.badge_rects.clear();
         self.refresh_rect = None;
-        for (i, vv) in home.vendors.iter().enumerate() {
-            let (first, last) = (i == 0, i + 1 == n);
-            let r = STACK_RADIUS;
-            let cr = CornerRadius {
-                nw: if first { r } else { 0 },
-                ne: if first { r } else { 0 },
-                sw: if last { r } else { 0 },
-                se: if last { r } else { 0 },
-            };
-            let accent = pal.vendor(vv.id);
-            let value_w = if remaining { 60.0 } else { 38.0 };
-            let block = Frame::new()
-                .fill(pal.panel)
-                .corner_radius(cr)
-                .inner_margin(Margin {
-                    left: 14,
-                    right: 10,
-                    top: 6,
-                    bottom: 6,
-                })
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    // in the small window a click does nothing (the window is dragged by any part)
-                    let launchable = !small
-                        && self.launch_enabled
-                        && matches!(vv.id, VendorId::Claude | VendorId::Grok | VendorId::Codex);
-                    let variant = st.settings.badge_style;
-                    if vendor_header(ui, pal, vv, launchable, variant, &mut self.badge_rects) {
-                        let launcher = match vv.id {
-                            VendorId::Grok => self.grok_launcher.clone(),
-                            VendorId::Codex => self.codex_launcher.clone(),
-                            _ => self.launcher.clone(),
-                        };
-                        launcher(ui.ctx(), &self.launch_msg);
-                    }
-                    // a longer label ("Grok Bot") pushes every bar of the block right, so they line up
-                    let strip_x = if vv.rows.iter().any(|r| r.label.len() > 7) {
-                        60.0
+        self.strip_n = n;
+        self.strip_h_next = 0.0;
+        if horizontal {
+            let total = ui.available_width();
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                let mut used = 0.0;
+                for (i, vv) in home.vendors.iter().enumerate() {
+                    // the last block takes what is left, so the row ends exactly at the edge
+                    let w = if i + 1 == n {
+                        total - used
                     } else {
-                        50.0
+                        (total / n as f32).round()
                     };
-                    for row in &vv.rows {
-                        if small {
-                            let resp = small_row_widget(ui, pal, row, vv.id, value_w, strip_x);
-                            resp.on_hover_ui(|ui| tooltip(ui, pal, row));
-                            continue;
-                        }
-                        let open = if row.secondary {
-                            self.bot_expanded
-                        } else {
-                            self.expanded == Some((vv.id, row.kind))
-                        };
-                        let resp = row_widget(ui, pal, row, vv.id, open, value_w, strip_x);
-                        if row.secondary {
-                            self.bot_row_rect = Some(resp.rect);
-                            if resp.clicked() {
-                                self.bot_expanded = !open;
-                                self.expanded = None;
-                            }
-                        } else {
-                            self.row_rects.push((vv.id, row.kind, resp.rect));
-                            if resp.clicked() {
-                                self.expanded = if open { None } else { Some((vv.id, row.kind)) };
-                                self.bot_expanded = false;
-                            }
-                        }
-                        resp.on_hover_ui(|ui| tooltip(ui, pal, row));
-                    }
-                    if small {
-                        return;
-                    }
-                    if vv.id == VendorId::Grok {
-                        self.grok_refresh_line(ui, pal, st);
-                    }
-                    if let Some((b, v)) = vendors
-                        .iter()
-                        .find(|v| v.id == vv.id)
-                        .and_then(|v| v.bot.as_ref().map(|b| (b, v)))
-                        .filter(|_| self.bot_expanded)
-                    {
-                        let d = view::build_bot_detail_with(
-                            b,
-                            v.bot_stats.as_ref(),
-                            v.bot_gauge.as_ref(),
-                            remaining,
-                            Utc::now(),
-                        );
-                        self.detail(ui, pal, &d);
-                    } else if let Some((id, kind)) = self.expanded.filter(|(id, _)| *id == vv.id) {
-                        if let Some(v) = vendors.iter().find(|v| v.id == id) {
-                            let d = view::build_detail(v, kind, remaining);
-                            self.detail(ui, pal, &d);
-                        }
-                    }
-                });
-            let rect = block.response.rect;
-            // The stripe is the block's own rounded shape clipped to its left edge, so it follows
-            // the outer corners.
-            let stripe_clip = Rect::from_min_size(rect.min, vec2(STRIPE_W, rect.height()))
-                .intersect(ui.clip_rect());
-            ui.painter()
-                .with_clip_rect(stripe_clip)
-                .rect_filled(rect, cr, accent);
-            let p = ui.painter();
-            if !first {
-                p.line_segment(
-                    [rect.left_top(), rect.right_top()],
-                    Stroke::new(1.0_f32, pal.line),
-                );
+                    used += w;
+                    let rect = ui
+                        .allocate_ui_with_layout(vec2(w, 0.0), Layout::top_down(Align::Min), |ui| {
+                            self.vendor_block(ui, pal, st, vendors, vv, i, n, small)
+                        })
+                        .inner;
+                    stack = Some(stack.map_or(rect, |s| s.union(rect)));
+                }
+            });
+            // every block of the row as tall as the tallest one (measured in the frame before)
+            if (self.strip_h_next - self.strip_h).abs() > 0.5 {
+                self.strip_h = self.strip_h_next;
+                ui.ctx().request_repaint();
             }
-            stack = Some(stack.map_or(rect, |s| s.union(rect)));
+        } else {
+            for (i, vv) in home.vendors.iter().enumerate() {
+                let rect = self.vendor_block(ui, pal, st, vendors, vv, i, n, small);
+                stack = Some(stack.map_or(rect, |s| s.union(rect)));
+            }
         }
         if let Some(rect) = stack {
             ui.painter().rect_stroke(
@@ -998,6 +1022,187 @@ impl AitrackUi {
                 StrokeKind::Inside,
             );
         }
+        if horizontal && !small {
+            let remaining = st.settings.remaining();
+            if let Some(d) = self.open_detail(vendors, None, remaining) {
+                ui.add_space(6.0);
+                Frame::new()
+                    .fill(pal.panel)
+                    .stroke(Stroke::new(1.0_f32, pal.line))
+                    .corner_radius(CornerRadius::same(STACK_RADIUS))
+                    .inner_margin(Margin {
+                        left: 14,
+                        right: 10,
+                        top: 0,
+                        bottom: 6,
+                    })
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        self.detail(ui, pal, &d, false);
+                    });
+            }
+        }
+    }
+
+    /// The detail pane that is open (a clicked row), if any; `only` limits it to one vendor's.
+    fn open_detail(
+        &self,
+        vendors: &[Vendor],
+        only: Option<VendorId>,
+        remaining: bool,
+    ) -> Option<Detail> {
+        if self.bot_expanded {
+            let (b, v) = vendors
+                .iter()
+                .filter(|v| only.is_none_or(|o| o == v.id))
+                .find_map(|v| v.bot.as_ref().map(|b| (b, v)))?;
+            return Some(view::build_bot_detail_with(
+                b,
+                v.bot_stats.as_ref(),
+                v.bot_gauge.as_ref(),
+                remaining,
+                Utc::now(),
+            ));
+        }
+        let (id, kind) = self
+            .expanded
+            .filter(|(id, _)| only.is_none_or(|o| o == *id))?;
+        let v = vendors.iter().find(|v| v.id == id)?;
+        Some(view::build_detail(v, kind, remaining))
+    }
+
+    /// One vendor block (`i` of `n`): header, meter rows, and in the vertical full window its
+    /// detail pane. Returns the block's rect.
+    #[allow(clippy::too_many_arguments)]
+    fn vendor_block(
+        &mut self,
+        ui: &mut Ui,
+        pal: &Palette,
+        st: &State,
+        vendors: &[Vendor],
+        vv: &view::VendorView,
+        i: usize,
+        n: usize,
+        small: bool,
+    ) -> Rect {
+        let horizontal = self.horizontal_shown;
+        let remaining = st.settings.remaining();
+        let (first, last) = (i == 0, i + 1 == n);
+        let r = STACK_RADIUS;
+        let cr = if horizontal {
+            CornerRadius {
+                nw: if first { r } else { 0 },
+                sw: if first { r } else { 0 },
+                ne: if last { r } else { 0 },
+                se: if last { r } else { 0 },
+            }
+        } else {
+            CornerRadius {
+                nw: if first { r } else { 0 },
+                ne: if first { r } else { 0 },
+                sw: if last { r } else { 0 },
+                se: if last { r } else { 0 },
+            }
+        };
+        let accent = pal.vendor(vv.id);
+        let value_w = if remaining { 60.0 } else { 38.0 };
+        let (pad_top, pad_bottom) = (6, 6);
+        let block = Frame::new()
+            .fill(pal.panel)
+            .corner_radius(cr)
+            .inner_margin(Margin {
+                left: 14,
+                right: 10,
+                top: pad_top,
+                bottom: pad_bottom,
+            })
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().item_spacing.y = 0.0;
+                // in the small window a click does nothing (the window is dragged by any part)
+                let launchable = !small
+                    && self.launch_enabled
+                    && matches!(vv.id, VendorId::Claude | VendorId::Grok | VendorId::Codex);
+                let variant = st.settings.badge_style;
+                if vendor_header(ui, pal, vv, launchable, variant, &mut self.badge_rects) {
+                    let launcher = match vv.id {
+                        VendorId::Grok => self.grok_launcher.clone(),
+                        VendorId::Codex => self.codex_launcher.clone(),
+                        _ => self.launcher.clone(),
+                    };
+                    launcher(ui.ctx(), &self.launch_msg);
+                }
+                // a longer label ("Grok Bot") pushes every bar of the block right, so they line up
+                let strip_x = if vv.rows.iter().any(|r| r.label.len() > 7) {
+                    60.0
+                } else {
+                    50.0
+                };
+                for row in &vv.rows {
+                    if small {
+                        let resp = small_row_widget(ui, pal, row, vv.id, value_w, strip_x);
+                        resp.on_hover_ui(|ui| tooltip(ui, pal, row));
+                        continue;
+                    }
+                    let open = if row.secondary {
+                        self.bot_expanded
+                    } else {
+                        self.expanded == Some((vv.id, row.kind))
+                    };
+                    let resp = row_widget(ui, pal, row, vv.id, open, value_w, strip_x);
+                    if row.secondary {
+                        self.bot_row_rect = Some(resp.rect);
+                        if resp.clicked() {
+                            self.bot_expanded = !open;
+                            self.expanded = None;
+                        }
+                    } else {
+                        self.row_rects.push((vv.id, row.kind, resp.rect));
+                        if resp.clicked() {
+                            self.expanded = if open { None } else { Some((vv.id, row.kind)) };
+                            self.bot_expanded = false;
+                        }
+                    }
+                    resp.on_hover_ui(|ui| tooltip(ui, pal, row));
+                }
+                if !small && vv.id == VendorId::Grok {
+                    self.grok_refresh_line(ui, pal, st);
+                }
+                if horizontal {
+                    // the row's blocks line up at the bottom: stretched to the tallest
+                    let natural = ui.min_rect().height();
+                    self.strip_h_next = self.strip_h_next.max(natural);
+                    if self.strip_h > natural {
+                        ui.add_space(self.strip_h - natural);
+                    }
+                    return;
+                }
+                if small {
+                    return;
+                }
+                if let Some(d) = self.open_detail(vendors, Some(vv.id), remaining) {
+                    self.detail(ui, pal, &d, true);
+                }
+            });
+        let rect = block.response.rect;
+        // The stripe is the block's own rounded shape clipped to its left edge, so it follows
+        // the outer corners.
+        let stripe_clip =
+            Rect::from_min_size(rect.min, vec2(STRIPE_W, rect.height())).intersect(ui.clip_rect());
+        ui.painter()
+            .with_clip_rect(stripe_clip)
+            .rect_filled(rect, cr, accent);
+        let p = ui.painter();
+        if !first {
+            let edge = if horizontal {
+                [rect.left_top(), rect.left_bottom()]
+            } else {
+                [rect.left_top(), rect.right_top()]
+            };
+            p.line_segment(edge, Stroke::new(1.0_f32, pal.line));
+        }
+        rect
     }
 
     /// The small line under Grok's rows: "Refresh" when its data is missing or old (starts the Grok
@@ -1069,11 +1274,14 @@ impl AitrackUi {
         }
     }
 
-    fn detail(&mut self, ui: &mut Ui, pal: &Palette, d: &Detail) {
+    /// The detail pane of a clicked row; `rule` puts a divider above it (inside a vendor block).
+    fn detail(&mut self, ui: &mut Ui, pal: &Palette, d: &Detail, rule: bool) {
         let accent = pal.level(d.vendor, d.level);
         ui.add_space(6.0);
-        divider(ui, pal);
-        ui.add_space(6.0);
+        if rule {
+            divider(ui, pal);
+            ui.add_space(6.0);
+        }
         ui.spacing_mut().item_spacing.y = 4.0;
         ui.horizontal(|ui| {
             ui.label(
@@ -1219,6 +1427,7 @@ impl AitrackUi {
         let mut variant_rects: Vec<(BadgeVariant, Rect)> = Vec::new();
         let mut track_rects: Vec<(String, Rect)> = Vec::new();
         let mut theme_rects: Vec<(ThemeChoice, Rect)> = Vec::new();
+        let mut layout_rects: Vec<(bool, Rect)> = Vec::new();
         let mut sec_rects: Vec<(String, Rect)> = Vec::new();
         let mut about_rects: Vec<(String, Rect)> = Vec::new();
         ROW_LOG.with(|l| l.borrow_mut().clear());
@@ -1330,7 +1539,27 @@ impl AitrackUi {
                     v.sections.appearance,
                     &mut sec_rects,
                     |ui| {
-                    setting_row(ui, pal, "Theme", "Window colours", |ui| {
+                    setting_row(
+                        ui,
+                        pal,
+                        "Layout",
+                        "",
+                        |ui| {
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                for (label, horizontal) in
+                                    [("Horizontal", true), ("Vertical", false)]
+                                {
+                                    let r = pill(ui, pal, label, v.horizontal == horizontal);
+                                    layout_rects.push((horizontal, r.rect));
+                                    if r.clicked() && v.horizontal != horizontal {
+                                        self.app.settings.set_horizontal(horizontal);
+                                    }
+                                }
+                            });
+                        },
+                    );
+                    divider(ui, pal);
+                    setting_row(ui, pal, "Theme", "Window colors", |ui| {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             for t in ThemeChoice::ALL.into_iter().rev() {
                                 let r = pill(ui, pal, t.label(), v.theme == t);
@@ -1645,6 +1874,7 @@ impl AitrackUi {
         self.variant_rects = variant_rects;
         self.track_rects = track_rects;
         self.theme_rects = theme_rects;
+        self.layout_rects = layout_rects;
         top + out.content_size.y
     }
 }
@@ -1670,7 +1900,7 @@ impl AitrackUi {
         }
     }
 
-    /// Settings > About: project link, developer and contact, licence.
+    /// Settings > About: project link, developer and contact, license.
     fn about_body(&mut self, ui: &mut Ui, pal: &Palette, rects: &mut Vec<(String, Rect)>) {
         // (the build line is at the bottom of Settings; here the name links to the project)
         let mut open_repo = false;
@@ -1720,7 +1950,7 @@ impl AitrackUi {
         if open_license {
             self.open_about_link(
                 crate::launch::LICENSE_URL,
-                "Could not open the licence page",
+                "Could not open the license page",
             );
         }
     }
@@ -2039,7 +2269,8 @@ pub fn run(app: Arc<App>) -> eframe::Result {
     }
     let small = app.settings.get().small;
     if small {
-        // the small window: no title bar, floating, sized to its content on the first frame
+        // the small window: no title bar, floating, sized to its content on the first frame (and
+        // as wide as its row of blocks once the vendors are known, when horizontal)
         viewport = viewport
             .with_decorations(false)
             .with_min_inner_size([crate::view::SMALL_WINDOW_W, 40.0])

@@ -3,6 +3,17 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.11-beta] - 2026-10-24
+
+### Added
+- Horizontal layout (Settings > Appearance > Layout): the tool blocks side by side in one row, the detail pane
+  under the row; Settings and Stats open at one block's width (a new layout applies when Settings is closed). The small window follows the setting. The
+  window is 310 points wide per tool; a width dragged by hand is kept per block.
+- Clicking the aiTrack logo in the header opens the project page on GitHub.
+
+### Changed
+- American spelling in the app and the README ("Window colors", "license").
+
 ## [0.5.10-beta] - 2026-10-24
 
 ### Changed

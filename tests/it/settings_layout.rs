@@ -402,7 +402,7 @@ mod view {
         w.click(p);
         assert_eq!(
             w.ui.launch_notice().as_deref(),
-            Some("Could not open the licence page")
+            Some("Could not open the license page")
         );
     }
 

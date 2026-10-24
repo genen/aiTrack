@@ -88,7 +88,7 @@ release (the one marked **Latest**). Releases marked "Pre-release" are early bui
 
 - **`aiTrack-Setup-<version>-win-x64.msi`**: the installer. It installs aiTrack for all users in
   `C:\Program Files\aiTrack`, adds Start menu and desktop shortcuts, and asks for administrator permission.
-  Double-click it, accept the licence (GPL-3.0-or-later), pick the folder, and click **Install**. On the last page,
+  Double-click it, accept the license (GPL-3.0-or-later), pick the folder, and click **Install**. On the last page,
   **Run after install?** is ticked: leave it ticked to start aiTrack at once.
 - **`aiTrack-Setup-<version>-win-x64-msi.zip`**: the same installer inside a zip, with this README (`README.md`, and
   `README.pdf` to read offline), `LICENSE` and the pictures in `docs\img`. If your browser blocks the `.msi`
@@ -239,7 +239,7 @@ sudo apt install ./aitrack_<version>_amd64.deb
 ```
 
 Then start **aiTrack** from the applications menu, or run `aitrack`. The package also holds this guide
-(`/usr/share/doc/aitrack/README.pdf`) and the licence.
+(`/usr/share/doc/aitrack/README.pdf`) and the license.
 
 **Wayland and XWayland.** On a Wayland session (GNOME on Ubuntu) aiTrack starts through XWayland by default, because
 native Wayland has no "always on top" and lets an app neither read nor set its own window position. Set
@@ -436,6 +436,7 @@ somewhere else, the **Refresh** button is hidden (the live billing and the log s
 
 The window has a header with three buttons, one block per tool, and a status line at the bottom.
 
+- The aiTrack logo at the top left opens the project page on GitHub.
 - Header buttons: **Small window** (two arrows pointing in, see
   [Small window](#small-window)), **Refresh now** (the circular arrow, polls at once), **Stats** (the bars
   icon) and **Settings** (the sliders icon).
@@ -444,7 +445,7 @@ The window has a header with three buttons, one block per tool, and a status lin
 
 ### The bars
 
-Each bar has 20 segments in the tool's colour (Claude amber, Grok light grey, ChatGPT green). Read it left to right:
+Each bar has 20 segments in the tool's color (Claude amber, Grok light gray, ChatGPT green). Read it left to right:
 
 - **bright**: what you have used so far;
 - **medium**: the extra use expected by the time the window resets if you keep your current pace;
@@ -487,6 +488,20 @@ Beside each bar is how long that window will last at your current pace:
 - nothing when there is no pace yet, or the reading is more than 60 minutes old (see [Old data](#old-data)).
 
 Hovering a row shows the same tooltip as in the full window.
+
+### Horizontal layout
+
+Settings > Appearance > **Layout** > **Horizontal** puts the tool blocks side by side in one row instead of
+stacking them. The header and the status line stay where they are.
+
+- **Width:** the window opens 310 points wide per tool (930 for three). Drag it wider or narrower and the blocks
+  share the width evenly, down to 270 points each. aiTrack remembers that width; when a tool appears or is hidden,
+  the window fits the new number of blocks.
+- **Details:** clicking a row opens its detail pane under the whole row, full width.
+- **Settings and Stats** open at the width of one block; closing them brings the row back. A layout picked in
+  Settings takes effect when you close Settings.
+- **Small window:** it follows the same setting, so its blocks sit side by side too.
+- **Vertical again:** the window goes back to the width it had in the vertical layout.
 
 ### Reset times and "carried"
 
@@ -600,7 +615,7 @@ Linux they are desktop notifications (see **On Linux** below).
   `alerts-grok.json`), so restarting does not repeat it.
 - If you jump past a level, only the highest one is announced.
 - The Info, Warning and Limit alerts also bring the aiTrack window to the front (and back from the taskbar if it
-  was minimised), in the full and the small window. It does not take the keyboard focus. Native Wayland does not let
+  was minimized), in the full and the small window. It does not take the keyboard focus. Native Wayland does not let
   an app raise its own window.
 - Alerts need the window to be running. Closed means no alerts.
 - Old readings do not trigger alerts.
@@ -643,6 +658,8 @@ At the bottom: **Back**, a **Help** link (it opens this page), and the build lin
 
 **Appearance**
 
+- **Layout**: **Vertical** (the tool blocks stacked, the default) or **Horizontal** (side by side in one row, see
+  [Horizontal layout](#horizontal-layout)).
 - **Theme**: **System** (follows Windows, macOS or the desktop), **Dark** or **Light**.
 - **Logos**: the look of the logo squares: **Auto** (dark logos on a dark window, light logos on a light one),
   **Filled**, **Dark** or **Light**.
@@ -749,7 +766,7 @@ it was before each cleanup is kept as `.bak` until the next one, and a line that
 never dropped.
 
 What a reading holds: the percentages, reset times, spend and per-model limits from the Claude usage answer, plus
-the whole answer from the Claude usage service. It does **not** hold your sign-in token, your organisation id,
+the whole answer from the Claude usage service. It does **not** hold your sign-in token, your organization id,
 your email or anything you wrote. The Grok record holds only the percentage, the reset time and your plan name. The Codex record holds the
 percentages, reset times, plan name, credit balance and per-model limits, never your account id or sign-in.
 
@@ -848,7 +865,7 @@ installed (section 5) and a terminal emulator must exist.
 ### Copy the Diagnostics log safely
 
 Settings > Diagnostics > **Copy log** copies the build line and the recent rows. It has no sign-in tokens and no
-organisation ids. It can contain **file paths**, and paths include your user name (for example
+organization ids. It can contain **file paths**, and paths include your user name (for example
 `C:\Users\<you>\.claude\.credentials.json`, or `/Users/<you>/.claude/.credentials.json` on a Mac, or `/home/<you>/.claude/.credentials.json` on Linux). Read what you copied and replace your user name before you post it in
 public.
 
@@ -894,7 +911,7 @@ then more tools (Codex is in; Gemini next).
 # Details
 
 - Logic (credentials, HTTP, sources, store, analysis, collector, settings, view model) lives in the
-  library (`src/*.rs`); `src/ui.rs` and `src/theme.rs` are the thin egui layer (all colours in `theme.rs`).
+  library (`src/*.rs`); `src/ui.rs` and `src/theme.rs` are the thin egui layer (all colors in `theme.rs`).
 - Only one window / collector runs at a time: an exclusive lock on `~/.aitrack/aitrack.lock` (`AITRACK_LOCK`
   overrides; the OS releases it if the app crashes). A second launch just brings the running window to the front
   (Windows) and exits; a second `--collect` prints "already running (pid N)" and exits with code 3. `--once`,
@@ -927,7 +944,7 @@ then more tools (Codex is in; Gemini next).
   active a line saying so is written to `notify.log` at startup.
 - The window reopens where you left it: its position and width (not the height, which always fits the content)
   are saved in `settings.json` under `window` (`x`, `y`, `width` in points, plus the `scale` factor they were
-  measured with) a moment after a move or resize and once more on exit. A minimised window (Windows reports
+  measured with) a moment after a move or resize and once more on exit. A minimized window (Windows reports
   about -32000,-32000) is never saved. On start the saved place is used only if it still shows at least 80x40
   pixels on a connected monitor (otherwise the default placement is used; a slightly off-screen window is moved
   back in). Settings > Display > Window position > Reset forgets it and moves the window to the top left.
@@ -955,7 +972,7 @@ then more tools (Codex is in; Gemini next).
   date. The same line is pinned at the bottom of the Settings view (click it to copy). `build.rs` captures it at
   compile time; without git (a source archive) the unknown parts are left out and the build still succeeds.
 - Toast styles (Windows; Settings > Notifications). Alerts are ordinary Windows toasts that disappear on their
-  own (no persistent reminder, no buttons, no taskbar flashing). Windows draws the toast's fonts and colours
+  own (no persistent reminder, no buttons, no taskbar flashing). Windows draws the toast's fonts and colors
   itself; aiTrack adds the vendor logo (the Filled badge of Claude or Grok, drawn by the same painters as the
   window and embedded from `assets/toast/`; written to `~/.aitrack/toast-icons/` on first use). If the logo cannot
   be written or Windows rejects it, the toast is shown text-only and a line goes to `notify.log`.
@@ -1039,7 +1056,7 @@ at the top right); otherwise it is 0 to 100 %.
 
 ### Reading the bars (technical notes)
 
-Each limit bar is 20 LED segments in the vendor's colour, in three tones, read left to right:
+Each limit bar is 20 LED segments in the vendor's color, in three tones, read left to right:
 
 - **bright**: what you have used so far;
 - **medium (faint)**: the extra use expected by the time the window resets if you keep your current pace (the
@@ -1054,14 +1071,15 @@ the average since the window started) and the data source; clicking a row opens 
 
 ### Badge style
 
-Settings > Appearance has two choices, both applied live. *Theme* (`theme` in settings.json): `dark` (default), `light` or `system`
+Settings > Appearance has three choices, all applied live. *Layout* (`layout` in settings.json): `vertical`
+(default) or `horizontal`; the horizontal window's width per tool block is kept as `block_width`. *Theme* (`theme` in settings.json): `dark` (default), `light` or `system`
 (follows the operating system). *Logos* (`badge_style`): the logo squares before the vendor
 names come in four looks: `auto` (the default for new settings files: the Dark look on a dark window, the Light
-look on a light one, so there are light icons on dark and dark icons on light), `filled` (brand-coloured squircle,
-light logo), `dark` (dark squircle, logo in the brand colour) and `light` (light squircle with a thin outline,
-brand-coloured logo). A settings file written before `auto` existed keeps `filled` unless you change it.
+look on a light one, so there are light icons on dark and dark icons on light), `filled` (brand-colored squircle,
+light logo), `dark` (dark squircle, logo in the brand color) and `light` (light squircle with a thin outline,
+brand-colored logo). A settings file written before `auto` existed keeps `filled` unless you change it.
 Logos are drawn with the painter (no image files): one mark painter per vendor in `src/ui.rs`, and the fill /
-border / mark colour per vendor and look in `theme::badge_style`. The vendor accent colours of the LED strips and
+border / mark color per vendor and look in `theme::badge_style`. The vendor accent colors of the LED strips and
 percentages do not change. The base fills of the other reference icons (ChatGPT, Gemini, Copilot, Perplexity,
 DeepSeek, Llama, Mistral, Kling, Firefly) are in `theme.rs` (`BADGE_*`) as the target look for future vendors;
 only their marks are missing.
@@ -1075,7 +1093,7 @@ Every poll tries these in order and uses the first reading that is fresh (at mos
    needed. Both Chromium cache layouts are read (blockfile `index`/`data_N`/`f_*`, and the simple cache
    `<hex>_0` files); bodies may be plain, gzip, deflate or zstd (brotli is not supported). Files are opened
    read-only (retried once if locked) and size-capped; nothing in the app's folders is ever written or
-   deleted. Only the usage entry of the organisation seen in the history file is used (orgs are never mixed).
+   deleted. Only the usage entry of the organization seen in the history file is used (orgs are never mixed).
 2. **desktop-history**: the app's own `plan-usage-history.json`. It holds the 5-hour and 7-day used
    percentages but no reset times, and the app only appends to it now and then, so it is the current reading
    only when newer than the cache; otherwise it is just imported.
@@ -1225,7 +1243,7 @@ workflow `.github/workflows/release-msi.yml`. To build them on your PC you need:
 The scripts stop with a message if `target\release\aitrack.exe` or the .NET SDK is missing. The MSI version is the
 version in `Cargo.toml` without the `-beta` suffix and padded to four parts (`0.1.4-beta` becomes `0.1.4.0`). The
 installer source is in `installer\` (`Package.wxs`, `aiTrack.Installer.wixproj`). `installer\License.rtf` (the
-licence page) is generated from `LICENSE`: after changing `LICENSE`, run `python installer\make-license-rtf.py`.
+license page) is generated from `LICENSE`: after changing `LICENSE`, run `python installer\make-license-rtf.py`.
 
 **Install scope.** The MSI installs for all users only. WiX has a dialog set (`WixUI_Advanced`) that offers "just me",
 but its logic shows that choice only to a setup that is already elevated and defaults to "just me" for a normal
