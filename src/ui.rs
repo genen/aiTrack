@@ -2892,64 +2892,36 @@ fn paint_grok_mark(p: &Painter, badge: Rect, ink: Color32) {
     );
 }
 
-/// The ChatGPT (Codex) mark: a knot of two rounded triangles, one pointing up and one down,
-/// turned a little and woven over and under each other at their six crossings, in round-ended
-/// strokes of even width. A plain likeness of an interlaced rosette, not the OpenAI logo.
+/// The ChatGPT (Codex) mark: a round rosette of six curved links, each an arc of its own circle
+/// (the six circles sit evenly round the centre). Each link starts over the one before it, sweeps
+/// round the outside and ends tucked under the next, so the ring reads as woven; round-ended
+/// strokes of even width. A plain likeness of an interlaced knot, not the OpenAI logo.
 fn paint_codex_mark(p: &Painter, badge: Rect, ink: Color32) {
-    const TURN: f32 = 12.0; // degrees
+    use std::f32::consts::{FRAC_PI_6, TAU};
     let c = badge.center();
     let size = badge.width();
-    let (reach, round, w) = (size * 0.445, size * 0.05, size * 0.042);
-    let at = |deg: f32, r: f32| {
-        let a = deg.to_radians();
-        c + vec2(a.cos(), a.sin()) * r
-    };
-    // the crossings: corners of the inner hexagon, alternately under one triangle and the other
-    let crossings: Vec<Pos2> = (0..6)
-        .map(|j| at(TURN - 60.0 + 60.0 * j as f32, reach / 3.0_f32.sqrt()))
-        .collect();
-    // half the gap along the under strand: clears the over strand, its cap and a sliver of badge
-    let clear = (2.0 * w + size * 0.028) / 60.0_f32.to_radians().sin();
-    let step = size * 0.02;
-    for (k, first) in [(0usize, -90.0_f32), (1, 90.0)] {
-        // the outline: a smaller triangle grown by `round` (its corner arcs), sampled evenly
-        let mut outline: Vec<Pos2> = Vec::new();
-        for i in 0..3 {
-            let corner = first + TURN + 120.0 * i as f32;
-            let centre = at(corner, reach - 2.0 * round);
-            let arc = 8;
-            for s in 0..=arc {
-                let a = (corner - 60.0 + 120.0 * s as f32 / arc as f32).to_radians();
-                outline.push(centre + vec2(a.cos(), a.sin()) * round);
-            }
-        }
-        let mut pts: Vec<Pos2> = Vec::new();
-        for i in 0..outline.len() {
-            let (a, b) = (outline[i], outline[(i + 1) % outline.len()]);
-            let n = ((b - a).length() / step).ceil().max(1.0) as usize;
-            pts.extend((0..n).map(|s| a + (b - a) * (s as f32 / n as f32)));
-        }
-        let under: Vec<Pos2> = (0..6)
-            .filter(|j| j % 2 == k)
-            .map(|j| crossings[j])
+    let (d, rho, w) = (size * 0.24, size * 0.16, size * 0.04);
+    // how far a link reaches past the previous one, in towards the centre
+    let tail = 50.0_f32.to_radians();
+    // where a link's circle meets the next one's on the outside, as an angle round its own centre
+    let h = (rho * rho - d * d / 4.0).sqrt();
+    let r = d * FRAC_PI_6.cos() + h;
+    let meet = (r * FRAC_PI_6.sin()).atan2(r * FRAC_PI_6.cos() - d);
+    // the head stops short of that point, clear of the next link's stroke and its own cap
+    let crossing = 2.0 * (d / (2.0 * rho)).asin();
+    let gap = (2.0 * w + size * 0.02) / crossing.sin() / rho;
+    let (from, to) = (-meet - tail, meet - gap);
+    let n = ((to - from) * rho / (size * 0.02)).ceil().max(1.0) as usize;
+    for k in 0..6 {
+        let axis = k as f32 * TAU / 6.0;
+        let centre = c + vec2(axis.cos(), axis.sin()) * d;
+        let pts: Vec<(Pos2, f32)> = (0..=n)
+            .map(|i| {
+                let a = axis + from + (to - from) * i as f32 / n as f32;
+                (centre + vec2(a.cos(), a.sin()) * rho, w)
+            })
             .collect();
-        let shown = |q: &Pos2| under.iter().all(|x| x.distance(*q) > clear);
-        // start just after a gap so every run is one piece, then draw the runs between gaps
-        let Some(gap) = pts.iter().position(|q| !shown(q)) else {
-            continue;
-        };
-        pts.rotate_left(gap);
-        let mut run: Vec<(Pos2, f32)> = Vec::new();
-        for q in pts.iter().chain(std::iter::once(&pts[0])) {
-            if shown(q) {
-                run.push((*q, w));
-            } else if run.len() > 1 {
-                strip(p, &run, ink);
-                run.clear();
-            } else {
-                run.clear();
-            }
-        }
+        strip(p, &pts, ink);
     }
 }
 

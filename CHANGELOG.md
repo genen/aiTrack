@@ -6,7 +6,7 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 ## [0.5.10-beta] - 2026-10-24
 
 ### Changed
-- ChatGPT badge: an interlaced knot mark instead of the terminal prompt
+- ChatGPT badge: a rounded rosette of six curved links instead of the terminal prompt
 
 ## [0.5.9-beta] - 2026-10-24
 
