@@ -31,7 +31,7 @@ impl VendorId {
     pub fn name(self) -> &'static str {
         match self {
             VendorId::Claude => "Claude",
-            VendorId::Codex => "Codex",
+            VendorId::Codex => "ChatGPT",
             VendorId::Antigravity => "Antigravity",
             VendorId::Grok => "Grok",
         }

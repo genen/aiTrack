@@ -615,7 +615,7 @@ fn tip_text(row: &aitrack::view::Row) -> String {
 fn the_codex_block_shows_what_the_claude_block_shows() {
     let now = Utc::now();
     let v = codex_home_view(&live_readings(now, now), now);
-    assert_eq!(v.name, "Codex");
+    assert_eq!(v.name, "ChatGPT");
     assert_eq!(
         v.rows.iter().map(|r| r.kind).collect::<Vec<_>>(),
         [Kind::Session, Kind::Weekly]
@@ -628,7 +628,7 @@ fn the_codex_block_shows_what_the_claude_block_shows() {
         "Session resets in",
         "Pace:",
         "Plan: Plus",
-        "Live from Codex usage",
+        "Live from ChatGPT usage",
         "By model",
         "Spark  12%",
     ] {
@@ -674,7 +674,7 @@ fn an_old_codex_reading_stays_dimmed_with_the_age_chip_and_no_pace() {
     let weekly = tip_text(&v.rows[1]);
     assert!(!weekly.contains("Pace:"), "{weekly}");
     assert!(
-        weekly.contains("Codex figures come from its local session logs"),
+        weekly.contains("ChatGPT figures come from the local Codex session logs"),
         "{weekly}"
     );
 }
@@ -721,7 +721,7 @@ fn codex_polls_are_diagnostics_rows() {
     let now = Utc::now();
     let st = build_codex_state(&live_readings(now, now), status(), true, now);
     assert!(
-        st.diagnostics[0].text.starts_with("Codex: session"),
+        st.diagnostics[0].text.starts_with("ChatGPT: session"),
         "{}",
         st.diagnostics[0].text
     );
@@ -860,7 +860,7 @@ fn stats_has_codex_session_and_weekly_blocks() {
         now,
     );
     let titles: Vec<&str> = page.plan.iter().map(|b| b.title.as_str()).collect();
-    assert_eq!(titles, ["Codex session (5 h)", "Codex weekly (7 d)"]);
+    assert_eq!(titles, ["ChatGPT session (5 h)", "ChatGPT weekly (7 d)"]);
     assert!(page.plan.iter().all(|b| b.vendor == VendorId::Codex));
 }
 

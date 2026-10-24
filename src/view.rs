@@ -371,10 +371,10 @@ pub fn age_chip(v: &Vendor, interval_min: f64, now: DateTime<Utc>) -> Option<Age
             "Grok billing has not answered since {long}. Check your connection or press refresh."
         ),
         "codex-log" => format!(
-            "Live usage failed, so this comes from Codex's local session logs, last updated {long}. Use Codex or press refresh to update."
+            "Live usage failed, so this comes from the local Codex session logs, last updated {long}. Use Codex or press refresh to update."
         ),
         "codex-usage" => format!(
-            "Codex usage has not answered since {long}. Check your connection or press refresh."
+            "ChatGPT usage has not answered since {long}. Check your connection or press refresh."
         ),
         "oauth" => format!(
             "The usage service has not answered since {long}. Check your connection or press refresh."
@@ -417,9 +417,9 @@ pub fn stale_warning(v: &Vendor, now: DateTime<Utc>) -> Option<String> {
         }
         "grok-billing" => "Grok billing has not answered recently.",
         "codex-log" => {
-            "Codex figures come from its local session logs, which only update when you use Codex."
+            "ChatGPT figures come from the local Codex session logs, which only update when you use Codex."
         }
-        "codex-usage" => "Codex usage has not answered recently.",
+        "codex-usage" => "ChatGPT usage has not answered recently.",
         "oauth" => "the usage service has not answered recently.",
         "claude-json" => "Claude Code has not refreshed its saved usage.",
         "desktop-cache" | "desktop-history" => "the Claude app has not refreshed its usage cache.",
@@ -700,7 +700,7 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
     if v.source.as_deref() == Some("grok-billing") {
         t.push(tip("Live from Grok billing", Tone::Muted));
     } else if v.source.as_deref() == Some("codex-usage") {
-        t.push(tip("Live from Codex usage", Tone::Muted));
+        t.push(tip("Live from ChatGPT usage", Tone::Muted));
     } else if let Some(label) = v.source.as_deref().and_then(source_label) {
         let age = v
             .observed_at
@@ -925,7 +925,7 @@ pub fn build_home_for(s: &State, vendors: &[Vendor], now: DateTime<Utc>) -> Home
         v.empty = Some(if s.nothing_to_track() {
             Empty {
                 title: "Nothing to track yet".into(),
-                body: "aiTrack reads usage from the Claude desktop app or Claude Code, the Grok CLI and Codex. Install and sign in to one of them, then press refresh.".into(),
+                body: "aiTrack reads usage from the Claude desktop app or Claude Code, the Grok CLI and ChatGPT (Codex). Install and sign in to one of them, then press refresh.".into(),
                 help: true,
             }
         } else if s.loading {
@@ -1188,7 +1188,7 @@ fn status_line_of(s: &State, now: DateTime<Utc>, grok: bool) -> StatusLine {
             dot: Dot::Stale,
             text: "No supported tools found".into(),
             full: Some(format!(
-                "None of the Claude desktop app / Claude Code, the Grok CLI or Codex was found on this {}.",
+                "None of the Claude desktop app / Claude Code, the Grok CLI or ChatGPT (Codex) was found on this {}.",
                 crate::util::this_machine()
             )),
         };

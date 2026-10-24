@@ -535,13 +535,13 @@ pub fn build_page(
                 if !st.session.peaks.is_empty() || st.session.current.is_some() {
                     page.plan.push(PlanBlock {
                         vendor: VendorId::Codex,
-                        title: "Codex session (5 h)".into(),
+                        title: "ChatGPT session (5 h)".into(),
                         rows: plan_rows(st, Kind::Session, now),
                     });
                 }
                 page.plan.push(PlanBlock {
                     vendor: VendorId::Codex,
-                    title: "Codex weekly (7 d)".into(),
+                    title: "ChatGPT weekly (7 d)".into(),
                     rows: plan_rows(st, Kind::Weekly, now),
                 });
             }

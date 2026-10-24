@@ -1261,7 +1261,7 @@ impl AitrackUi {
                         ui,
                         pal,
                         "Custom (minutes)",
-                        "Online check: Claude usage service, Grok billing and Codex usage",
+                        "Online check: Claude usage service, Grok billing and ChatGPT usage",
                         |ui| {
                             let r = ui.add(
                                 egui::TextEdit::singleline(&mut self.custom)
@@ -1422,13 +1422,13 @@ impl AitrackUi {
                             false,
                         ),
                         (
-                            "Show Codex",
+                            "Show ChatGPT",
                             self.app.codex_detected(),
                             Track::from_opt(v.codex_enabled),
                             false,
                         ),
                     ] {
-                        let codex = name == "Show Codex";
+                        let codex = name == "Show ChatGPT";
                         if !is_claude && !codex && self.app.grok.is_none() {
                             continue;
                         }
