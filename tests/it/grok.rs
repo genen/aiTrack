@@ -811,10 +811,15 @@ fn an_expired_login_is_noticed_for_the_refresh_message() {
     assert!(!grok::login_expired(&h.env, now()));
     write_auth(&h, &auth_ok(now() - Duration::minutes(1)));
     assert!(grok::login_expired(&h.env, now()));
-    let m = aitrack::grok_cli::with_login_hint(aitrack::grok_cli::NO_NEW_DATA);
+    use aitrack::grok_cli::{refresh_error, ALREADY_OPEN, NO_NEW_DATA};
+    let m = refresh_error(NO_NEW_DATA.into(), true);
     assert!(m.starts_with("Grok login expired"), "{m}");
-    assert!(
-        m.contains("sign in") && m.contains(aitrack::grok_cli::NO_NEW_DATA),
-        "{m}"
-    );
+    assert!(m.contains("sign in") && m.contains(NO_NEW_DATA), "{m}");
+    let ended = "no new data (Grok did not fetch billing; it ended with exit code 1)";
+    assert!(refresh_error(ended.into(), true).starts_with("Grok login expired"));
+    // a login that is still valid, or another kind of failure, keeps its own reason
+    assert_eq!(refresh_error(NO_NEW_DATA.into(), false), NO_NEW_DATA);
+    assert_eq!(refresh_error(ALREADY_OPEN.into(), true), ALREADY_OPEN);
+    let start = "Could not start Grok: denied";
+    assert_eq!(refresh_error(start.into(), true), start);
 }

@@ -200,12 +200,17 @@ pub trait Host {
 /// The failure when a `grok` process is already running: that copy updates the log itself, but
 /// only while it is signed in, so say what to do when nothing changes.
 pub const ALREADY_OPEN: &str =
-    "The Grok CLI is already open. If Grok does not update, sign in there or close it, then press Refresh";
+    "The Grok CLI is already open. If the Grok row does not update, sign in there or close it, then press Refresh";
 
-/// What a failed refresh says when the Grok login in `auth.json` has expired: a hidden start cannot
-/// sign in again, so the user has to (the original reason follows in brackets).
-pub fn with_login_hint(reason: &str) -> String {
-    format!("Grok login expired: open the Grok CLI in a terminal and sign in ({reason})")
+/// What a failed refresh says: when the CLI ran without fetching billing while the Grok login in
+/// `auth.json` has expired, a hidden start could not renew it, so the user has to sign in (the
+/// original reason follows in brackets). Other failures are left as they are.
+pub fn refresh_error(reason: String, login_expired: bool) -> String {
+    if login_expired && reason.starts_with("no new data") {
+        format!("Grok login expired: open the Grok CLI in a terminal and sign in ({reason})")
+    } else {
+        reason
+    }
 }
 
 /// The failure when the CLI ran but no newer billing line appeared (signed out? offline?).
@@ -545,11 +550,14 @@ fn grok_process_running() -> bool {
 }
 
 /// Does a running `grok.exe` at `path` count as the CLI for "already running"? Not when it runs
-/// from a `WindowsApps` folder (the Grok Store app); yes when the path is unknown.
+/// from `Program Files\WindowsApps` (where Store apps such as Grok Bot are installed); yes when the
+/// path is unknown.
 pub fn counts_as_cli(path: Option<&str>) -> bool {
     path.is_none_or(|p| {
-        !p.split(['\\', '/'])
-            .any(|c| c.eq_ignore_ascii_case("WindowsApps"))
+        let parts: Vec<&str> = p.split(['\\', '/']).collect();
+        !parts.windows(2).any(|w| {
+            w[0].eq_ignore_ascii_case("Program Files") && w[1].eq_ignore_ascii_case("WindowsApps")
+        })
     })
 }
 

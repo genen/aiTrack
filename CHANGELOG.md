@@ -3,6 +3,16 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.9-beta] - 2026-10-24
+
+### Fixed
+- The age in the Grok header that belongs to the Grok Bot bar now says so ("Grok Bot about 31 hours ago", or
+  "Bot 31 h" when narrow), so it is no longer read as the age of a fresh Weekly row.
+- "Grok is already running" under the Grok block now says the Grok CLI is open and what to do when nothing updates
+  (sign in there or close it, then press Refresh).
+- A Grok refresh that fails while the Grok login has expired now says to open the Grok CLI in a terminal and sign in.
+- Windows: the Grok Store app (Grok Bot) running as `grok.exe` no longer stops the Grok refresh from starting.
+
 ## [0.5.8-beta] - 2026-10-24
 
 ### Changed

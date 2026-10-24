@@ -310,8 +310,9 @@ fn the_refresh_command_has_no_arguments_by_default_and_null_stdio() {
     assert!(!grok_cli::counts_as_cli(Some(
         r"C:\Program Files\WindowsApps\XAI.Grok_1.2.3.0_x64__abc\Grok.exe"
     )));
-    assert!(!grok_cli::counts_as_cli(Some(
-        r"C:\Users\gene\AppData\Local\Microsoft\windowsapps\grok.exe"
+    // only the Store install folder is skipped, not any folder named WindowsApps
+    assert!(grok_cli::counts_as_cli(Some(
+        r"C:\Users\gene\AppData\Local\Microsoft\WindowsApps\grok.exe"
     )));
 }
 
