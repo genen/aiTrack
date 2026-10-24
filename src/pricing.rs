@@ -12,7 +12,7 @@
 //!    "Known discrepancy" below). Your own overrides file still wins over these.
 //! 3. **Live list**: the community price list maintained by the LiteLLM project
 //!    ([`LIVE_URL`]), downloaded at most once per 24 h and kept in `<data dir>/pricing-cache.json`
-//!    (only the Claude entries, mapped onto our model ids). With no network the cached copy is used
+//!    (only the Claude and OpenAI entries, mapped onto our model ids). With no network the cached copy is used
 //!    however old it is; its age is reported in [`TableInfo`].
 //! 4. **Built-in fallback**: [`FALLBACK`], dated [`AS_OF`].
 //!
@@ -315,6 +315,15 @@ pub const FALLBACK: &[(&str, Rates)] = &[
     ("claude-3-sonnet", Rates::new(3.0, 15.0, 0.3, 3.75, 6.0)),
     ("claude-3-5-haiku", Rates::new(0.8, 4.0, 0.08, 1.0, 1.6)),
     ("claude-3-haiku", Rates::new(0.25, 1.25, 0.03, 0.3, 0.5)),
+    // OpenAI (Codex): no cache-write charge, so the write rates equal the input rate (unused)
+    ("gpt-5", Rates::new(1.25, 10.0, 0.125, 1.25, 1.25)),
+    ("gpt-5-codex", Rates::new(1.25, 10.0, 0.125, 1.25, 1.25)),
+    ("gpt-5-mini", Rates::new(0.25, 2.0, 0.025, 0.25, 0.25)),
+    ("gpt-5-nano", Rates::new(0.05, 0.4, 0.005, 0.05, 0.05)),
+    ("gpt-4.1", Rates::new(2.0, 8.0, 0.5, 2.0, 2.0)),
+    ("codex-mini", Rates::new(1.5, 6.0, 0.375, 1.5, 1.5)),
+    ("o3", Rates::new(2.0, 8.0, 0.5, 2.0, 2.0)),
+    ("o4-mini", Rates::new(1.1, 4.4, 0.275, 1.1, 1.1)),
 ];
 
 /// Rates that win over the live list (but not over the user's overrides file).
@@ -425,7 +434,14 @@ fn cost_field(o: &Map<String, Value>, key: &str) -> Option<f64> {
         .map(|x| round_to(x * 1e6, 6))
 }
 
-/// Parse the community list into rates keyed by normalised Claude model id. Entries that are not
+/// The model families the live list is read for: Claude, and OpenAI's (Codex) models.
+fn is_priced_family(id: &str) -> bool {
+    ["claude-", "gpt-", "codex-", "o3", "o4-"]
+        .iter()
+        .any(|p| id.starts_with(p))
+}
+
+/// Parse the community list into rates keyed by normalised Claude and OpenAI model id. Entries that are not
 /// objects, not Claude models or lack numeric `input_cost_per_token` / `output_cost_per_token` are
 /// skipped. When several keys map to one id (`claude-x`, `anthropic/claude-x`,
 /// `bedrock/...anthropic.claude-x-v1:0`) the least provider-specific key wins.
@@ -436,7 +452,7 @@ pub fn parse_live_list(text: &str) -> Result<BTreeMap<String, Rates>, String> {
     let mut best: BTreeMap<String, (u8, Rates)> = BTreeMap::new();
     for (key, entry) in obj {
         let id = normalize_id(key);
-        if !id.starts_with("claude-") {
+        if !is_priced_family(&id) {
             continue;
         }
         let Some(o) = entry.as_object() else { continue };

@@ -8,7 +8,9 @@ use crate::grok_cli::Progress;
 use crate::live::Poller;
 use crate::settings::{Direction, Settings};
 use crate::startup;
-use crate::state::{build_grok_state, build_state, GrokState, State};
+use crate::state::{
+    build_codex_state, build_grok_state, build_state, CodexState, GrokState, State,
+};
 use crate::store::{History, Store};
 use chrono::Utc;
 use serde_json::Value;
@@ -25,6 +27,8 @@ pub struct App {
     pub collector: Collector,
     /// Grok: its own history file and collector (see [`App::with_grok`]).
     pub grok: Option<GrokPart>,
+    /// Codex: its own history file and collector (see [`App::with_codex`]).
+    pub codex: Option<CodexPart>,
     notifier: Arc<Mutex<Arc<dyn Notifier>>>,
     /// A usage alert fired: the window comes to the front (see [`App::take_raise`]).
     raise: Arc<AtomicBool>,
@@ -84,6 +88,21 @@ pub struct GrokPart {
 
 impl GrokPart {
     /// Is the Grok CLI's folder there? (reused for a few seconds)
+    fn detected(&self) -> bool {
+        self.seen.get(&*self.detect)
+    }
+}
+
+/// Codex's history (a separate `usage-codex.jsonl`) and its collector.
+pub struct CodexPart {
+    pub history: Arc<History>,
+    pub collector: Collector,
+    detect: Detect,
+    seen: Remembered,
+}
+
+impl CodexPart {
+    /// Is Codex's folder there? (reused for a few seconds)
     fn detected(&self) -> bool {
         self.seen.get(&*self.detect)
     }
@@ -281,6 +300,7 @@ pub type Detect = Arc<dyn Fn() -> bool + Send + Sync>;
 struct Cached {
     version: u64,
     grok_version: u64,
+    codex_version: u64,
     at: Instant,
     state: State,
 }
@@ -360,6 +380,7 @@ impl App {
             settings,
             collector,
             grok: None,
+            codex: None,
             notifier,
             raise,
             cache: Mutex::new(None),
@@ -471,11 +492,97 @@ impl App {
         self
     }
 
+    /// Add Codex tracking: its own store and collector, polled like Grok's (live usage on the full
+    /// interval, the session logs on the local tick). Nothing is polled, and no error is recorded,
+    /// unless Codex tracking is on (setting, or automatic because `detect()` is true).
+    pub fn with_codex(
+        mut self,
+        store: Box<dyn Store>,
+        full: PollFn,
+        local: Option<PollFn>,
+        detect: Detect,
+    ) -> Self {
+        let gate = |f: PollFn| -> PollFn {
+            let (st, det) = (self.settings.clone(), detect.clone());
+            Box::new(move |s| {
+                if st.get().codex_on(det()) {
+                    f(s)
+                } else {
+                    Ok(Value::Null) // Codex not in use: nothing to do, nothing to report
+                }
+            })
+        };
+        let (full, local) = (gate(full), local.map(gate));
+        let history = Arc::new(History::new(store));
+        let collector = Collector::with_local(history.clone(), self.settings.clone(), full, local);
+        let alerts = Arc::new(Alerts::load(
+            self.settings.path.with_file_name("alerts-codex.json"),
+        ));
+        {
+            let (h, st, n, det) = (
+                history.clone(),
+                self.settings.clone(),
+                self.notifier.clone(),
+                detect.clone(),
+            );
+            let up = self.raise.clone();
+            collector.set_after_poll(move || {
+                let v = st.get();
+                if !v.notifications || !v.codex_on(det()) {
+                    return;
+                }
+                alerts.set_options(st.alert_options());
+                let now = Utc::now();
+                let Some(plan) = crate::analysis::analyze(&h.snapshot(), now) else {
+                    return;
+                };
+                if !crate::state::reading_is_current(&plan, &v, now) {
+                    return;
+                }
+                let notifier = n.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                let raising = Raising {
+                    inner: notifier.as_ref(),
+                    raise: &up,
+                };
+                alerts.evaluate("Codex", &plan, now, &raising);
+            });
+        }
+        collector.set_on_prune(prune_reporter(self.prune_result.clone()));
+        self.codex = Some(CodexPart {
+            history,
+            collector,
+            detect,
+            seen: Remembered::new(),
+        });
+        self
+    }
+
+    /// [`with_codex`](Self::with_codex) over a real [`Poller`] (live usage, then the session logs).
+    pub fn with_codex_poller(self, store: Box<dyn Store>, poller: Poller, detect: Detect) -> Self {
+        let poller = Arc::new(poller);
+        let p2 = poller.clone();
+        self.with_codex(
+            store,
+            Box::new(move |s| poller.poll_once(s)),
+            Some(Box::new(move |s| p2.poll_local(s))),
+            detect,
+        )
+    }
+
+    /// The collectors of the vendors besides Claude (Grok, Codex) that are set up.
+    fn other_collectors(&self) -> impl Iterator<Item = &Collector> {
+        self.grok
+            .as_ref()
+            .map(|g| &g.collector)
+            .into_iter()
+            .chain(self.codex.as_ref().map(|c| &c.collector))
+    }
+
     /// Turn on the daily pruning of every history file (the real app; tests leave it off).
     pub fn enable_auto_prune(&self) {
         self.collector.set_auto_prune(true);
-        if let Some(g) = &self.grok {
-            g.collector.set_auto_prune(true);
+        for c in self.other_collectors() {
+            c.set_auto_prune(true);
         }
     }
 
@@ -484,8 +591,8 @@ impl App {
     pub fn prune_now(&self) {
         *self.prune_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(String::new());
         self.collector.prune_now();
-        if let Some(g) = &self.grok {
-            g.collector.prune_now();
+        for c in self.other_collectors() {
+            c.prune_now();
         }
     }
 
@@ -512,6 +619,9 @@ impl App {
                 let (d, size) = b.store_info();
                 out.push((name(d), size));
             }
+        }
+        if let Some(c) = &self.codex {
+            out.push((name(c.history.describe()), c.history.size()));
         }
         out
     }
@@ -738,6 +848,7 @@ impl App {
             tz: Arc::new(|| chrono::Local::now().offset().local_minus_utc() / 60),
             claude: Some(self.history.clone()),
             grok: self.grok.as_ref().map(|g| g.history.clone()),
+            codex: self.codex.as_ref().map(|c| c.history.clone()),
             grok_bot: self.grok.as_ref().and_then(|g| g.bot.get().cloned()),
             rescan_every: crate::statsview::RESCAN_EVERY,
         };
@@ -800,8 +911,8 @@ impl App {
     /// Start the collector thread (polls immediately).
     pub fn start(&self) {
         self.collector.start();
-        if let Some(g) = &self.grok {
-            g.collector.start();
+        for c in self.other_collectors() {
+            c.start();
         }
         if let Some(s) = self.stats.get() {
             s.start();
@@ -810,6 +921,9 @@ impl App {
 
     pub fn stop(&self) {
         self.collector.stop();
+        if let Some(c) = &self.codex {
+            c.collector.stop();
+        }
         if let Some(g) = &self.grok {
             g.collector.stop();
             // closing the window during a refresh must not leave the hidden CLI running (a later
@@ -824,8 +938,8 @@ impl App {
     /// Wait for the collector threads to end (after [`stop`](Self::stop)).
     pub fn join(&self) {
         self.collector.join();
-        if let Some(g) = &self.grok {
-            g.collector.join();
+        for c in self.other_collectors() {
+            c.join();
         }
         if let Some(s) = self.stats.get() {
             s.join();
@@ -835,8 +949,8 @@ impl App {
     /// Poll everything now.
     pub fn refresh(&self) {
         self.collector.refresh();
-        if let Some(g) = &self.grok {
-            g.collector.refresh();
+        for c in self.other_collectors() {
+            c.refresh();
         }
         // "Refresh now" also rescans the transcripts, and may refresh the price list
         if let Some(s) = self.stats.get() {
@@ -850,6 +964,9 @@ impl App {
         if let Some(s) = self.stats.get() {
             let w = f.clone();
             s.set_waker(w);
+        }
+        if let Some(c) = &self.codex {
+            c.collector.set_waker(f.clone());
         }
         if let Some(g) = &self.grok {
             g.collector.set_waker(f);
@@ -876,6 +993,9 @@ impl App {
         if let Some(g) = &self.grok {
             g.seen.set_ttl(ttl);
         }
+        if let Some(c) = &self.codex {
+            c.seen.set_ttl(ttl);
+        }
     }
 
     /// Were Claude's tools found on this PC (whatever the setting says)?
@@ -893,6 +1013,25 @@ impl App {
     /// Was the Grok CLI found on this PC (whatever the setting says)? `false` without a Grok part.
     pub fn grok_detected(&self) -> bool {
         self.grok.as_ref().is_some_and(|g| g.detected())
+    }
+
+    /// Was Codex's folder found on this PC (whatever the setting says)? `false` without a Codex part.
+    pub fn codex_detected(&self) -> bool {
+        self.codex.as_ref().is_some_and(|c| c.detected())
+    }
+
+    /// Is Codex tracking on (setting, or automatic because Codex's folder exists)?
+    pub fn codex_on(&self) -> bool {
+        self.codex
+            .as_ref()
+            .is_some_and(|c| self.settings.get().codex_on(c.detected()))
+    }
+
+    pub fn set_codex_track(&self, t: crate::settings::Track) {
+        self.settings.set_codex_track(t);
+        if let Some(c) = &self.codex {
+            c.collector.refresh();
+        }
     }
 
     /// Is Claude's panel shown (setting, or automatic because a Claude tool was detected)?
@@ -921,8 +1060,9 @@ impl App {
 
     /// The history of a vendor's readings (for its chart).
     pub fn history_for(&self, vendor: crate::vendor::VendorId) -> &Arc<History> {
-        match (vendor, &self.grok) {
-            (crate::vendor::VendorId::Grok, Some(g)) => &g.history,
+        match (vendor, &self.grok, &self.codex) {
+            (crate::vendor::VendorId::Grok, Some(g), _) => &g.history,
+            (crate::vendor::VendorId::Codex, _, Some(c)) => &c.history,
             _ => &self.history,
         }
     }
@@ -967,15 +1107,24 @@ impl App {
                 .version()
                 .wrapping_add(g.bot.get().map_or(0, |b| b.version()))
         });
+        let cver = self.codex.as_ref().map_or(0, |c| c.history.version());
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(c) = cache.as_mut() {
-            if c.version == version && c.grok_version == gver && c.at.elapsed() < REFRESH_EVERY {
+            if c.version == version
+                && c.grok_version == gver
+                && c.codex_version == cver
+                && c.at.elapsed() < REFRESH_EVERY
+            {
                 c.state.settings = settings;
                 c.state.collector = status;
                 c.state.claude_on = claude_on;
                 if let (Some(gs), Some(g)) = (c.state.grok.as_mut(), &self.grok) {
                     gs.collector = g.collector.status();
                     gs.enabled = settings.grok_on(g.detected());
+                }
+                if let (Some(cs), Some(p)) = (c.state.codex.as_mut(), &self.codex) {
+                    cs.collector = p.collector.status();
+                    cs.enabled = settings.codex_on(p.detected());
                 }
                 return c.state.clone();
             }
@@ -993,15 +1142,34 @@ impl App {
                     None => (None, true),
                 };
                 state.grok = grok;
-                // Grok's polls (ok or failed) are rows of the same Diagnostics list
+                let prev_codex = cache.as_ref().and_then(|c| c.state.codex.clone());
+                let (codex, codex_real) = match self.build_codex(settings, now, prev_codex.as_ref())
+                {
+                    Some((c, real)) => (Some(c), real),
+                    None => (None, true),
+                };
+                state.codex = codex;
+                // Grok's and Codex's polls (ok or failed) are rows of the same Diagnostics list
+                let mut grok_rows = Vec::new();
                 if let Some(g) = state.grok.as_ref().filter(|g| g.enabled) {
-                    let mut grok_rows = g.diagnostics.clone();
+                    grok_rows = g.diagnostics.clone();
                     if let Some(p) = &self.grok {
                         let rows = p.refresh.rows.lock().unwrap_or_else(|e| e.into_inner());
                         grok_rows.extend(rows.iter().rev().cloned());
                     }
-                    state.diagnostics =
-                        crate::state::merged_diagnostics(&state.diagnostics, &grok_rows);
+                }
+                let codex_rows = state
+                    .codex
+                    .as_ref()
+                    .filter(|c| c.enabled)
+                    .map(|c| c.diagnostics.clone())
+                    .unwrap_or_default();
+                if !grok_rows.is_empty() || !codex_rows.is_empty() {
+                    state.diagnostics = crate::state::merged_diagnostics_of(&[
+                        &state.diagnostics,
+                        &grok_rows,
+                        &codex_rows,
+                    ]);
                 }
                 *cache = Some(Cached {
                     version,
@@ -1010,6 +1178,11 @@ impl App {
                         gver
                     } else {
                         gver.wrapping_add(1)
+                    },
+                    codex_version: if codex_real {
+                        cver
+                    } else {
+                        cver.wrapping_add(1)
                     },
                     at: Instant::now(),
                     state: state.clone(),
@@ -1081,6 +1254,30 @@ impl App {
         }
     }
 
+    /// Codex's part of the state, and whether it was built from the real readings (see
+    /// [`build_grok`](Self::build_grok) for the busy-lock rule).
+    fn build_codex(
+        &self,
+        settings: crate::settings::Values,
+        now: chrono::DateTime<Utc>,
+        prev: Option<&CodexState>,
+    ) -> Option<(CodexState, bool)> {
+        let c = self.codex.as_ref()?;
+        let (status, enabled) = (c.collector.status(), settings.codex_on(c.detected()));
+        Some(match c.history.try_snapshot() {
+            Some(r) => (build_codex_state(&r, status, enabled, now), true),
+            None => match prev {
+                Some(p) => {
+                    let mut p = p.clone();
+                    p.collector = status;
+                    p.enabled = enabled;
+                    (p, false)
+                }
+                None => (build_codex_state(&[], status, enabled, now), false),
+            },
+        })
+    }
+
     pub fn set_interval(&self, minutes: f64) {
         self.settings.set_interval(minutes);
         self.reschedule();
@@ -1093,8 +1290,8 @@ impl App {
 
     fn reschedule(&self) {
         self.collector.reschedule();
-        if let Some(g) = &self.grok {
-            g.collector.reschedule();
+        for c in self.other_collectors() {
+            c.reschedule();
         }
     }
 

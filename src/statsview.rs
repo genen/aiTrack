@@ -36,6 +36,8 @@ pub struct PlanData {
     pub grok: Option<Vec<(StatsRange, Stats)>>,
     /// `None` when the Grok Bot app is not tracked (weekly only).
     pub grok_bot: Option<Vec<(StatsRange, Stats)>>,
+    /// `None` when Codex is not tracked.
+    pub codex: Option<Vec<(StatsRange, Stats)>>,
 }
 
 impl PlanData {
@@ -45,6 +47,14 @@ impl PlanData {
 
     pub fn grok_at(&self, r: StatsRange) -> Option<&Stats> {
         self.grok
+            .as_ref()?
+            .iter()
+            .find(|(k, _)| *k == r)
+            .map(|(_, s)| s)
+    }
+
+    pub fn codex_at(&self, r: StatsRange) -> Option<&Stats> {
+        self.codex
             .as_ref()?
             .iter()
             .find(|(k, _)| *k == r)
@@ -84,6 +94,7 @@ pub struct ServiceConfig {
     pub tz: Arc<dyn Fn() -> i32 + Send + Sync>,
     pub claude: Option<Arc<History>>,
     pub grok: Option<Arc<History>>,
+    pub codex: Option<Arc<History>>,
     pub grok_bot: Option<Arc<crate::grok_bot::BotTracker>>,
     pub rescan_every: Duration,
 }
@@ -209,6 +220,7 @@ fn worker(
             claude: cfg.claude.as_ref().map(ranges).unwrap_or_default(),
             grok: cfg.grok.as_ref().map(ranges),
             grok_bot: cfg.grok_bot.as_ref().map(|b| compute_all(&b.readings())),
+            codex: cfg.codex.as_ref().map(ranges),
         };
         let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
         s.plan = Some(Arc::new(plan));
@@ -512,6 +524,21 @@ pub fn build_page(
                 page.plan.push(PlanBlock {
                     vendor: VendorId::Grok,
                     title: "Grok Bot weekly".into(),
+                    rows: plan_rows(st, Kind::Weekly, now),
+                });
+            }
+            if let Some(st) = plan
+                .codex_at(plan_range)
+                .filter(|s| s.coverage.readings > 0)
+            {
+                page.plan.push(PlanBlock {
+                    vendor: VendorId::Codex,
+                    title: "Codex session (5 h)".into(),
+                    rows: plan_rows(st, Kind::Session, now),
+                });
+                page.plan.push(PlanBlock {
+                    vendor: VendorId::Codex,
+                    title: "Codex weekly (7 d)".into(),
                     rows: plan_rows(st, Kind::Weekly, now),
                 });
             }

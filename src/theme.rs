@@ -121,6 +121,14 @@ pub fn badge_style(v: VendorId, variant: BadgeVariant, pal: &Palette) -> BadgeSt
             BadgeStyle::new(Fill::Solid(rgb(0x08090B)), rgb(0xFEFEFE))
         }
         (VendorId::Grok, BadgeVariant::Light) => light(rgb(0x101012)),
+        // Codex: OpenAI's black square with a white prompt; light: a black prompt
+        (VendorId::Codex, BadgeVariant::Filled) => {
+            BadgeStyle::new(Fill::Vertical(rgb(0x1A1A1A), rgb(0x0A0A0A)), rgb(0xFFFFFF))
+        }
+        (VendorId::Codex, BadgeVariant::Dark) => {
+            BadgeStyle::new(Fill::Solid(rgb(0x0D0D0D)), rgb(0x10A37F))
+        }
+        (VendorId::Codex, BadgeVariant::Light) => light(rgb(0x0D0D0D)),
         // letter badges: the vendor's accent colour
         (v, BadgeVariant::Filled) => BadgeStyle::new(
             Fill::Solid(pal.vendor(v)),
@@ -172,7 +180,7 @@ pub const DARK: Palette = Palette {
     orange: rgb(0xFF9E2E),
     red: rgb(0xF24747),
     claude: rgb(0xFF9E2E),
-    codex: rgb(0x52D6E0),
+    codex: rgb(0x10A37F),
     antigravity: rgb(0x4794FF),
     grok: rgb(0xD1D1D1),
 };
@@ -198,7 +206,7 @@ pub const LIGHT: Palette = Palette {
     orange: rgb(0xD9730D),
     red: rgb(0xD32F2F),
     claude: rgb(0xD9730D),
-    codex: rgb(0x1696A3),
+    codex: rgb(0x0B7A5E),
     antigravity: rgb(0x1F6FE0),
     grok: rgb(0x6B6B70),
 };

@@ -54,6 +54,7 @@ impl Tree {
         Roots {
             claude_projects: self.claude(),
             grok_home: self.grok(),
+            codex_home: self.dir.join("codex"),
             index: index.then(|| self.dir.join("index.json")),
         }
     }

@@ -3,6 +3,15 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.7-beta] - 2026-10-24
+
+### Added
+- **Codex** (ChatGPT) as a third tool: a green block with the 5-hour Session and Weekly Codex limits, the same
+  numbers as Codex's Settings > Usage page. Live from ChatGPT's usage service with the sign-in Codex stored, else
+  from Codex's session logs. Plan, credits, banked resets and per-model limits in the tooltips; detail pane, history
+  chart, Stats blocks, per-project tokens and cost, alerts, 90-day cycling, Diagnostics and `--sources` as for
+  Claude. Settings > Display > **Show Codex**. Clicking the Codex logo opens the Codex app.
+
 ## [0.5.6-beta] - 2026-10-24
 
 ### Removed

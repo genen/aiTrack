@@ -7,6 +7,8 @@
 //!   [`crate::sources::desktop_data_dirs`]) **or** a Claude Code config
 //!   folder exists (`$CLAUDE_CONFIG_DIR`, else `~/.claude`).
 //! * **Grok** is present when the Grok CLI's folder exists (`$GROK_HOME`, else `~/.grok`).
+//! * **Codex** is present when its folder exists (`$CODEX_HOME`, else `~/.codex`; the Codex app
+//!   and the CLI share it).
 //!
 //! Detection is about the tool, not about data: a present tool with no reading yet shows its
 //! panel with its status; an absent one shows nothing (no panel, no polling noise, no alerts).
@@ -35,16 +37,23 @@ pub fn grok_present(env: &Env) -> bool {
     crate::grok::detected(env)
 }
 
-/// Both at once.
+/// Is Codex (the app or the CLI) installed for this user?
+pub fn codex_present(env: &Env) -> bool {
+    crate::codex::detected(env)
+}
+
+/// All at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Presence {
     pub claude: bool,
     pub grok: bool,
+    pub codex: bool,
 }
 
 pub fn detect(env: &Env) -> Presence {
     Presence {
         claude: claude_present(env),
         grok: grok_present(env),
+        codex: codex_present(env),
     }
 }

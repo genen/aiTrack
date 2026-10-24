@@ -22,7 +22,7 @@ use std::path::PathBuf;
 #[cfg(feature = "gui")]
 use std::sync::Arc;
 
-const USAGE: &str = "aiTrack - Claude plan usage tracker
+const USAGE: &str = "aiTrack - Claude, Grok and Codex plan usage tracker
 
 USAGE:
     aitrack [OPTIONS]
@@ -43,6 +43,7 @@ OPTIONS:
 ENVIRONMENT:
     AITRACK_WAYLAND=native   Linux: use native Wayland instead of XWayland (no always-on-top,
                              window position is not remembered)
+    CODEX_HOME               folder of Codex (default ~/.codex)
 ";
 
 #[derive(Default)]
@@ -255,6 +256,7 @@ fn open_window(data: PathBuf) {
     // Grok readings go to their own file next to the Claude one
     let grok_file = data.with_file_name("usage-grok.jsonl");
     let grok_bot_file = data.with_file_name("usage-grok-bot.jsonl");
+    let codex_file = data.with_file_name("usage-codex.jsonl");
     let app = Arc::new(
         App::new(
             Box::new(JsonlStore::new(data)),
@@ -269,6 +271,11 @@ fn open_window(data: PathBuf) {
         .with_grok_bot(
             Box::new(JsonlStore::new(grok_bot_file)),
             aitrack::sources::Env::from_process(),
+        )
+        .with_codex_poller(
+            Box::new(JsonlStore::new(codex_file)),
+            Poller::codex_from_env(),
+            Arc::new(|| aitrack::codex::detected(&aitrack::sources::Env::from_process())),
         )
         .with_stats(
             aitrack::transcripts::Roots::from_env(

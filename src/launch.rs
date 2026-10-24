@@ -982,6 +982,16 @@ pub fn grok_store_targets(localappdata: Option<&Path>, apps: &[StartApp]) -> Vec
 /// How to open the CLI in a new terminal window in `dir`, running `grok` with no arguments:
 /// Windows Terminal when `wt` is given, else a new console through `cmd /c start`.
 pub fn terminal_command(cli: &Path, dir: &Path, wt: Option<&Path>) -> (PathBuf, Vec<String>) {
+    terminal_command_titled("Grok", cli, dir, wt)
+}
+
+/// [`terminal_command`] with the console window titled `title`.
+pub fn terminal_command_titled(
+    title: &str,
+    cli: &Path,
+    dir: &Path,
+    wt: Option<&Path>,
+) -> (PathBuf, Vec<String>) {
     let (cli, dir) = (
         cli.to_string_lossy().into_owned(),
         dir.to_string_lossy().into_owned(),
@@ -993,7 +1003,7 @@ pub fn terminal_command(cli: &Path, dir: &Path, wt: Option<&Path>) -> (PathBuf, 
             vec![
                 "/c".into(),
                 "start".into(),
-                "Grok".into(),
+                title.into(),
                 "/D".into(),
                 dir,
                 cli,
@@ -1141,6 +1151,230 @@ pub fn launch_grok_async(log: PathBuf, done: impl FnOnce(bool) + Send + 'static)
             &log_path(),
             &format!(
                 "{}  grok launch: could not start a thread",
+                crate::util::now_iso()
+            ),
+        );
+    }
+}
+
+// ---------------------------------------------------------------- Codex
+
+/// Package-family prefix of the Codex Store app (`OpenAI.Codex_<hash>`).
+pub const CODEX_STORE_PREFIX: &str = "openai.codex_";
+/// AppId of that package's application entry (`<family>!App`). A guess: the Start-menu entry's own
+/// AppID, when there is one, is tried first.
+pub const CODEX_STORE_APP_ID: &str = "App";
+/// Start-menu name of the Codex app. Exact match only.
+pub const CODEX_NAME: &str = "Codex";
+/// macOS app names, tried in order (`open -a`): the Codex app, then the ChatGPT app that bundles it.
+pub const CODEX_MAC_APP_NAMES: [&str; 2] = ["Codex", "ChatGPT"];
+
+/// The `shell:AppsFolder` targets of the Codex Store app: a Start entry named exactly "Codex"
+/// (`OpenAI.Codex` ones first), then each `OpenAI.Codex_*` package folder (`<family>!App`).
+pub fn codex_store_targets(localappdata: Option<&Path>, apps: &[StartApp]) -> Vec<String> {
+    let mut ids: Vec<String> = apps
+        .iter()
+        .filter(|a| a.name.eq_ignore_ascii_case(CODEX_NAME))
+        .map(|a| a.app_id.clone())
+        .collect();
+    ids.sort_by_key(|id| !id.to_ascii_lowercase().starts_with(CODEX_STORE_PREFIX));
+    if let Some(l) = localappdata {
+        for fam in families_with_prefix(l, CODEX_STORE_PREFIX) {
+            let id = format!("{fam}!{CODEX_STORE_APP_ID}");
+            if !ids.iter().any(|i| i.eq_ignore_ascii_case(&id)) {
+                ids.push(id);
+            }
+        }
+    }
+    ids.into_iter()
+        .map(|id| format!("shell:AppsFolder\\{id}"))
+        .collect()
+}
+
+/// The `codex` CLI on `path_var` (`codex.exe` / `codex.cmd` on Windows), when installed.
+pub fn find_codex_cli(path_var: Option<&std::ffi::OsStr>, windows: bool) -> Option<PathBuf> {
+    let names: &[&str] = if windows {
+        &["codex.exe", "codex.cmd"]
+    } else {
+        &["codex"]
+    };
+    path_var
+        .into_iter()
+        .flat_map(std::env::split_paths)
+        .flat_map(|d| names.iter().map(move |n| d.join(n)))
+        .find(|p| p.is_file())
+}
+
+/// What [`launch_codex`] needs to know about the machine (Windows).
+pub struct CodexLaunchEnv {
+    pub localappdata: Option<PathBuf>,
+    pub home: Option<PathBuf>,
+    pub cli: Option<PathBuf>,
+    pub wt: Option<PathBuf>,
+}
+
+/// Windows: 1. the Codex Store app, 2. the `codex` CLI in a new terminal window. Stops at the first
+/// that starts. Nothing is typed into the CLI.
+pub fn launch_codex(env: &CodexLaunchEnv, spawner: &dyn Spawner) -> Vec<Attempt> {
+    let mut tried = Vec::new();
+    let push = |method: String, r: Result<(), String>, tried: &mut Vec<Attempt>| -> bool {
+        let ok = r.is_ok();
+        tried.push(Attempt {
+            method,
+            ok,
+            detail: r.err(),
+        });
+        ok
+    };
+    let apps = match spawner.capture(
+        Path::new("powershell.exe"),
+        &[
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-Command".into(),
+            START_APPS_SCRIPT.into(),
+        ],
+    ) {
+        Ok(t) => parse_start_apps(&t),
+        Err(_) => Vec::new(),
+    };
+    for t in codex_store_targets(env.localappdata.as_deref(), &apps) {
+        let r = spawner.run(Path::new("explorer.exe"), std::slice::from_ref(&t));
+        if push(format!("Codex app {t}"), r, &mut tried) {
+            return tried;
+        }
+    }
+    match &env.cli {
+        Some(cli) => {
+            let dir = env.home.clone().unwrap_or_else(|| PathBuf::from("."));
+            let (prog, args) = terminal_command_titled("Codex", cli, &dir, env.wt.as_deref());
+            let r = spawner.run(&prog, &args);
+            push(
+                format!("codex CLI in a terminal ({})", prog.display()),
+                r,
+                &mut tried,
+            );
+        }
+        None => tried.push(Attempt {
+            method: "codex CLI in a terminal".into(),
+            ok: false,
+            detail: Some("no Codex app or codex CLI found".into()),
+        }),
+    }
+    tried
+}
+
+/// macOS: 1. `open -a Codex`, 2. `open -a ChatGPT`, 3. the `codex` CLI in a new Terminal window.
+pub fn launch_codex_mac(
+    home: Option<&Path>,
+    cli: Option<&Path>,
+    spawner: &dyn Spawner,
+) -> Vec<Attempt> {
+    let mut tried = Vec::new();
+    for name in CODEX_MAC_APP_NAMES {
+        let r = spawner.run(Path::new(OPEN_PROGRAM), &["-a".into(), name.into()]);
+        let ok = r.is_ok();
+        tried.push(Attempt {
+            method: format!("open -a {name}"),
+            ok,
+            detail: r.err(),
+        });
+        if ok {
+            return tried;
+        }
+    }
+    if let Some(cli) = cli {
+        let dir = home.unwrap_or_else(|| Path::new("."));
+        let r = spawner.run(
+            Path::new(OSASCRIPT_PROGRAM),
+            &terminal_osascript_args(cli, dir),
+        );
+        tried.push(Attempt {
+            method: "codex CLI in Terminal (osascript)".into(),
+            ok: r.is_ok(),
+            detail: r.err(),
+        });
+    }
+    tried
+}
+
+/// Linux: the `codex` CLI in a terminal window (there is no Codex desktop app for Linux).
+pub fn launch_codex_linux(
+    cli: Option<&Path>,
+    terminals: &[(PathBuf, &'static str)],
+    spawner: &dyn Spawner,
+) -> Vec<Attempt> {
+    let Some(cli) = cli else {
+        return vec![Attempt {
+            method: "codex CLI in a terminal".into(),
+            ok: false,
+            detail: Some("the codex CLI was not found on PATH".into()),
+        }];
+    };
+    let mut tried = Vec::new();
+    for (term, flag) in terminals {
+        let r = spawner.run(
+            term,
+            &[(*flag).to_owned(), cli.to_string_lossy().into_owned()],
+        );
+        let ok = r.is_ok();
+        tried.push(Attempt {
+            method: format!("codex CLI in {} {flag}", term.display()),
+            ok,
+            detail: r.err(),
+        });
+        if ok {
+            break;
+        }
+    }
+    if tried.is_empty() {
+        tried.push(Attempt {
+            method: "codex CLI in a terminal".into(),
+            ok: false,
+            detail: Some("no terminal emulator found".into()),
+        });
+    }
+    tried
+}
+
+/// Launch Codex on a short-lived thread; `done(ok)` runs on that thread.
+pub fn launch_codex_async(log: PathBuf, done: impl FnOnce(bool) + Send + 'static) {
+    let spawn = std::thread::Builder::new()
+        .name("aitrack-launch-codex".into())
+        .spawn(move || {
+            let env = crate::sources::Env::from_process();
+            let path = std::env::var_os("PATH");
+            let tried = if cfg!(target_os = "macos") {
+                let cli = find_codex_cli(path.as_deref(), false);
+                launch_codex_mac(env.home.as_deref(), cli.as_deref(), &SystemSpawner)
+            } else if cfg!(target_os = "linux") {
+                let terms =
+                    linux_terminals(std::env::var_os("TERMINAL").as_deref(), path.as_deref());
+                let cli = find_codex_cli(path.as_deref(), false);
+                launch_codex_linux(cli.as_deref(), &terms, &SystemSpawner)
+            } else {
+                let wt = env
+                    .localappdata
+                    .as_ref()
+                    .map(|l| l.join("Microsoft").join("WindowsApps").join("wt.exe"))
+                    .filter(|p| p.is_file());
+                let cenv = CodexLaunchEnv {
+                    localappdata: env.localappdata.clone(),
+                    home: env.home.clone(),
+                    cli: find_codex_cli(path.as_deref(), true),
+                    wt,
+                };
+                launch_codex(&cenv, &SystemSpawner)
+            };
+            let line = log_text(&tried).replace("claude desktop launch", "codex launch");
+            append_log(&log, &line);
+            done(succeeded(&tried));
+        });
+    if spawn.is_err() {
+        append_log(
+            &log_path(),
+            &format!(
+                "{}  codex launch: could not start a thread",
                 crate::util::now_iso()
             ),
         );

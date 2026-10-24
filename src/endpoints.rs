@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Where credentials may be sent, and the test hooks that are compiled out of real builds.
 //!
-//! A bearer token goes only to `https://api.anthropic.com` (Claude) or
-//! `https://cli-chat-proxy.grok.com` (Grok): no `http:`, no user info, no other host, no redirect.
-//! The environment variables that used to replace those URLs (`AITRACK_USAGE_URL`,
-//! `AITRACK_GROK_URL`) and the ones that choose the Grok program and its arguments
-//! (`AITRACK_GROK_CMD`, `AITRACK_GROK_REFRESH_ARGS`) exist for the tests only: they are read, and a
-//! non-HTTPS URL is accepted, **only** when the crate is built with the `test-hooks` feature. The
+//! A bearer token goes only to `https://api.anthropic.com` (Claude),
+//! `https://cli-chat-proxy.grok.com` (Grok) or `https://chatgpt.com` (Codex): no `http:`, no user
+//! info, no other host, no redirect. The environment variables that used to replace those URLs
+//! (`AITRACK_USAGE_URL`, `AITRACK_GROK_URL`, `AITRACK_CODEX_URL`) and the ones that choose the
+//! Grok program and its arguments (`AITRACK_GROK_CMD`, `AITRACK_GROK_REFRESH_ARGS`) exist for the
+//! tests only: they are read, and a non-HTTPS URL is accepted, **only** when the crate is built with the `test-hooks` feature. The
 //! feature is switched on for `cargo test` through the self dev-dependency in `Cargo.toml`
 //! (the integration tests start the real binary against a mock server); `cargo build`,
 //! `cargo run` and release builds never have it.
@@ -15,6 +15,8 @@
 pub const CLAUDE_HOST: &str = "api.anthropic.com";
 /// The host of the Grok billing endpoint.
 pub const GROK_HOST: &str = "cli-chat-proxy.grok.com";
+/// The host of the Codex usage endpoint.
+pub const CODEX_HOST: &str = "chatgpt.com";
 
 /// Are the test hooks compiled in?
 pub const TEST_HOOKS: bool = cfg!(feature = "test-hooks");

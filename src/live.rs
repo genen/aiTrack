@@ -486,6 +486,12 @@ impl Poller {
         Self::with_chain_for(crate::grok::build_chain(&Env::from_process()), "grok")
     }
 
+    /// Codex's chain (live usage, then the session logs) from the process environment;
+    /// `AITRACK_CODEX_URL` overrides the usage endpoint in test builds only.
+    pub fn codex_from_env() -> Self {
+        Self::with_chain_for(crate::codex::build_chain(&Env::from_process()), "codex")
+    }
+
     pub fn with_chain(chain: Vec<Box<dyn UsageSource>>) -> Self {
         Self {
             chain,
@@ -891,6 +897,10 @@ pub fn sample_record(s: &Sample, source: &str, backfill: bool) -> Value {
         "limits": Value::Null,
         "raw": s.raw.clone().unwrap_or(Value::Null),
     });
+    // per-model buckets a source put among its extras (Codex) are stored where Claude's are
+    if let Some(l) = rec["raw"].as_object_mut().and_then(|r| r.remove("limits")) {
+        rec["limits"] = l;
+    }
     tag(&mut rec, source, &at);
     if backfill {
         rec["backfill"] = Value::Bool(true);

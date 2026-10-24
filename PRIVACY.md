@@ -6,8 +6,8 @@ else.**
 
 ## What it reads on your computer
 
-- Claude and Grok usage files and settings that those tools already keep on your computer (for example the Claude
-  app's cache, `~/.claude.json`, the Grok CLI's `~/.grok` folder and the Grok Bot app's usage cache).
+- Claude, Grok and Codex usage files and settings that those tools already keep on your computer (for example the Claude
+  app's cache, `~/.claude.json`, the Grok CLI's `~/.grok` folder, the Grok Bot app's usage cache and Codex's `~/.codex` folder).
 - On a Mac, the sign-in that Claude Code stored in the macOS Keychain (macOS asks you before it is read).
 
 aiTrack only **reads** those files. It never changes them.
@@ -25,9 +25,10 @@ Only these requests, over HTTPS, and only when needed:
 - `api.anthropic.com`: the Claude usage question, with the Claude Code sign-in already on your computer, only when no
   file on your computer has a recent reading.
 - `cli-chat-proxy.grok.com`: the Grok billing question, with the sign-in the Grok CLI stored.
+- `chatgpt.com`: the Codex usage question, with the sign-in Codex stored.
 - `raw.githubusercontent.com`: a download of the public model price list, about once a day.
 
-Sign-in tokens go only to the first two hosts, are read fresh for each request, and are never written to a file or a
+Sign-in tokens go only to the first three hosts, are read fresh for each request, and are never written to a file or a
 log by aiTrack. Starting the Grok CLI (the Refresh button) makes that CLI contact xAI as it normally does.
 
 ## Updates and contact
