@@ -121,7 +121,7 @@ pub fn badge_style(v: VendorId, variant: BadgeVariant, pal: &Palette) -> BadgeSt
             BadgeStyle::new(Fill::Solid(rgb(0x08090B)), rgb(0xFEFEFE))
         }
         (VendorId::Grok, BadgeVariant::Light) => light(rgb(0x101012)),
-        // Codex: OpenAI's black square with a white prompt; light: a black prompt
+        // Codex: OpenAI's black square with a white knot; light: a black knot
         (VendorId::Codex, BadgeVariant::Filled) => {
             BadgeStyle::new(Fill::Vertical(rgb(0x1A1A1A), rgb(0x0A0A0A)), rgb(0xFFFFFF))
         }
