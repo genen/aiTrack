@@ -3,6 +3,10 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.13] - 2026-10-24
+
+Stable release with everything since 0.5.3 (the 0.5.4-beta to 0.5.12-beta entries below). No changes of its own.
+
 ## [0.5.12-beta] - 2026-10-24
 
 ### Added
