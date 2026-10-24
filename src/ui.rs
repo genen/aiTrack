@@ -1542,7 +1542,7 @@ impl AitrackUi {
                         ui,
                         pal,
                         "Layout",
-                        "Vendor blocks stacked or side by side",
+                        "",
                         |ui| {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 for (label, horizontal) in
