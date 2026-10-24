@@ -265,7 +265,9 @@ mod window {
         w.ui.screen = Screen::Settings;
         w.frame(vec![]);
         w.frame(vec![]);
-        assert_eq!(w.width, 310.0, "{:?}", w.sizes);
+        // (no saved width yet: the platform's default, 376 pt on macOS)
+        let one_block = view::default_inner_size_pt().0;
+        assert_eq!(w.width, one_block, "{:?}", w.sizes);
         let vertical =
             w.ui.layout_rects
                 .iter()
@@ -278,7 +280,7 @@ mod window {
         w.frame(vec![]);
         w.frame(vec![]);
         // vertical: the vertical width, and the wide one was never saved as the vertical window's
-        assert_eq!(w.width, 310.0, "{:?}", w.sizes);
+        assert_eq!(w.width, one_block, "{:?}", w.sizes);
         let saved = w.app.settings.get().window.and_then(|p| p.width);
         assert!(saved.is_none_or(|s| s < 400.0), "{saved:?}");
     }
