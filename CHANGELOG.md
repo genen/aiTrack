@@ -10,6 +10,9 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
   better-known name. The block, tooltips, status texts, Stats blocks, Diagnostics, `--sources` and Settings >
   Display > **Show ChatGPT** use the new name. Where the text means the Codex app or CLI (the sign-in message, the
   logo hover "Open Codex", the session logs), it still says Codex. Colour, badge and settings files are unchanged.
+- A 7-day window no longer shows a pace, "On pace for" note, projection or time to limit until 12 hours of it have
+  passed or 3 points are used (1 % at 1.6 hours in used to read "On pace for ~98%"). The 5-hour session is unchanged.
+  The rule is the same for Claude, Grok, Grok Bot and ChatGPT.
 
 ## [0.5.7-beta] - 2026-10-24
 

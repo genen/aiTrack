@@ -292,3 +292,47 @@ fn toast_alerts_share_the_guard() {
     assert!(sent.is_empty(), "{sent:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ------------------------------------------------------------ weekly early-window gate
+
+#[test]
+fn weekly_pace_waits_for_12_hours_or_3_points() {
+    // 1% at 1.6 h into the week: no pace
+    assert_eq!(pace_for(Kind::Weekly, 1.0, Some(168.0 - 1.6), &[]), None);
+    // 1% at 13 h: a pace
+    let (r, m) = pace_for(Kind::Weekly, 1.0, Some(168.0 - 13.0), &[]).unwrap();
+    assert_eq!(m, PaceMethod::Average);
+    assert!((r - 1.0 / 13.0).abs() < 1e-9);
+    // 4% at 2 h: a pace
+    let (r, _) = pace_for(Kind::Weekly, 4.0, Some(168.0 - 2.0), &[]).unwrap();
+    assert!((r - 2.0).abs() < 1e-9);
+    // the session window keeps its rules: 1% at 1.6 h still has a pace
+    let (r, m) = pace_for(Kind::Session, 1.0, Some(5.0 - 1.6), &[]).unwrap();
+    assert_eq!(m, PaceMethod::Average);
+    assert!((r - 1.0 / 1.6).abs() < 1e-9);
+}
+
+#[test]
+fn weekly_early_gate_leaves_gauge_and_pane_without_a_pace() {
+    // weekly 1%, window opened 1.6 h before `now` (resets 168 - 1.6 h ahead); session unaffected
+    let w_left = (168.0 - 1.6) * 60.0;
+    let rs = [rd(0, 20.0, 1.0, Some(150), Some(w_left as i64))];
+    let plan = analyze(&rs, now()).unwrap();
+    let w = plan.weekly.unwrap();
+    assert_eq!(w.rate_per_hour, None);
+    assert_eq!(w.projected_pct, None);
+    assert_eq!(w.hours_to_limit, None);
+    assert_eq!(view::pace_note(&w), None);
+    let s = plan.session.unwrap();
+    assert!(s.rate_per_hour.is_some() && s.projected_pct.is_some());
+    // 13 h in: the pace is back
+    let rs = [rd(
+        0,
+        20.0,
+        1.0,
+        Some(150),
+        Some(((168.0 - 13.0) * 60.0) as i64),
+    )];
+    let w = analyze(&rs, now()).unwrap().weekly.unwrap();
+    assert!(w.rate_per_hour.is_some() && w.projected_pct.is_some());
+}

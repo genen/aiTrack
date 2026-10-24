@@ -504,6 +504,8 @@ aiTrack compares your use so far with the time that has passed in the window. If
 window resets**, a red line appears after the tool's name, for example `Empty in ~2h 19m · resets in 3h 19m`. The
 row tooltip says "Limit in ~1.4h at this pace".
 
+For the 7-day window there is no pace, projection or warning until 12 hours of it have passed or 3 points are used.
+
 The warning is held back when it would be noise:
 
 - there is no reset time;
