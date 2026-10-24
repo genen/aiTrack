@@ -104,7 +104,8 @@ pub fn parse_subscription(bytes: &[u8]) -> Option<String> {
         .get("subscriptionType")?
         .as_str()?
         .trim();
-    if plan.is_empty() || plan.eq_ignore_ascii_case("unknown") {
+    // an empty, placeholder or implausibly long value is not a plan name
+    if plan.is_empty() || plan.eq_ignore_ascii_case("unknown") || plan.chars().count() > 32 {
         return None;
     }
     Some(match plan.to_ascii_lowercase().as_str() {

@@ -928,7 +928,8 @@ fn claude_plan_name_comes_from_the_login_file_without_the_token() {
         parse_subscription(creds("\"newplan\"").as_bytes()).as_deref(),
         Some("Newplan")
     );
-    for none in ["null", "\"\"", "\"unknown\"", "3"] {
+    let long = format!("\"{}\"", "x".repeat(33));
+    for none in ["null", "\"\"", "\"unknown\"", "3", long.as_str()] {
         assert_eq!(parse_subscription(creds(none).as_bytes()), None, "{none}");
     }
     assert_eq!(parse_subscription(b"not json"), None);

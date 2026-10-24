@@ -1156,7 +1156,8 @@ impl App {
         match built {
             Some(mut state) => {
                 state.claude_on = claude_on;
-                state.tier = self.claude_plan();
+                // the login file is not opened while Claude is off
+                state.tier = claude_on.then(|| self.claude_plan()).flatten();
                 let prev = cache.as_ref().and_then(|c| c.state.grok.clone());
                 let (grok, grok_real) = match self.build_grok(settings, now, prev.as_ref()) {
                     Some((g, real)) => (Some(g), real),
