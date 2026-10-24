@@ -197,6 +197,22 @@ pub trait Host {
     fn spawn(&self, program: &Path, args: &[OsString]) -> Result<Box<dyn Child>, String>;
 }
 
+/// The failure when a `grok` process is already running: that copy updates the log itself, but
+/// only while it is signed in, so say what to do when nothing changes.
+pub const ALREADY_OPEN: &str =
+    "The Grok CLI is already open. If the Grok row does not update, sign in there or close it, then press Refresh";
+
+/// What a failed refresh says: when the CLI ran without fetching billing while the Grok login in
+/// `auth.json` has expired, a hidden start could not renew it, so the user has to sign in (the
+/// original reason follows in brackets). Other failures are left as they are.
+pub fn refresh_error(reason: String, login_expired: bool) -> String {
+    if login_expired && reason.starts_with("no new data") {
+        format!("Grok login expired: open the Grok CLI in a terminal and sign in ({reason})")
+    } else {
+        reason
+    }
+}
+
 /// The failure when the CLI ran but no newer billing line appeared (signed out? offline?).
 pub const NO_NEW_DATA: &str = "no new data (Grok did not fetch billing)";
 
@@ -260,7 +276,7 @@ pub fn refresh_tracked(
     }
     let _clear = Clear(active);
     if host.grok_running() {
-        return Err("Grok is already running; it updates the log itself".into());
+        return Err(ALREADY_OPEN.into());
     }
     let baseline = newest(&cfg.log).map(|s| s.fetched_at);
     let is_new = || newest(&cfg.log).is_some_and(|s| baseline.is_none_or(|b| s.fetched_at > b));
@@ -304,8 +320,8 @@ pub fn refresh_tracked(
     }
 }
 
-/// The real host: `std::process`, no window, null stdio; process list through `tasklist` (Windows)
-/// or `/proc` / `pgrep`.
+/// The real host: `std::process`, no window, null stdio; process list through a Toolhelp snapshot
+/// (Windows) or `/proc` / `pgrep`.
 pub struct SystemHost;
 
 struct RealChild {
@@ -455,19 +471,66 @@ impl Host for SystemHost {
     }
 }
 
+/// Windows: is a `grok.exe` running that may be the CLI? The Grok Store app (Grok Bot) can run
+/// under the same name from a `WindowsApps` folder; it never writes the CLI's log, so it does not
+/// count. A process whose path cannot be read counts (do not start a second copy).
 #[cfg(windows)]
 fn grok_process_running() -> bool {
-    use std::os::windows::process::CommandExt;
-    let out = std::process::Command::new("tasklist")
-        .args(["/FI", "IMAGENAME eq grok.exe", "/NH", "/FO", "CSV"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output();
-    match out {
-        Ok(o) => listing_has_grok(&String::from_utf8_lossy(&o.stdout)),
-        // cannot tell: do not start a second copy
-        Err(_) => true,
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    // SAFETY: plain Win32 calls on a snapshot handle we own and close; the entry is sized as the
+    // API requires.
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            // cannot tell: do not start a second copy
+            return true;
+        };
+        let mut e = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut found = false;
+        let mut ok = Process32FirstW(snap, &mut e).is_ok();
+        while ok && !found {
+            let len = e
+                .szExeFile
+                .iter()
+                .position(|c| *c == 0)
+                .unwrap_or(e.szExeFile.len());
+            let name = String::from_utf16_lossy(&e.szExeFile[..len]);
+            if name.eq_ignore_ascii_case("grok.exe") {
+                found = counts_as_cli(process_path(e.th32ProcessID).as_deref());
+            }
+            ok = Process32NextW(snap, &mut e).is_ok();
+        }
+        let _ = CloseHandle(snap);
+        found
+    }
+}
+
+/// The full program path of process `pid`, when we may read it.
+#[cfg(windows)]
+fn process_path(pid: u32) -> Option<String> {
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // SAFETY: the handle is closed before returning; the buffer outlives the call and its length
+    // is passed in.
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        let r =
+            QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len);
+        let _ = CloseHandle(h);
+        r.ok()?;
+        Some(String::from_utf16_lossy(&buf[..len as usize]))
     }
 }
 
@@ -486,13 +549,15 @@ fn grok_process_running() -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// Does a `tasklist /FO CSV /NH` listing contain a `grok.exe` row?
-pub fn listing_has_grok(text: &str) -> bool {
-    text.lines().any(|l| {
-        l.trim_start_matches('"')
-            .split('"')
-            .next()
-            .is_some_and(|n| n.eq_ignore_ascii_case("grok.exe"))
+/// Does a running `grok.exe` at `path` count as the CLI for "already running"? Not when it runs
+/// from `Program Files\WindowsApps` (where Store apps such as Grok Bot are installed); yes when the
+/// path is unknown.
+pub fn counts_as_cli(path: Option<&str>) -> bool {
+    path.is_none_or(|p| {
+        let parts: Vec<&str> = p.split(['\\', '/']).collect();
+        !parts.windows(2).any(|w| {
+            w[0].eq_ignore_ascii_case("Program Files") && w[1].eq_ignore_ascii_case("WindowsApps")
+        })
     })
 }
 

@@ -801,3 +801,25 @@ fn a_mac_looks_in_homebrew_and_the_per_user_folders_because_a_gui_app_has_a_mini
     env.os = Os::Mac;
     assert_eq!(grok_cli::find_cli(&env, None, None), Some(exe));
 }
+
+#[test]
+fn an_expired_login_is_noticed_for_the_refresh_message() {
+    let h = home();
+    // no auth.json: not "expired" (that has its own message)
+    assert!(!grok::login_expired(&h.env, now()));
+    write_auth(&h, &auth_ok(now() + Duration::hours(2)));
+    assert!(!grok::login_expired(&h.env, now()));
+    write_auth(&h, &auth_ok(now() - Duration::minutes(1)));
+    assert!(grok::login_expired(&h.env, now()));
+    use aitrack::grok_cli::{refresh_error, ALREADY_OPEN, NO_NEW_DATA};
+    let m = refresh_error(NO_NEW_DATA.into(), true);
+    assert!(m.starts_with("Grok login expired"), "{m}");
+    assert!(m.contains("sign in") && m.contains(NO_NEW_DATA), "{m}");
+    let ended = "no new data (Grok did not fetch billing; it ended with exit code 1)";
+    assert!(refresh_error(ended.into(), true).starts_with("Grok login expired"));
+    // a login that is still valid, or another kind of failure, keeps its own reason
+    assert_eq!(refresh_error(NO_NEW_DATA.into(), false), NO_NEW_DATA);
+    assert_eq!(refresh_error(ALREADY_OPEN.into(), true), ALREADY_OPEN);
+    let start = "Could not start Grok: denied";
+    assert_eq!(refresh_error(start.into(), true), start);
+}

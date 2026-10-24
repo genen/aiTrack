@@ -265,7 +265,9 @@ impl GrokRefresh {
             let program = crate::grok_cli::find_cli_here(&env)
                 .ok_or_else(|| "The Grok CLI was not found".to_string())?;
             let cfg = crate::grok_cli::RefreshCfg::new(&env, program);
-            crate::grok_cli::refresh_tracked(&cfg, &crate::grok_cli::SystemHost, &a2)?;
+            crate::grok_cli::refresh_tracked(&cfg, &crate::grok_cli::SystemHost, &a2).map_err(
+                |e| crate::grok_cli::refresh_error(e, crate::grok::login_expired(&env, Utc::now())),
+            )?;
             Ok(crate::grok_cli::newest_pct(&env))
         });
         GrokRefresh {

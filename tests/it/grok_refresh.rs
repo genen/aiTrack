@@ -299,13 +299,21 @@ fn the_refresh_command_has_no_arguments_by_default_and_null_stdio() {
     assert_eq!(c.get_program(), "/x/grok");
     assert_eq!(c.get_args().count(), 0);
     assert_eq!(grok_cli::CREATE_NO_WINDOW, 0x0800_0000);
-    assert!(grok_cli::listing_has_grok(
-        "\"grok.exe\",\"123\",\"Console\",\"1\",\"5 K\"\r\n"
-    ));
-    assert!(!grok_cli::listing_has_grok(
-        "INFO: No tasks are running which match the specified criteria.\r\n"
-    ));
-    assert!(!grok_cli::listing_has_grok("\"grokbot.exe\",\"9\"\r\n"));
+    // the Grok Store app (Grok Bot) may run as grok.exe too: it does not block a refresh
+    assert!(grok_cli::counts_as_cli(Some(
+        r"C:\Users\gene\.grok\bin\grok.exe"
+    )));
+    assert!(
+        grok_cli::counts_as_cli(None),
+        "unknown path: do not start a second copy"
+    );
+    assert!(!grok_cli::counts_as_cli(Some(
+        r"C:\Program Files\WindowsApps\XAI.Grok_1.2.3.0_x64__abc\Grok.exe"
+    )));
+    // only the Store install folder is skipped, not any folder named WindowsApps
+    assert!(grok_cli::counts_as_cli(Some(
+        r"C:\Users\gene\AppData\Local\Microsoft\WindowsApps\grok.exe"
+    )));
 }
 
 // ------------------------------------------------------------ the refresh run
@@ -420,7 +428,11 @@ fn nothing_is_started_while_grok_is_already_running() {
     let mut host = FakeHost::new(grok::log_path(&h.env));
     host.running = true;
     let e = grok_cli::refresh(&cfg(&h, 100), &host).unwrap_err();
-    assert!(e.contains("already running"), "{e}");
+    assert_eq!(e, grok_cli::ALREADY_OPEN);
+    assert!(
+        e.contains("sign in"),
+        "says what to do when nothing changes: {e}"
+    );
     assert_eq!(host.spawned.load(Ordering::SeqCst), 0);
 }
 
