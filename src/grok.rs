@@ -393,6 +393,20 @@ impl GrokBilling {
 
 const EXPIRED: &str = "Grok login expired: run `grok` once";
 
+/// Has every xAI sign-in in `auth.json` expired? `false` when the file is missing or unreadable
+/// (that has its own message) or does not say when the login ends.
+pub fn login_expired(env: &Env, now: DateTime<Utc>) -> bool {
+    let path = auth_path(env);
+    if std::fs::metadata(&path).map_or(true, |m| m.len() > MAX_AUTH_BYTES) {
+        return false;
+    }
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| select_session(&t, now).ok())
+        .and_then(|(s, _)| s.expires_at)
+        .is_some_and(|t| t < now)
+}
+
 impl UsageSource for GrokBilling {
     fn name(&self) -> &'static str {
         SOURCE_BILLING

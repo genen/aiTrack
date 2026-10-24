@@ -801,3 +801,20 @@ fn a_mac_looks_in_homebrew_and_the_per_user_folders_because_a_gui_app_has_a_mini
     env.os = Os::Mac;
     assert_eq!(grok_cli::find_cli(&env, None, None), Some(exe));
 }
+
+#[test]
+fn an_expired_login_is_noticed_for_the_refresh_message() {
+    let h = home();
+    // no auth.json: not "expired" (that has its own message)
+    assert!(!grok::login_expired(&h.env, now()));
+    write_auth(&h, &auth_ok(now() + Duration::hours(2)));
+    assert!(!grok::login_expired(&h.env, now()));
+    write_auth(&h, &auth_ok(now() - Duration::minutes(1)));
+    assert!(grok::login_expired(&h.env, now()));
+    let m = aitrack::grok_cli::with_login_hint(aitrack::grok_cli::NO_NEW_DATA);
+    assert!(m.starts_with("Grok login expired"), "{m}");
+    assert!(
+        m.contains("sign in") && m.contains(aitrack::grok_cli::NO_NEW_DATA),
+        "{m}"
+    );
+}

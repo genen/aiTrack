@@ -897,13 +897,14 @@ fn bot_chip(v: &Vendor, now: DateTime<Utc>) -> Option<AgeChip> {
     if age <= CHIP_BOT_MIN {
         return None;
     }
-    let long = age_long(age);
+    let ago = age_long(age);
+    // the chip sits in the Grok header above a Weekly row that may be fresh: say whose age it is
     Some(AgeChip {
-        compact: age_compact(age),
+        compact: format!("Bot {}", age_compact(age)),
         tooltip: format!(
-            "The Grok Bot bar comes from the Grok Bot app's local cache, last updated {long}. The app rewrites it only every half hour or so, and only while it is open."
+            "The Grok Bot bar comes from the Grok Bot app's local cache, last updated {ago}. The app rewrites it only every half hour or so, and only while it is open."
         ),
-        long,
+        long: format!("Grok Bot {ago}"),
         age_min: age,
     })
 }

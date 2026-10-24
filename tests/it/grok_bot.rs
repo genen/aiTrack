@@ -592,7 +592,8 @@ fn an_old_reading_is_kept_dimmed_with_chip_and_no_projection() {
         .iter()
         .any(|l| l.contains("pace") || l.contains("Empty")));
     let chip = vv.age_chip.expect("chip for the old Grok Bot reading");
-    assert_eq!(chip.compact, "2 h");
+    assert_eq!(chip.compact, "Bot 2 h");
+    assert_eq!(chip.long, "Grok Bot about 2 hours ago");
     assert!(chip.tooltip.contains("Grok Bot"), "{}", chip.tooltip);
     // at exactly 60 minutes it is neither dimmed nor chipped; the app rewrites its cache only every
     // 30 to 40 minutes, so a 40 minute old reading is normal
