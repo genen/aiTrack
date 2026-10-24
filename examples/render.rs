@@ -564,7 +564,7 @@ fn main() {
             Box::new(|_, _, _| {}),
         ),
     ];
-    // the horizontal layout: blocks side by side, the detail pane under the row, Settings centred
+    // the horizontal layout: blocks side by side, the detail pane under the row
     let wide = aitrack::view::horizontal_width(vendor::demo_vendors(now).len(), 310.0);
     for (name, setup) in [
         (
@@ -580,13 +580,6 @@ fn main() {
                 mock(ui);
                 app.settings.set_horizontal(true);
                 ui.expanded = Some((VendorId::Claude, Kind::Session));
-            }),
-        ),
-        (
-            "horizontal_settings",
-            Box::new(move |_: &Context, ui: &mut AitrackUi, app: &Arc<App>| {
-                app.settings.set_horizontal(true);
-                ui.screen = Screen::Settings;
             }),
         ),
     ] {

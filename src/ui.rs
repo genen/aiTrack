@@ -176,6 +176,8 @@ pub struct AitrackUi {
     /// The window shape last set up: small or full, horizontal or vertical, and the number of
     /// vendor blocks in a row (0 when vertical, where the count does not change the width).
     layout_sent: Option<(bool, bool, usize)>,
+    /// The window shows the horizontal row: the setting, on the home view or the small window.
+    horizontal_shown: bool,
     /// The title bar state last set up (`false` while small).
     decor_sent: Option<bool>,
     /// A width `apply_layout` asked for that the window has not reached yet, and when: the height
@@ -281,6 +283,7 @@ impl AitrackUi {
             // the window was built for the saved mode (see `run`); the first frame sets the width
             layout_sent: None,
             decor_sent: Some(!first.small),
+            horizontal_shown: first.horizontal,
             width_sent: None,
             small_h_sent: None,
             strip_h: 0.0,
@@ -401,7 +404,10 @@ impl AitrackUi {
     /// again when a vendor appears or goes.
     fn save_block_width(&self, s: &crate::placement::Sample) {
         let v = self.app.settings.get();
-        if v.horizontal && !v.small && self.layout_sent == Some((false, true, self.strip_n)) {
+        if self.horizontal_shown
+            && !v.small
+            && self.layout_sent == Some((false, true, self.strip_n))
+        {
             let w = view::block_width_for(s.width as f32, self.strip_n) as f64;
             if v.block_width.is_none_or(|b| (b - w).abs() > 0.5) {
                 self.app.settings.set_block_width(w.round());
@@ -413,7 +419,7 @@ impl AitrackUi {
     /// width: while in either, the saved width stays the vertical full window's.
     fn keep_full_width(&self, mut pos: crate::settings::WindowPos) -> crate::settings::WindowPos {
         let v = self.app.settings.get();
-        if v.small || v.horizontal {
+        if v.small || self.horizontal_shown {
             pos.width = v.window.and_then(|w| w.width);
         }
         pos
@@ -561,7 +567,7 @@ impl AitrackUi {
         if self.small_h_sent.is_none_or(|s| (s - h).abs() > 1.0) {
             self.small_h_sent = Some(h);
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(
-                view::small_width(st.settings.horizontal, home.vendors.len()),
+                view::small_width(self.horizontal_shown, home.vendors.len()),
                 h,
             )));
         }
@@ -636,7 +642,10 @@ impl AitrackUi {
             }
         }
 
-        let horizontal = st.settings.horizontal;
+        // Settings and Stats always show at one block's width: a layout picked in Settings applies
+        // once it is closed, and the wide window narrows while they are open
+        self.horizontal_shown = st.settings.horizontal && (small || self.screen == Screen::Home);
+        let horizontal = self.horizontal_shown;
         self.apply_layout(ctx, small, horizontal, home.vendors.len());
         if small {
             self.draw_small(ctx, &pal, &st, &home, &vendors);
@@ -701,14 +710,6 @@ impl AitrackUi {
                 ui.add_space(4.0);
                 content_bottom = match self.screen {
                     Screen::Home => self.home(ui, &pal, &st, &home, &vendors),
-                    // in the wide horizontal window these keep their usual width, centered
-                    Screen::Settings | Screen::Stats if horizontal => {
-                        let w = self.vertical_width() - view::FULL_MARGIN_X;
-                        centered_column(ui, w, |ui| match self.screen {
-                            Screen::Settings => self.settings(ui, &pal, &st),
-                            _ => self.stats_view(ui, &pal, now),
-                        })
-                    }
                     Screen::Settings => self.settings(ui, &pal, &st),
                     Screen::Stats => self.stats_view(ui, &pal, now),
                 };
@@ -971,7 +972,7 @@ impl AitrackUi {
         vendors: &[Vendor],
         small: bool,
     ) {
-        let horizontal = st.settings.horizontal;
+        let horizontal = self.horizontal_shown;
         let n = home.vendors.len();
         ui.spacing_mut().item_spacing.y = 0.0;
         let mut stack: Option<Rect> = None;
@@ -1085,7 +1086,7 @@ impl AitrackUi {
         n: usize,
         small: bool,
     ) -> Rect {
-        let horizontal = st.settings.horizontal;
+        let horizontal = self.horizontal_shown;
         let remaining = st.settings.remaining();
         let (first, last) = (i == 0, i + 1 == n);
         let r = STACK_RADIUS;
@@ -2024,25 +2025,6 @@ impl AitrackUi {
 }
 
 /// Cut `text` with an ellipsis so it fits `max_w` in `font`.
-/// Lay `add` out in a column `w` points wide in the middle of the space left (all of it when that
-/// is narrower).
-fn centered_column<R>(ui: &mut Ui, w: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
-    let avail = ui.available_rect_before_wrap();
-    if avail.width() <= w + 1.0 {
-        return add(ui);
-    }
-    let left = (avail.center().x - w / 2.0).round();
-    let rect = Rect::from_min_max(
-        Pos2::new(left, avail.top()),
-        Pos2::new(left + w, avail.bottom()),
-    );
-    ui.scope_builder(
-        egui::UiBuilder::new().max_rect(rect).layout(*ui.layout()),
-        add,
-    )
-    .inner
-}
-
 fn ellipsize(p: &Painter, text: &str, font: &FontId, max_w: f32) -> String {
     let width = |t: &str| {
         p.layout_no_wrap(t.to_owned(), font.clone(), Color32::WHITE)

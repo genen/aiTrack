@@ -249,6 +249,11 @@ mod window {
                 .expect("the Layout row is in Appearance");
         w.click(horizontal.center());
         assert!(w.app.settings.get().horizontal);
+        // Settings stays one block wide until it is closed
+        assert_eq!(w.width, 310.0, "{:?}", w.sizes);
+        w.ui.screen = Screen::Home;
+        w.frame(vec![]);
+        w.frame(vec![]);
         let n = vendor::demo_vendors(Utc::now()).len();
         assert_eq!(
             w.width,
@@ -256,7 +261,11 @@ mod window {
             "{:?}",
             w.sizes
         );
+        // opening Settings narrows the wide window to one block again
+        w.ui.screen = Screen::Settings;
         w.frame(vec![]);
+        w.frame(vec![]);
+        assert_eq!(w.width, 310.0, "{:?}", w.sizes);
         let vertical =
             w.ui.layout_rects
                 .iter()
@@ -265,8 +274,11 @@ mod window {
                 .unwrap();
         w.click(vertical.center());
         assert!(!w.app.settings.get().horizontal);
-        // the vertical width again, and the wide one was not saved as the vertical window's
-        assert_eq!(w.width, view::default_inner_size_pt().0, "{:?}", w.sizes);
+        w.ui.screen = Screen::Home;
+        w.frame(vec![]);
+        w.frame(vec![]);
+        // vertical: the vertical width, and the wide one was never saved as the vertical window's
+        assert_eq!(w.width, 310.0, "{:?}", w.sizes);
         let saved = w.app.settings.get().window.and_then(|p| p.width);
         assert!(saved.is_none_or(|s| s < 400.0), "{saved:?}");
     }

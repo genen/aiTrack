@@ -498,7 +498,8 @@ stacking them. The header and the status line stay where they are.
   share the width evenly, down to 270 points each. aiTrack remembers that width; when a tool appears or is hidden,
   the window fits the new number of blocks.
 - **Details:** clicking a row opens its detail pane under the whole row, full width.
-- **Settings and Stats** keep their usual width, centered in the wide window.
+- **Settings and Stats** open at the width of one block; closing them brings the row back. A layout picked in
+  Settings takes effect when you close Settings.
 - **Small window:** it follows the same setting, so its blocks sit side by side too.
 - **Vertical again:** the window goes back to the width it had in the vertical layout.
 
