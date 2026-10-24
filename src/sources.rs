@@ -237,6 +237,21 @@ fn credential_sources(env: &Env) -> Vec<Box<dyn CredentialSource>> {
     )
 }
 
+/// Claude's plan name ("Max", "Pro") from the first Claude Code login file that has one. The macOS
+/// Keychain is not asked: reading it on a timer could bring up an access dialog.
+pub fn claude_plan(env: &Env) -> Option<String> {
+    live::credentials_files(
+        env.claude_config_dir.as_ref().and_then(|p| p.to_str()),
+        env.home.clone(),
+    )
+    .iter()
+    .find_map(|p| {
+        let mut file = std::fs::File::open(p).ok()?;
+        let bytes = crate::endpoints::read_capped(&mut file).ok()?;
+        live::parse_subscription(&bytes)
+    })
+}
+
 // ---------------------------------------------------------------- the source abstraction
 
 /// One reading of the two plan windows at a point in time.
@@ -1284,6 +1299,10 @@ pub fn diagnose(env: &Env, now: DateTime<Utc>) -> String {
             s.label()
         ));
     }
+    line(format!(
+        "   plan (subscriptionType in .credentials.json): {}",
+        claude_plan(env).unwrap_or_else(|| "not found".into())
+    ));
     line(String::new());
     o.push_str(&crate::grok::diagnose(env, now));
     o.push_str(&crate::grok_bot::diagnose(env, now));

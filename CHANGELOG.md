@@ -3,6 +3,13 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.12-beta] - 2026-10-24
+
+### Added
+- Claude's row tooltips show your plan ("Plan: Max"), like Grok and ChatGPT. It is read from the `subscriptionType`
+  field of Claude Code's `~/.claude/.credentials.json` (nothing else from that file), and `aitrack --sources` lists
+  it. The macOS Keychain is not asked, so on a Mac without that file the line is left out.
+
 ## [0.5.11-beta] - 2026-10-24
 
 ### Added

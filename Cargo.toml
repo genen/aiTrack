@@ -1,6 +1,6 @@
 [package]
 name = "aitrack"
-version = "0.5.11-beta"
+version = "0.5.12-beta"
 edition = "2021"
 # File::try_lock (the single-instance lock) needs Rust 1.89
 rust-version = "1.89"

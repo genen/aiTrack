@@ -899,3 +899,101 @@ fn live_local_polling_shows_live_instead_of_a_countdown() {
     );
     assert!(s.text.ends_with("next in 15 min"), "{}", s.text);
 }
+
+#[test]
+fn claude_plan_name_comes_from_the_login_file_without_the_token() {
+    use aitrack::live::parse_subscription;
+    let creds = |t: &str| {
+        format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"sk-secret","subscriptionType":{t},"rateLimitTier":"default_claude_max_20x"}}}}"#
+        )
+    };
+    assert_eq!(
+        parse_subscription(creds("\"max\"").as_bytes()).as_deref(),
+        Some("Max")
+    );
+    assert_eq!(
+        parse_subscription(creds("\"pro\"").as_bytes()).as_deref(),
+        Some("Pro")
+    );
+    assert_eq!(
+        parse_subscription(creds("\"team\"").as_bytes()).as_deref(),
+        Some("Team")
+    );
+    assert_eq!(
+        parse_subscription(creds("\"enterprise\"").as_bytes()).as_deref(),
+        Some("Enterprise")
+    );
+    assert_eq!(
+        parse_subscription(creds("\"newplan\"").as_bytes()).as_deref(),
+        Some("Newplan")
+    );
+    for none in ["null", "\"\"", "\"unknown\"", "3"] {
+        assert_eq!(parse_subscription(creds(none).as_bytes()), None, "{none}");
+    }
+    assert_eq!(parse_subscription(b"not json"), None);
+    assert_eq!(
+        parse_subscription(br#"{"claudeAiOauth":{"accessToken":"t"}}"#),
+        None
+    );
+
+    // $CLAUDE_CONFIG_DIR first, then ~/.claude; a file without the field falls through
+    let d = TempDir::new();
+    let mut env = Env::new(Os::Linux);
+    env.home = Some(d.join("home"));
+    assert_eq!(sources::claude_plan(&env), None, "no login file");
+    std::fs::create_dir_all(d.join("home/.claude")).unwrap();
+    std::fs::write(d.join("home/.claude/.credentials.json"), creds("\"pro\"")).unwrap();
+    assert_eq!(sources::claude_plan(&env).as_deref(), Some("Pro"));
+    std::fs::create_dir_all(d.join("cfg")).unwrap();
+    env.claude_config_dir = Some(d.join("cfg"));
+    std::fs::write(
+        d.join("cfg/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"t"}}"#,
+    )
+    .unwrap();
+    assert_eq!(sources::claude_plan(&env).as_deref(), Some("Pro"));
+    std::fs::write(d.join("cfg/.credentials.json"), creds("\"max\"")).unwrap();
+    assert_eq!(sources::claude_plan(&env).as_deref(), Some("Max"));
+    let report = sources::diagnose(&env, now());
+    assert!(
+        report.contains("plan (subscriptionType in .credentials.json): Max"),
+        "{report}"
+    );
+    assert!(!report.contains("sk-secret"));
+}
+
+#[test]
+fn claude_tooltip_shows_the_plan_like_chatgpt() {
+    let rs: Vec<Reading> = [(60, 20.0), (0, 30.0)]
+        .iter()
+        .map(|(m, s)| rd(*m, *s, 5.0))
+        .collect();
+    let mut st = build_state(
+        &rs,
+        Values::default(),
+        Status {
+            error: None,
+            polling: false,
+            next_in: Some(600.0),
+            polls: 1,
+            sample: None,
+            live: false,
+        },
+        now(),
+    );
+    let tips = |st: &aitrack::state::State| -> Vec<String> {
+        view::build_home(st, now()).vendors[0].rows[0]
+            .tip
+            .iter()
+            .map(|l| l.text.clone())
+            .collect()
+    };
+    assert!(!tips(&st).iter().any(|l| l.starts_with("Plan:")));
+    st.tier = Some("Max".into());
+    assert!(
+        tips(&st).contains(&"Plan: Max".to_string()),
+        "{:?}",
+        tips(&st)
+    );
+}

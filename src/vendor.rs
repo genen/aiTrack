@@ -167,6 +167,7 @@ pub fn from_state_at(s: &State, now: DateTime<Utc>) -> Vec<Vendor> {
     let mut out = Vec::new();
     if let Some(p) = s.plan.as_ref().filter(|_| s.claude_on) {
         let mut v = claude(p, &s.models);
+        v.tier = s.tier.clone();
         v.current = crate::state::reading_is_current(p, &s.settings, now);
         out.push(v);
     }
@@ -275,6 +276,7 @@ pub fn demo_vendors(now: DateTime<Utc>) -> Vec<Vendor> {
             v.observed_at = Some(now);
         }
         if id == VendorId::Claude {
+            v.tier = Some("Max".into());
             v.models = vec![
                 ModelLimit {
                     name: "Fable".into(),
