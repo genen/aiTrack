@@ -290,7 +290,7 @@ fn collector_prunes_its_store_and_extra_files_together() {
     let settings = Arc::new(Settings::load(dir.join("s.json")));
     let c = Collector::new(store, settings, Box::new(|_| Ok(Value::Null)));
     let bot_store = JsonlStore::new(&bot);
-    c.add_pruner("bot", move |now| bot_store.prune(now));
+    c.add_pruner("bot", move |now, limit| bot_store.prune_limited(now, limit));
     let reports = c.prune_blocking(now());
     assert_eq!(reports.len(), 2);
     assert_eq!(reports[0].1.as_ref().map(|r| r.removed), Ok(1));

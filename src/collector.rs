@@ -11,10 +11,11 @@
 //! * After a failure the next poll waits at least as long as the server's `Retry-After`.
 //! * After loading the history, and then once a day, the history files are pruned (see
 //!   [`Store::prune`]); `prune_now()` asks for a run at once. Pruning never runs on the GUI thread.
+//!   With a [`PruneGuard`] set, a prune that would delete too many days at once is held (see there).
 
 use crate::live::{CollectError, Poller};
 use crate::settings::Settings;
-use crate::store::{PruneReport, Store};
+use crate::store::{PruneGuard, PruneReport, Store};
 use crate::util::parse_ts;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -24,8 +25,10 @@ use std::time::{Duration, Instant};
 
 pub type PollFn = Box<dyn Fn(&dyn Store) -> Result<Value, CollectError> + Send + Sync>;
 type Waker = Box<dyn Fn() + Send + Sync>;
-/// Prunes one more history file (beyond the collector's own store), e.g. the Grok Bot's.
-pub type Pruner = Box<dyn Fn(DateTime<Utc>) -> std::io::Result<PruneReport> + Send + Sync>;
+/// Prunes one more history file (beyond the collector's own store), e.g. the Grok Bot's, with the
+/// clock guard's limit (see [`Store::prune_limited`]).
+pub type Pruner =
+    Box<dyn Fn(DateTime<Utc>, Option<usize>) -> std::io::Result<PruneReport> + Send + Sync>;
 /// What one prune run did, by file: the report, or why it failed.
 pub type PruneResult = (String, Result<PruneReport, String>);
 /// Told what each prune run did, and whether it was asked for.
@@ -110,6 +113,7 @@ struct Shared {
     /// files with fixed dates leave them off, so the real clock never deletes their data).
     auto_prune: std::sync::atomic::AtomicBool,
     on_prune: Mutex<Option<PruneDone>>,
+    guard: Mutex<Option<Arc<PruneGuard>>>,
     local_override: Mutex<Option<Duration>>,
     state: Mutex<State>,
     cv: Condvar,
@@ -151,6 +155,7 @@ impl Collector {
                 pruners: Mutex::new(Vec::new()),
                 auto_prune: std::sync::atomic::AtomicBool::new(false),
                 on_prune: Mutex::new(None),
+                guard: Mutex::new(None),
                 local_override: Mutex::new(None),
                 state: Mutex::new(state),
                 cv: Condvar::new(),
@@ -188,7 +193,7 @@ impl Collector {
     pub fn add_pruner(
         &self,
         name: impl Into<String>,
-        f: impl Fn(DateTime<Utc>) -> std::io::Result<PruneReport> + Send + Sync + 'static,
+        f: impl Fn(DateTime<Utc>, Option<usize>) -> std::io::Result<PruneReport> + Send + Sync + 'static,
     ) {
         lock(&self.shared.pruners).push((name.into(), Box::new(f)));
     }
@@ -197,6 +202,12 @@ impl Collector {
     /// was asked for with [`prune_now`](Self::prune_now).
     pub fn set_on_prune(&self, f: impl Fn(&[PruneResult], bool) + Send + Sync + 'static) {
         *lock(&self.shared.on_prune) = Some(Box::new(f));
+    }
+
+    /// Hold prunes that would delete too many days at once (see [`PruneGuard`]); every prune of
+    /// this collector, automatic or asked for, goes through it. Without one nothing is held.
+    pub fn set_prune_guard(&self, guard: Arc<PruneGuard>) {
+        *lock(&self.shared.guard) = Some(guard);
     }
 
     /// Turn the daily automatic prune on or off (off by default; the app turns it on).
@@ -215,9 +226,10 @@ impl Collector {
         self.shared.cv.notify_all();
     }
 
-    /// Run one prune on the calling thread with an explicit `now` (tests, `--prune`-style callers).
+    /// Run one prune on the calling thread with an explicit `now` (tests, `--prune`-style callers),
+    /// reported like an asked-for run.
     pub fn prune_blocking(&self, now: DateTime<Utc>) -> Vec<PruneResult> {
-        self.shared.prune(now)
+        self.shared.prune_and_report(now, true)
     }
 
     /// Called (from the collector thread) whenever the status changes, e.g. to repaint the GUI.
@@ -384,12 +396,20 @@ impl Shared {
     }
 
     fn prune(&self, now: DateTime<Utc>) -> Vec<PruneResult> {
-        let mut out = vec![(
-            self.store.describe(),
-            self.store.prune(now).map_err(|e| e.to_string()),
-        )];
+        let guard = lock(&self.guard).clone();
+        let run = |name: &str, f: &dyn Fn(Option<usize>) -> std::io::Result<PruneReport>| {
+            let limit = guard.as_ref().and_then(|g| g.limit_for(name));
+            let r = f(limit);
+            if let Some(g) = &guard {
+                g.record(name, &r);
+            }
+            (name.to_owned(), r.map_err(|e| e.to_string()))
+        };
+        let mut out = vec![run(&self.store.describe(), &|l| {
+            self.store.prune_limited(now, l)
+        })];
         for (name, f) in lock(&self.pruners).iter() {
-            out.push((name.clone(), f(now).map_err(|e| e.to_string())));
+            out.push(run(name, &|l| f(now, l)));
         }
         out
     }
@@ -409,6 +429,10 @@ impl Shared {
             st.last_prune = Some(now);
             manual
         };
+        self.prune_and_report(now, manual);
+    }
+
+    fn prune_and_report(&self, now: DateTime<Utc>, manual: bool) -> Vec<PruneResult> {
         let reports = self.prune(now);
         if let Some(f) = lock(&self.on_prune).as_ref() {
             f(&reports, manual);
@@ -416,10 +440,11 @@ impl Shared {
         if manual
             || reports
                 .iter()
-                .any(|(_, r)| r.as_ref().map_or(true, PruneReport::changed))
+                .any(|(_, r)| r.as_ref().map_or(true, |rep| rep.changed() || rep.held()))
         {
             self.wake_ui();
         }
+        reports
     }
 
     fn run(&self) {

@@ -39,6 +39,7 @@ mod placement;
 mod plan_windows;
 mod pricing;
 mod projects_cli;
+mod prune_guard;
 mod prune_script;
 mod release_review;
 mod release_workflows;

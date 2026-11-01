@@ -384,7 +384,16 @@ impl BotTracker {
     /// Prune the history file (see [`Store::prune`]). Runs on the Grok collector thread, the same
     /// thread that appends, so the two never interleave.
     pub fn prune(&self, now: DateTime<Utc>) -> std::io::Result<crate::store::PruneReport> {
-        let rep = self.store.prune(now)?;
+        self.prune_limited(now, None)
+    }
+
+    /// [`prune`](Self::prune) under the clock guard's limit (see [`Store::prune_limited`]).
+    pub fn prune_limited(
+        &self,
+        now: DateTime<Utc>,
+        max_days: Option<usize>,
+    ) -> std::io::Result<crate::store::PruneReport> {
+        let rep = self.store.prune_limited(now, max_days)?;
         if rep.changed() {
             self.rebuild();
             self.version.fetch_add(1, Ordering::SeqCst);

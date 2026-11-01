@@ -40,7 +40,17 @@ pub trait Store: Send + Sync {
     fn prepare(&self) {}
     /// Delete the records that fall out of retention (see [`prune_cutoff`]). Stores that keep
     /// nothing on disk do nothing.
-    fn prune(&self, _now: DateTime<Utc>) -> io::Result<PruneReport> {
+    fn prune(&self, now: DateTime<Utc>) -> io::Result<PruneReport> {
+        self.prune_limited(now, None)
+    }
+    /// [`prune`](Self::prune), but when the records to delete fall on more than `max_days`
+    /// distinct days nothing is changed and the report says so (see [`PruneReport::held_days`]);
+    /// `None` prunes whatever is due. This is the clock guard of [`PruneGuard`].
+    fn prune_limited(
+        &self,
+        _now: DateTime<Utc>,
+        _max_days: Option<usize>,
+    ) -> io::Result<PruneReport> {
         Ok(PruneReport::default())
     }
     /// Size of the backing file in bytes, when there is one.
@@ -68,6 +78,11 @@ pub struct PruneReport {
     pub corrupt: usize,
     pub bytes_before: u64,
     pub bytes_after: u64,
+    /// Non-zero when the run was held by the clock guard: the expired records fall on this many
+    /// distinct days, more than the limit asked for, so nothing was changed (not even the `.bak`).
+    pub held_days: usize,
+    /// Records the held run would have deleted.
+    pub held_records: usize,
 }
 
 impl PruneReport {
@@ -76,8 +91,21 @@ impl PruneReport {
         self.removed > 0 || self.corrupt > 0
     }
 
+    /// Was the run held by the clock guard (nothing changed)?
+    pub fn held(&self) -> bool {
+        self.held_days > 0
+    }
+
     /// One line for the log and the Settings window: `removed 120 records older than 90 days, ...`.
     pub fn describe(&self) -> String {
+        if self.held() {
+            return format!(
+                "held: would delete {} record{} from {} days of history at once; {CLOCK_WARNING}",
+                self.held_records,
+                if self.held_records == 1 { "" } else { "s" },
+                self.held_days
+            );
+        }
         if !self.changed() {
             return format!("nothing older than {KEEP_DAYS} days ({} kept)", self.kept);
         }
@@ -117,10 +145,7 @@ pub fn human_size(n: u64) -> String {
 /// every billing window it reports ended before `cutoff` too, so a window is never cut in half and
 /// the current and previous windows (whatever their length) keep all their readings.
 pub fn expired(record: &Value, cutoff: DateTime<Utc>) -> bool {
-    let at = ["observed_at", "ts"]
-        .iter()
-        .find_map(|k| record.get(*k).and_then(Value::as_str).and_then(parse_ts));
-    let Some(at) = at else {
+    let Some(at) = record_time(record) else {
         return false; // never delete what cannot be dated
     };
     if at >= cutoff {
@@ -134,6 +159,13 @@ pub fn expired(record: &Value, cutoff: DateTime<Utc>) -> bool {
             .and_then(parse_ts)
             .is_some_and(|r| r >= cutoff)
     })
+}
+
+/// When a record was observed (`observed_at`, else `ts`).
+fn record_time(record: &Value) -> Option<DateTime<Utc>> {
+    ["observed_at", "ts"]
+        .iter()
+        .find_map(|k| record.get(*k).and_then(Value::as_str).and_then(parse_ts))
 }
 
 /// A step of [`JsonlStore::prune_with`], for tests that simulate a crash part-way through.
@@ -183,6 +215,17 @@ impl JsonlStore {
         now: DateTime<Utc>,
         hook: &mut dyn FnMut(PruneStep) -> bool,
     ) -> io::Result<PruneReport> {
+        self.prune_limited_with(now, None, hook)
+    }
+
+    /// [`prune_with`](Self::prune_with) under the clock guard's limit (see
+    /// [`Store::prune_limited`]). A held run returns before anything is written.
+    pub fn prune_limited_with(
+        &self,
+        now: DateTime<Utc>,
+        max_days: Option<usize>,
+        hook: &mut dyn FnMut(PruneStep) -> bool,
+    ) -> io::Result<PruneReport> {
         let cutoff = prune_cutoff(now);
         let data = match std::fs::read(&self.path) {
             Ok(d) => d,
@@ -195,6 +238,8 @@ impl JsonlStore {
         };
         let mut kept: Vec<u8> = Vec::with_capacity(data.len());
         let mut corrupt: Vec<u8> = Vec::new();
+        // the UTC calendar days the expired records were observed on
+        let mut days = std::collections::BTreeSet::new();
         for line in data.split_inclusive(|b| *b == b'\n') {
             let body = line.strip_suffix(b"\n").unwrap_or(line);
             let body = body.strip_suffix(b"\r").unwrap_or(body);
@@ -205,6 +250,9 @@ impl JsonlStore {
                 Ok(v @ Value::Object(_)) => {
                     if expired(&v, cutoff) {
                         rep.removed += 1;
+                        if let Some(at) = record_time(&v) {
+                            days.insert(at.date_naive());
+                        }
                     } else {
                         rep.kept += 1;
                         // kept lines are copied byte for byte, never re-serialised
@@ -218,6 +266,17 @@ impl JsonlStore {
                     corrupt.push(b'\n');
                 }
             }
+        }
+        if max_days.is_some_and(|m| days.len() > m) {
+            return Ok(PruneReport {
+                kept: rep.kept + rep.removed,
+                bytes_after: rep.bytes_before,
+                held_days: days.len(),
+                held_records: rep.removed,
+                removed: 0,
+                corrupt: 0,
+                ..rep
+            });
         }
         if !rep.changed() {
             rep.bytes_after = rep.bytes_before;
@@ -377,8 +436,12 @@ impl Store for JsonlStore {
         self.path.display().to_string()
     }
 
-    fn prune(&self, now: DateTime<Utc>) -> io::Result<PruneReport> {
-        self.prune_with(now, &mut |_| true)
+    fn prune_limited(
+        &self,
+        now: DateTime<Utc>,
+        max_days: Option<usize>,
+    ) -> io::Result<PruneReport> {
+        self.prune_limited_with(now, max_days, &mut |_| true)
     }
 
     fn size(&self) -> Option<u64> {
@@ -497,9 +560,13 @@ impl Store for History {
 
     /// Prunes under the lock, so no append can interleave, then reloads the readings if anything
     /// was removed.
-    fn prune(&self, now: DateTime<Utc>) -> io::Result<PruneReport> {
+    fn prune_limited(
+        &self,
+        now: DateTime<Utc>,
+        max_days: Option<usize>,
+    ) -> io::Result<PruneReport> {
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let rep = self.inner.prune(now)?;
+        let rep = self.inner.prune_limited(now, max_days)?;
         if rep.changed() && st.loaded {
             let mut readings = Vec::new();
             self.inner
@@ -512,5 +579,142 @@ impl Store for History {
 
     fn size(&self) -> Option<u64> {
         self.inner.size()
+    }
+}
+
+/// A prune that would delete records from more than this many distinct days at once is held by
+/// [`PruneGuard`] (a normal daily prune deletes one or two days).
+pub const GUARD_DAYS: usize = 30;
+
+/// What the window and the toast say when the guard held a prune.
+pub const CLOCK_WARNING: &str = "Check Clock about to delete 30+ days of history on next launch.";
+
+/// The clock guard of the 90-day prune.
+///
+/// The cutoff is worked out from the system clock, so a clock that jumped months ahead would make
+/// one prune delete most of the history (and the next prune would overwrite the only `.bak`). A
+/// prune that would delete records from more than [`GUARD_DAYS`] distinct calendar days is
+/// therefore held for the rest of this run: nothing is changed, the user is warned, and the file
+/// is remembered on disk. On the next launch (the restart is the user's confirmation) that file's
+/// first prune runs without the limit, worked out again with the clock as it is then: a fixed clock
+/// deletes only what is really older than 90 days, a clock still ahead deletes what it was warned
+/// about. Then the file leaves the list and the guard holds it again.
+///
+/// Distinct days, not the span from the oldest to the newest record, so a single stray record
+/// with a very old time cannot set it off, and gaps in usage do not count.
+pub struct PruneGuard {
+    path: PathBuf,
+    state: Mutex<GuardState>,
+}
+
+#[derive(Default)]
+struct GuardState {
+    /// Files held on the last launch: their first prune this run has no limit.
+    allowed: std::collections::BTreeSet<String>,
+    /// Files held in this run (they prune on the next launch).
+    held: std::collections::BTreeSet<String>,
+    /// The first hold of this run has not been told to the window yet.
+    tell: bool,
+}
+
+impl PruneGuard {
+    /// Read the list saved by the last run at `path` (missing or unreadable = empty).
+    pub fn load(path: impl Into<PathBuf>) -> Self {
+        let path = path.into();
+        let allowed = std::fs::read(&path)
+            .ok()
+            .and_then(|d| serde_json::from_slice::<Value>(&d).ok())
+            .and_then(|v| {
+                v.get("prune_on_next_launch")?.as_array().map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(str::to_owned))
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+        Self {
+            path,
+            state: Mutex::new(GuardState {
+                allowed,
+                ..GuardState::default()
+            }),
+        }
+    }
+
+    /// Where the list is kept.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, GuardState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The limit for the next prune of `name` (see [`Store::prune_limited`]).
+    pub fn limit_for(&self, name: &str) -> Option<usize> {
+        if self.lock().allowed.contains(name) {
+            None
+        } else {
+            Some(GUARD_DAYS)
+        }
+    }
+
+    /// Note what a prune of `name` did: a held run is saved for the next launch, and a run that
+    /// used the allowance from the last launch (and did not fail) re-arms the guard for `name`.
+    pub fn record(&self, name: &str, result: &io::Result<PruneReport>) {
+        let mut st = self.lock();
+        let before = (st.allowed.clone(), st.held.clone());
+        match result {
+            Ok(rep) if rep.held() => {
+                if st.held.is_empty() {
+                    st.tell = true;
+                }
+                st.held.insert(name.to_owned());
+            }
+            Ok(_) => {
+                st.allowed.remove(name);
+            }
+            Err(_) => {} // the file is as it was: keep whatever allowance there is
+        }
+        if (st.allowed.clone(), st.held.clone()) != before {
+            self.save(&st);
+        }
+    }
+
+    /// Files whose prune waits for the next launch, as saved on disk.
+    pub fn pending(&self) -> Vec<String> {
+        let st = self.lock();
+        st.allowed.union(&st.held).cloned().collect()
+    }
+
+    /// Did the guard hold a prune in this run? (the Diagnostics line)
+    pub fn held_this_run(&self) -> bool {
+        !self.lock().held.is_empty()
+    }
+
+    /// `true` once, after the first hold of this run (the toast and the switch to Diagnostics).
+    pub fn take_first_hold(&self) -> bool {
+        std::mem::take(&mut self.lock().tell)
+    }
+
+    /// Write the list (temporary file, then renamed over the real one); an empty list removes it.
+    fn save(&self, st: &GuardState) {
+        let names: Vec<&String> = st.allowed.union(&st.held).collect();
+        if names.is_empty() {
+            let _ = std::fs::remove_file(&self.path);
+            return;
+        }
+        if let Some(dir) = self.path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let text = serde_json::json!({ "prune_on_next_launch": names }).to_string();
+        let tmp = self.path.with_extension("json.tmp");
+        let written = std::fs::File::create(&tmp)
+            .and_then(|mut f| f.write_all(text.as_bytes()).and_then(|()| f.sync_all()))
+            .and_then(|()| rename_retrying(&tmp, &self.path));
+        if let Err(e) = written {
+            let _ = std::fs::remove_file(&tmp);
+            crate::alerts::log_line(&format!("could not save {}: {e}", self.path.display()));
+        }
     }
 }
