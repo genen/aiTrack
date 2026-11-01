@@ -189,6 +189,33 @@ fn predictive_alert_needs_a_pace_that_empties_the_window_within_30_minutes_befor
 }
 
 #[test]
+fn predictive_alert_needs_a_reading_the_window_still_shows_a_pace_for() {
+    // the same 70 pts/h climb to 80%, but the newest reading is 90 minutes old: the window has
+    // dropped pace and run-out for it, so no "empty in" toast either
+    let t = TempDir::new();
+    let (a, rec) = (alerts(&t), Recorder::default());
+    let old = plan(&[(150, 10.0), (120, 45.0), (90, 80.0)], 180, 5.0);
+    assert!(
+        aitrack::analysis::empty_before_reset(old.session.as_ref().unwrap()).is_some(),
+        "the old reading alone would predict a run-out"
+    );
+    let sent = a.evaluate("Claude", &old, now(), &rec);
+    assert!(
+        sent.iter().all(|n| n.kind != AlertKind::Predictive),
+        "{sent:?}"
+    );
+    // the % threshold still applies to the old value
+    assert!(sent.iter().any(|n| n.kind == AlertKind::Info), "{sent:?}");
+    // a fresh reading in the same window still gets it
+    let fresh = plan(&[(60, 10.0), (30, 45.0), (0, 80.0)], 180, 5.0);
+    let sent = a.evaluate("Claude", &fresh, now(), &rec);
+    assert!(
+        sent.iter().any(|n| n.kind == AlertKind::Predictive),
+        "{sent:?}"
+    );
+}
+
+#[test]
 fn predictive_alert_stays_quiet_when_it_is_not_urgent() {
     let t = TempDir::new();
     let rec = Recorder::default();

@@ -62,6 +62,9 @@ pub struct CodexState {
     pub models: Vec<ModelLimit>,
     pub credits: Option<crate::reading::CreditBalance>,
     pub banked_resets: Option<u64>,
+    /// A live (not session-log) reading exists in the current weekly window: a newer log sample is
+    /// then not a sign that live usage failed.
+    pub live_in_window: bool,
     /// Antigravity: when the weekly limit will be full again (newest reading).
     pub full_at: Option<String>,
     /// Tracking is switched on (setting, or automatic because the Codex folder exists).
@@ -85,6 +88,33 @@ pub struct GrokState {
     pub bot_gauge: Option<crate::analysis::Gauge>,
 }
 
+/// When the current weekly window began (its reset time minus 7 days; the last 7 days without one).
+fn week_start(plan: Option<&Plan>, now: DateTime<Utc>) -> DateTime<Utc> {
+    plan.and_then(|p| p.weekly.as_ref())
+        .and_then(|w| w.resets_at.as_deref())
+        .and_then(crate::util::parse_ts)
+        .map(|r| r - chrono::Duration::days(7))
+        .unwrap_or(now - chrono::Duration::days(7))
+}
+
+/// `field` of the newest good reading of the current weekly window that has it. A Codex session
+/// log sample between live polls has no banked resets (and may lack credits or the plan): it must
+/// not blank what the last live reading of this week reported.
+fn newest_with<T>(
+    readings: &[Reading],
+    plan: Option<&Plan>,
+    now: DateTime<Utc>,
+    field: impl Fn(&Reading) -> Option<T>,
+) -> Option<T> {
+    let start = week_start(plan, now);
+    readings
+        .iter()
+        .filter(|r| r.ok && r.t.is_some_and(|t| t >= start && t <= now))
+        .filter_map(|r| field(r).map(|v| (r.t, v)))
+        .max_by_key(|(t, _)| *t)
+        .map(|(_, v)| v)
+}
+
 /// The per-model limits of the newest reading that reports them, from the current weekly window.
 /// Newest by time, not by file position (backfilled history is appended after newer records),
 /// among the readings that report per-model limits: a newer history sample has none and must not
@@ -95,12 +125,7 @@ fn current_models(
     plan: Option<&Plan>,
     now: DateTime<Utc>,
 ) -> Vec<ModelLimit> {
-    let week_start = plan
-        .and_then(|p| p.weekly.as_ref())
-        .and_then(|w| w.resets_at.as_deref())
-        .and_then(crate::util::parse_ts)
-        .map(|r| r - chrono::Duration::days(7))
-        .unwrap_or(now - chrono::Duration::days(7));
+    let week_start = week_start(plan, now);
     readings
         .iter()
         .filter(|r| r.ok && !r.limits.is_empty())
@@ -194,9 +219,9 @@ pub fn merged_diagnostics_of(lists: &[&[Diag]]) -> Vec<Diag> {
 /// Oldest reading still shown as the present for the snapshot sources (the desktop app, claude.json).
 pub const SNAPSHOT_MAX_AGE_MIN: f64 = 120.0;
 
-/// Is the newest reading recent enough to be shown as the current state? An old sample (for
-/// example a backfilled history row from yesterday) must never pass as "now", least of all a
-/// `0%` one.
+/// Is the newest reading recent enough to count as the present for alerts? An old sample (for
+/// example a backfilled history row from yesterday) must never trigger a toast. The window shows
+/// readings by the looser [`reading_is_shown`] rule instead (last value kept, dimmed when old).
 pub fn reading_is_current(plan: &Plan, settings: &Values, now: DateTime<Utc>) -> bool {
     let Some(t) = crate::util::parse_ts(&plan.last) else {
         return false;
@@ -220,13 +245,46 @@ pub fn reading_is_current(plan: &Plan, settings: &Values, now: DateTime<Utc>) ->
     age_min <= limit
 }
 
-/// Is Grok's newest reading worth showing as the last known value? Unlike
-/// [`reading_is_current`] there is no age limit: Grok's log only changes when the CLI is used, so a
-/// nine-hour-old weekly figure is still the best number there is (the view dims it and adds the
-/// data-age chip). Only a figure of a billing period that has ended is never shown (it is last
-/// week's), and a reading without a usable time is not shown.
-pub fn grok_reading_is_shown(plan: &Plan, now: DateTime<Utc>) -> bool {
+/// Is a vendor's newest reading worth showing as the last known value (every vendor, Claude
+/// included)? Unlike [`reading_is_current`] there is no age limit: a log or cache only changes when
+/// its app is used, so a nine-hour-old weekly figure is still the best number there is (the view
+/// dims it after an hour, adds the data-age chip and drops pace and run-out). Only a figure of a
+/// billing period that has ended is never shown (it is last week's), and a reading without a
+/// usable time is not shown. A single window whose own period ended is dashed by the view.
+pub fn reading_is_shown(plan: &Plan, now: DateTime<Utc>) -> bool {
     crate::util::parse_ts(&plan.last).is_some() && !weekly_period_ended(plan, now)
+}
+
+/// [`reading_is_shown`] for Claude, which has two windows: there is no age limit, each window is
+/// dashed on its own once it ended (see [`window_ended`]; a session still running stays shown after
+/// the weekly period ended), and the reading is not shown at all only once every window ended.
+pub fn claude_reading_is_shown(plan: &Plan, now: DateTime<Utc>) -> bool {
+    let Some(t) = crate::util::parse_ts(&plan.last) else {
+        return false;
+    };
+    [plan.session.as_ref(), plan.weekly.as_ref()]
+        .into_iter()
+        .flatten()
+        .any(|g| !window_ended(g, Some(t), now))
+}
+
+/// Has the window a gauge's reading (taken at `observed`) belongs to ended? Its reported reset
+/// time passed, or, with no reset time known, the reading is older than the window is long (a
+/// 5-hour session read six hours ago is over, whatever it said).
+pub fn window_ended(
+    g: &crate::analysis::Gauge,
+    observed: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> bool {
+    g.reset_passed
+        || (g.resets_at.is_none()
+            && g.window_hours > 0.0
+            && observed.is_some_and(|t| (now - t).num_minutes() as f64 > g.window_hours * 60.0))
+}
+
+/// Grok's name for [`reading_is_shown`].
+pub fn grok_reading_is_shown(plan: &Plan, now: DateTime<Utc>) -> bool {
+    reading_is_shown(plan, now)
 }
 
 /// Has the weekly billing period of `plan` really ended (its reset time is in the past)? A reset a
@@ -346,14 +404,33 @@ fn build_plan_state(
             ),
         })
         .collect();
+    let p = plan.as_ref();
+    let tier = newest_with(readings, p, now, |r| r.tier.clone()).or_else(|| {
+        readings
+            .iter()
+            .filter(|r| r.ok && r.tier.is_some())
+            .max_by_key(|r| r.t)
+            .and_then(|r| r.tier.clone())
+    });
+    let credits = newest_with(readings, p, now, |r| r.credits.clone());
+    let banked_resets = newest_with(readings, p, now, |r| r.banked_resets);
+    let live_in_window = newest_with(readings, p, now, |r| {
+        r.source
+            .as_deref()
+            .filter(|s| *s != crate::codex::SOURCE_LOG)
+            .map(|_| ())
+    })
+    .is_some();
     CodexState {
         plan,
         collector,
         diagnostics,
-        tier: newest.and_then(|r| r.tier.clone()),
+        // each from the newest reading of this week that has it (the plan name from any week)
+        tier,
         models,
-        credits: newest.and_then(|r| r.credits.clone()),
-        banked_resets: newest.and_then(|r| r.banked_resets),
+        credits,
+        banked_resets,
+        live_in_window,
         full_at: newest.and_then(|r| r.full_at.clone()),
         enabled,
     }

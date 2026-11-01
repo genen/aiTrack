@@ -84,20 +84,30 @@ fn stale_zero_percent_history_is_never_shown_as_the_current_reading() {
     };
     // the 0% samples are in the store as history ...
     assert_eq!(st.plan.as_ref().unwrap().session.as_ref().unwrap().pct, 0.0);
-    // ... but the view says there is no current data
+    // ... but the 5-hour session read 13 h ago is over: dashes, never a lit 0%
     let home = view::build_home(&st, Utc::now());
     let claude = &home.vendors[0];
-    for row in &claude.rows {
-        assert!(row.stale, "{row:?}");
-        assert_eq!(row.value, "--");
-        assert!(row.cells.iter().all(|c| *c == Cell::Off));
-        assert!(row.tip[0].text.contains("no current data"), "{:?}", row.tip);
-    }
+    let session = &claude.rows[0];
+    assert!(session.stale, "{session:?}");
+    assert_eq!(session.value, "--");
+    assert!(session.cells.iter().all(|c| *c == Cell::Off));
+    assert!(
+        session.tip[0].text.contains("its window has ended"),
+        "{:?}",
+        session.tip
+    );
+    // the weekly window is still running: its last value stays, dimmed, with the age chip
+    let weekly = &claude.rows[1];
+    assert_eq!(weekly.value, "0%");
+    assert!(weekly.dim && !weekly.stale, "{weekly:?}");
+    assert!(claude.age_chip.is_some());
     assert_eq!(claude.warn, None);
+    // the failed poll still says why, in short, with the full text on hover
     assert_eq!(home.status.dot, Dot::Err);
-    assert_eq!(
-        home.status.text,
-        "No current data \u{b7} Claude app closed?"
+    assert!(
+        home.status.text.ends_with("\u{b7} Claude app closed?"),
+        "{:?}",
+        home.status
     );
     assert!(home
         .status
@@ -110,7 +120,7 @@ fn stale_zero_percent_history_is_never_shown_as_the_current_reading() {
     let d = view::build_detail(v, Kind::Session, false);
     assert_eq!(
         (d.value.as_str(), d.resets.as_deref()),
-        ("--", Some("No current data"))
+        ("--", Some("Reset passed, waiting for a new reading"))
     );
     app.stop();
     app.collector.join();
@@ -150,28 +160,79 @@ fn freshness_limits_per_source() {
 }
 
 #[test]
-fn stale_reading_renders_dashes_and_current_one_renders_normally() {
-    let mk = |m: i64| {
+fn an_old_reading_keeps_its_value_dimmed_until_its_window_resets() {
+    let mk = |m: i64, resets_in: i64| {
         build_state(
-            &[reading(m, "desktop-cache", 55.0, Some(200))],
+            &[reading(m, "desktop-cache", 55.0, Some(resets_in))],
             Values::default(),
             status(),
             now(),
         )
     };
-    let fresh = view::build_home(&mk(3), now());
-    assert!(!fresh.vendors[0].rows[0].stale);
-    assert_eq!(fresh.vendors[0].rows[0].value, "55%");
-    let old = view::build_home(&mk(300), now());
-    assert!(old.vendors[0]
+    let fresh = view::build_home(&mk(3, 200), now());
+    let row = &fresh.vendors[0].rows[0];
+    assert!(!row.stale && !row.dim, "{row:?}");
+    assert_eq!(row.value, "55%");
+    // three hours old (past the old 2 h cut-off), both resets still ahead: the values stay, dimmed,
+    // with the age chip, but no pace or run-out
+    let old = view::build_home(&mk(180, 200), now());
+    let claude = &old.vendors[0];
+    for r in &claude.rows {
+        assert!(!r.stale && r.dim, "{r:?}");
+        assert_ne!(r.value, "--");
+        assert!(!r.tip.iter().any(|l| l.text.starts_with("Pace")), "{r:?}");
+    }
+    assert_eq!(claude.rows[0].value, "55%");
+    assert!(claude.age_chip.is_some());
+    assert_eq!(claude.warn, None);
+    assert!(
+        !old.status.text.contains("No current data"),
+        "{:?}",
+        old.status
+    );
+    assert_eq!(old.status.dot, Dot::Stale);
+    let v = &aitrack::vendor::from_state_at(&mk(180, 200), now())[0];
+    let d = view::build_detail_at(v, Kind::Session, false, now());
+    assert_eq!(d.value, "55");
+    assert!(d.rows.iter().all(|r| r.0 != "Pace" && r.0 != "At reset"));
+    // the session reset has passed: only that row turns to dashes
+    let ended = view::build_home(&mk(180, -10), now());
+    let rows = &ended.vendors[0].rows;
+    assert_eq!(rows[0].value, "--");
+    assert!(rows[0].stale);
+    assert!(rows[0].tip[0].text.contains("reset time has passed"));
+    assert_eq!(rows[1].value, "5%");
+}
+
+#[test]
+fn every_window_ended_means_no_current_data() {
+    // over five hours old, no reset times: the session is over, the weekly figure stays
+    let st = build_state(
+        &[reading(310, "desktop-history", 40.0, None)],
+        Values::default(),
+        status(),
+        now(),
+    );
+    let home = view::build_home(&st, now());
+    assert_eq!(home.vendors[0].rows[0].value, "--");
+    assert_eq!(home.vendors[0].rows[1].value, "5%");
+    // eight days old: the weekly window is over too, so nothing is shown as current
+    let st = build_state(
+        &[reading(8 * 24 * 60, "desktop-history", 40.0, None)],
+        Values::default(),
+        status(),
+        now(),
+    );
+    let home = view::build_home(&st, now());
+    assert!(home.vendors[0]
         .rows
         .iter()
         .all(|r| r.stale && r.value == "--"));
-    assert_eq!(
-        old.status.text,
-        "No current data \u{b7} last reading 5.0 h ago"
+    assert!(
+        home.status.text.starts_with("No current data"),
+        "{:?}",
+        home.status
     );
-    assert_eq!(old.status.dot, Dot::Stale);
 }
 
 // ------------------------------------------------------------ the status line

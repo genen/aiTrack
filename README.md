@@ -363,8 +363,9 @@ aiTrack uses:
 2. **Codex's session logs.** Codex writes the current limits into its session files in `~/.codex/sessions` each
    time it works. aiTrack reads the newest one. It is only as fresh as the last time you used Codex.
 
-The tooltips show your plan, your credit balance and banked resets when the service reports them, and limits for a
-single model (for example a separate Codex model limit) under **By model**. The Stats view and the history chart work
+The tooltips show your plan, your credit balance and banked resets when the service reports them (a newer session-log
+sample keeps this week's last reported values), and limits for a single model (for example a separate Codex model
+limit) under **By model**. The Stats view and the history chart work
 as for Claude, and the Stats view counts Codex tokens and cost per project from the session logs.
 
 The ChatGPT block appears when the folder `~/.codex` (or the folder in `CODEX_HOME`) has a sign-in or session logs. If
@@ -569,10 +570,11 @@ Each source updates at its own speed, so a number can be a little old.
 - After **60 minutes** the number is shown dimmed, the tooltip ends with an amber "Data is about 2 h old" line, and
   the "Empty in" warning and the pace lines are left out, because a pace from an old reading says nothing about
   now.
-- **Claude** shows dashes (`--`) and "No current data" when no source has given a reading for about two hours
-  (for example the Claude app was closed all day). Open the app and press **Refresh now**.
-- **Grok** keeps its last value however old (dimmed). It shows dashes only when its billing period has ended, because
-  the old number belongs to last week.
+- Every tool keeps its last value however old (dimmed). A row shows dashes (`--`) only when its window has ended:
+  its reset time has passed, or, without a reset time, the reading is older than the window itself (5 hours or 7
+  days), because the old number belongs to a window that is over. **Claude** checks its two windows one by one and
+  says "No current data" once both have ended; **Grok** and **ChatGPT** show dashes once their weekly billing
+  period has ended. Open the app (or run the CLI) and press **Refresh now** for a new reading.
 
 ![Grok with an old value](docs/img/grok-old-data.png)
 
@@ -649,7 +651,8 @@ Linux they are desktop notifications (see **On Linux** below).
   was minimized), in the full and the small window. It does not take the keyboard focus. Native Wayland does not let
   an app raise its own window.
 - Alerts need the window to be running. Closed means no alerts.
-- Old readings do not trigger alerts.
+- Old readings do not trigger alerts. The Predictive alert also needs a reading less than 60 minutes old, the
+  same as the "Empty in" warning in the window.
 
 In Settings > Notifications you can turn **Usage alerts** off, turn **Alert sounds** off, and press **Info**,
 **Warning** or **Limit** under "Send a test toast" to see how each one looks.
@@ -833,9 +836,10 @@ crates it is built from are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTIC
 
 ## 13. Troubleshooting
 
-**The Claude bars show dashes and "No current data".**
-No source gave a reading for about two hours. The most common reason is that the Claude desktop app is closed. Open
-it (or use Claude Code), then press **Refresh now**. Hover the status line for the full reason.
+**The Claude bars are dimmed, or show dashes and "No current data".**
+No source has given a new reading for a while, so aiTrack shows the last value dimmed; once that window has reset,
+the row shows dashes. The most common reason is that the Claude desktop app is closed. Open it (or use Claude
+Code), then press **Refresh now**. Hover the status line for the full reason.
 
 **"login expired" or "login rejected".**
 For Claude: open Claude Code once so it renews its sign-in. For Grok: run `grok` once, or use **Refresh Grok now**.
@@ -958,10 +962,12 @@ then more tools (Codex and Gemini are in).
   `--sources` and `--help` never take the lock.
 - Local sources (desktop cache/history, `~/.claude.json`) are re-read every 60 s (`local_interval_sec` in
   settings.json, 15..600, also in the Settings view); the network source keeps the `interval_min` cadence and
-  is only asked when no local source has a current reading. A reading older than its freshness limit is shown
-  as dashes / `--` and "No current data", never as a number.
+  is only asked when no local source has a current reading. An old reading stays shown as the last value
+  (dimmed after 60 minutes, no pace); a window whose reset has passed (or, without a reset time, a reading older
+  than the window) is shown as dashes / `--`, and "No current data" once every window has ended.
 - Toast notifications (Windows; Settings > Notifications, on by default): at 75 % used, 90 % ("10% left"), the
-  limit, when the pace would empty the window within 30 minutes (before it resets), and after a window that was
+  limit, when the pace would empty the window within 30 minutes (before it resets; only from a reading at most
+  60 minutes old), and after a window that was
   at 90 %+ resets. Each event fires once per limit window; what was sent is remembered in
   `~/.aitrack/alerts.json` (next to settings.json). Toasts use the AppUserModelID `aiTrack`, registered under
   `HKCU\Software\Classes\AppUserModelId\aiTrack` (no shortcut, nothing outside HKCU). If nothing appears, use

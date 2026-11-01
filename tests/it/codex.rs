@@ -660,6 +660,80 @@ fn the_codex_block_shows_what_the_claude_block_shows() {
 }
 
 #[test]
+fn a_newer_log_sample_keeps_the_live_credits_banked_resets_and_plan() {
+    let now = Utc::now();
+    // live readings (credits, banked resets, plan) up to an hour ago, then Codex was used and its
+    // session log wrote a sample 20 minutes ago that has none of them
+    let mut rs = live_readings(now - Duration::hours(1), now);
+    let ts = t(now - Duration::minutes(20));
+    rs.push(reading(json!({
+        "v": 1, "ts": ts, "observed_at": ts, "ok": true, "vendor": "codex", "source": "codex-log",
+        "session": {"pct": 30.0, "resets_at": t(now + Duration::hours(2))},
+        "weekly": {"pct": 44.0, "resets_at": t(now + Duration::days(3))},
+    })));
+    let st = build_codex_state(&rs, status(), true, now);
+    assert_eq!(st.banked_resets, Some(2));
+    assert_eq!(st.tier.as_deref(), Some("Plus"));
+    assert_eq!(st.credits.as_ref().and_then(|c| c.balance), Some(120.0));
+    assert!(st.live_in_window);
+    let v = codex_home_view(&rs, now);
+    assert_eq!(v.rows[0].value, "30%", "the newest value is the log's");
+    let weekly = tip_text(&v.rows[1]);
+    for want in [
+        "Banked resets  2 available",
+        "Credits  120 left",
+        "Plan: Plus",
+    ] {
+        assert!(weekly.contains(want), "{want} missing from\n{weekly}");
+    }
+    // the chip does not claim live usage failed: it worked an hour ago, the log is just newer
+    let chip = v.age_chip.expect("age chip for a 20 min old log sample");
+    assert!(!chip.tooltip.contains("failed"), "{}", chip.tooltip);
+    assert!(
+        chip.tooltip.starts_with(
+            "From the local Codex session logs (newer than the last live check), last updated"
+        ),
+        "{}",
+        chip.tooltip
+    );
+    // a newer live reading saying 0 banked resets wins over the older 2
+    let ts = t(now - Duration::minutes(5));
+    rs.push(reading(json!({
+        "v": 1, "ts": ts, "observed_at": ts, "ok": true, "vendor": "codex", "source": "codex-usage",
+        "session": {"pct": 31.0, "resets_at": t(now + Duration::hours(2))},
+        "weekly": {"pct": 44.0, "resets_at": t(now + Duration::days(3))},
+        "raw": {"banked_resets": 0},
+    })));
+    assert_eq!(
+        build_codex_state(&rs, status(), true, now).banked_resets,
+        Some(0)
+    );
+}
+
+#[test]
+fn last_weeks_banked_resets_and_credits_are_not_this_weeks() {
+    let now = Utc::now();
+    // a live reading from before this weekly window began (it resets in 3 days, so began 4 days
+    // ago), then only log samples this week
+    let mut rs = live_readings(now - Duration::days(5), now - Duration::days(5));
+    for r in rs.iter_mut() {
+        r.session = None;
+    }
+    let ts = t(now - Duration::minutes(20));
+    rs.push(reading(json!({
+        "v": 1, "ts": ts, "observed_at": ts, "ok": true, "vendor": "codex", "source": "codex-log",
+        "session": {"pct": 30.0, "resets_at": t(now + Duration::hours(2))},
+        "weekly": {"pct": 4.0, "resets_at": t(now + Duration::days(3))},
+    })));
+    let st = build_codex_state(&rs, status(), true, now);
+    assert_eq!(st.banked_resets, None);
+    assert!(st.credits.is_none());
+    assert!(!st.live_in_window);
+    // the plan name is not tied to a week
+    assert_eq!(st.tier.as_deref(), Some("Plus"));
+}
+
+#[test]
 fn an_old_codex_reading_stays_dimmed_with_the_age_chip_and_no_pace() {
     let now = Utc::now();
     let mut rs = live_readings(now - Duration::hours(3), now);
@@ -671,6 +745,12 @@ fn an_old_codex_reading_stays_dimmed_with_the_age_chip_and_no_pace() {
     assert_eq!(v.rows[0].value, "25%", "the last value stays");
     let chip = v.age_chip.expect("age chip");
     assert!(chip.tooltip.contains("session logs"), "{}", chip.tooltip);
+    // no live reading this week: the logs are all there is
+    assert!(
+        chip.tooltip.starts_with("Live usage failed"),
+        "{}",
+        chip.tooltip
+    );
     let weekly = tip_text(&v.rows[1]);
     assert!(!weekly.contains("Pace:"), "{weekly}");
     assert!(

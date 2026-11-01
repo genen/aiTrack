@@ -330,6 +330,11 @@ impl Alerts {
         let mut sent = Vec::new();
         // per alert in `sent`: its window key and the `fired` tags it set (undone if it must be retried)
         let mut undo: Vec<(String, Vec<String>)> = Vec::new();
+        // the window drops pace and run-out for a reading older than this, so no "empty in" toast
+        // either: the pace of an old sample says nothing about now (the % alerts still apply)
+        let pace_fresh = parse_ts(&plan.last).is_some_and(|t| {
+            (now - t).num_milliseconds() as f64 / 60000.0 <= crate::view::STALE_WARN_MIN
+        });
         for kind in Kind::ALL {
             let Some(g) = plan.gauge(kind) else { continue };
             if g.window_id.is_empty() {
@@ -437,7 +442,10 @@ impl Alerts {
 
             // predictive: on course to run out before the reset, and soon (same rule as the header
             // warning, including its guard against noisy low-usage paces)
-            if let Some(e) = crate::analysis::empty_before_reset(g).filter(|e| !e.at_limit) {
+            if let Some(e) = crate::analysis::empty_before_reset(g)
+                .filter(|e| !e.at_limit)
+                .filter(|_| pace_fresh)
+            {
                 if e.empty_in_h * 60.0 < PREDICT_MIN && !fired(entry, "pred") {
                     entry.fired.push("pred".into());
                     out_tags.push(vec!["pred".into()]);
