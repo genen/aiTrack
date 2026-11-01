@@ -13,7 +13,8 @@ else.**
 aiTrack only **reads** those files. It never changes them.
 
 For Gemini it runs Google Antigravity's own command-line tool, `agy -p /usage`, which prints your usage. aiTrack does
-not read Antigravity's sign-in.
+not read Antigravity's sign-in. When agy lists no limits, aiTrack reads one word from agy's newest log, the sign-in
+type (`consumer` or `gcp`), to say "Likely enterprise account"; it does not read or keep the email or project there.
 
 ## What it stores on your computer
 

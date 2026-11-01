@@ -564,6 +564,18 @@ pub fn empty_warning(g: &Gauge) -> Option<String> {
 
 /// The header warning of a vendor: the most urgent window that would run out before its reset.
 /// The weekly window is named (`Weekly: empty in ~2d 3h`); the session is the default.
+/// Gemini: Antigravity answered but listed no limits (an Antigravity Business account), shown after
+/// the name instead of leaving only an old reading.
+fn enterprise_note(v: &Vendor) -> Option<HeaderWarn> {
+    (v.id == crate::vendor::VendorId::Antigravity
+        && v.error.as_deref() == Some(crate::antigravity::BUSINESS_REPLY))
+    .then(|| HeaderWarn {
+        kind: Kind::Weekly,
+        full: "Likely enterprise account".into(),
+        compact: "Likely enterprise".into(),
+    })
+}
+
 pub fn header_warning(v: &Vendor) -> Option<HeaderWarn> {
     Kind::ALL
         .iter()
@@ -1004,7 +1016,8 @@ pub fn build_home_for(s: &State, vendors: &[Vendor], now: DateTime<Utc>) -> Home
                         .map(|b| bot_row(b, ven.bot_gauge.as_ref(), remaining, now)),
                 )
                 .collect(),
-            warn: header_warning(ven).filter(|_| ven.current && !is_old(ven, now)),
+            warn: enterprise_note(ven)
+                .or_else(|| header_warning(ven).filter(|_| ven.current && !is_old(ven, now))),
             age_chip: age_chip(ven, s.settings.interval_min, now).or_else(|| bot_chip(ven, now)),
         });
     }

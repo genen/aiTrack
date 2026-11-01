@@ -46,8 +46,48 @@ const WEEKLY_RANGE_H: std::ops::RangeInclusive<f64> = 144.0..=192.0;
 /// The reply's text when agy answered but listed no limit: retried once (a cold run may answer
 /// before the quota is fetched). Seen on 2026-11-01 on an Antigravity Business account (Google
 /// Workspace sign-in on Agent Platform): no buckets, its usage is billed in Google Cloud.
-pub const EMPTY_REPLY: &str =
-    "Antigravity Business account: usage is billed in Google Cloud, no weekly limits";
+pub const EMPTY_REPLY: &str = "No usage data from Antigravity (it listed no limits)";
+/// [`EMPTY_REPLY`] when agy's own log of that run says it signed in with a Google Cloud
+/// (Antigravity Business) account (`authMethod=gcp`, not `consumer`).
+pub const BUSINESS_REPLY: &str =
+    "Likely enterprise account: Antigravity reports no weekly limits (Antigravity Business usage is billed in Google Cloud)";
+/// How much of the end of agy's newest log is searched for its sign-in type.
+const LOG_TAIL_BYTES: u64 = 256 * 1024;
+
+/// The sign-in type agy's newest log reports (`consumer`, `gcp`, ...): agy writes one log per run
+/// (`cli-YYYYMMDD_HHMMSS.log`) with a line `applyAuthResult: ... authMethod=<type> ...`. Only
+/// that word is read, never the email or project on the same line.
+pub fn auth_method(env: &Env) -> Option<String> {
+    use std::io::{Seek, SeekFrom};
+    let dir = cli_dir(env).join("log");
+    let newest = std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("cli-") && n.ends_with(".log"))
+        })
+        // (names carry the start time)
+        .max()?;
+    let mut f = std::fs::File::open(newest).ok()?;
+    let len = f.metadata().ok()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(LOG_TAIL_BYTES)))
+        .ok()?;
+    let mut buf = Vec::new();
+    f.take(LOG_TAIL_BYTES).read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    text.lines().rev().find_map(|l| {
+        let rest = &l[l.find("authMethod=")? + "authMethod=".len()..];
+        let word: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .take(24)
+            .collect();
+        (!word.is_empty()).then(|| word.to_ascii_lowercase())
+    })
+}
 /// The wait before that one retry.
 const EMPTY_RETRY_AFTER: StdDuration = StdDuration::from_secs(5);
 /// The reply's text when agy used the model (a turn or tokens): aiTrack stops running it.
@@ -586,6 +626,9 @@ impl UsageSource for AgyUsage {
             r = self.run_once(&program, now);
         }
         self.was_empty.store(empty(&r), Ordering::SeqCst);
+        if empty(&r) && auth_method(&self.env).is_some_and(|m| m != "consumer") {
+            r = Err(BUSINESS_REPLY.into());
+        }
         if r.as_ref().err().map(String::as_str) == Some(USED_MODEL) {
             self.stopped.store(true, Ordering::SeqCst);
         }

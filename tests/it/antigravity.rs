@@ -458,3 +458,47 @@ fn a_helper_holding_agys_output_open_does_not_hold_the_poll() {
     );
     assert!(reply_json(&out).is_some());
 }
+
+#[test]
+fn the_sign_in_type_comes_from_agys_newest_log_only() {
+    let d = common::TempDir::new();
+    let mut env = Env::new(Os::Windows);
+    env.home = Some(d.path().to_path_buf());
+    assert_eq!(antigravity::auth_method(&env), None);
+    let log = antigravity::cli_dir(&env).join("log");
+    std::fs::create_dir_all(&log).unwrap();
+    // the lines as agy 1.4.12 writes them (email and project made up)
+    std::fs::write(log.join("cli-20261031_202322.log"),
+        "I1031 20:23:23.077651       1 server_oauth.go:224] applyAuthResult: email=a@example.com, authMethod=consumer, quotaProject=\n").unwrap();
+    assert_eq!(antigravity::auth_method(&env).as_deref(), Some("consumer"));
+    std::fs::write(log.join("cli-20261031_204617.log"),
+        "I1031 20:46:17.734413       1 auth_provider.go:954] [AuthProvider] SetEnableBusinessLogin called with enable: true\nI1031 20:46:17.898128       1 server_oauth.go:224] applyAuthResult: email=a@example.com, authMethod=gcp, quotaProject=some-project-1\n").unwrap();
+    assert_eq!(antigravity::auth_method(&env).as_deref(), Some("gcp"));
+}
+
+#[test]
+fn only_a_business_sign_in_says_likely_enterprise() {
+    let at = Utc::now();
+    let note = |err: &str| {
+        let mut s = build_state(&[], Values::default(), status(), at);
+        s.claude_on = false;
+        let mut st = status();
+        st.error = Some(err.into());
+        s.antigravity = Some(build_antigravity_state(&readings(at), st, true, at));
+        aitrack::view::build_home(&s, at)
+            .vendors
+            .into_iter()
+            .find(|v| v.id == VendorId::Antigravity)
+            .unwrap()
+            .warn
+            .map(|w| w.full)
+    };
+    assert_eq!(
+        note(antigravity::BUSINESS_REPLY).as_deref(),
+        Some("Likely enterprise account")
+    );
+    assert_ne!(
+        note(antigravity::EMPTY_REPLY).as_deref(),
+        Some("Likely enterprise account")
+    );
+}

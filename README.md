@@ -378,7 +378,9 @@ block: a **Weekly** bar for the **Gemini models** (Gemini Flash and Pro). Antigr
 with a weekly limit of their own; that one is shown in the tooltip under **Other models**. Antigravity refills these
 limits gradually, so a bar can go down as well as up between readings. There is no fixed reset: the tooltip says when
 the limit will be **full again** instead. An Antigravity Business (Google Workspace / Google Cloud) account has no weekly limits: its usage
-is billed in Google Cloud, and the block keeps its last reading and says so.
+is billed in Google Cloud. When agy lists no limits and its own log says it signed in through Google Cloud, the block
+says **Likely enterprise account** after its name; otherwise its tooltip says "No usage data from Antigravity". The
+last reading stays either way.
 
 aiTrack runs `agy -p /usage --output-format json` in the background at each update (every 15 minutes by default, and
 when you press refresh). That is `agy`'s own read-only usage command: it sends no prompt and uses no quota. aiTrack
@@ -804,7 +806,8 @@ percentages, reset times, plan name, credit balance and per-model limits, never 
 Gemini record holds the percentages of each model group and when each will be full again.
 
 aiTrack only **reads** the folders of Claude, Grok and Codex. It never changes them. For Gemini it only runs `agy`'s
-usage command.
+usage command, and when that lists no limits it reads one word from agy's newest log (the sign-in type, `consumer` or
+`gcp`) to tell an Antigravity Business account; never the email or project on that line.
 
 ### What leaves your PC
 
