@@ -13,6 +13,7 @@
 //! app has one locked) and size-capped. Every surprise becomes a descriptive error, never a panic.
 //! Only the usage entry's numbers are ever used; cookies and other entries are not looked at.
 
+use crate::analysis::not_in_the_future;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::io::{Read, Seek, SeekFrom};
@@ -141,12 +142,14 @@ fn read_range(path: &Path, offset: u64, len: usize) -> Result<Vec<u8>, String> {
     .map_err(|e| describe_io(&e))
 }
 
-fn mtime(path: &Path) -> Option<DateTime<Utc>> {
+/// A file's modification time, unless it is more than the usual clock-skew tolerance after `now`.
+fn mtime(path: &Path, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
     std::fs::metadata(path)
         .ok()?
         .modified()
         .ok()
         .map(DateTime::<Utc>::from)
+        .filter(|t| not_in_the_future(*t, now))
 }
 
 // ---------------------------------------------------------------- byte helpers
@@ -157,7 +160,7 @@ fn filetime_micros(v: i64, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
     let secs = v / 1_000_000 - 11_644_473_600;
     let t = DateTime::from_timestamp(secs, 0)?;
     let lo = DateTime::from_timestamp(1_420_070_400, 0)?; // 2015-01-01
-    (t >= lo && t <= now + chrono::Duration::days(1)).then_some(t)
+    (t >= lo && not_in_the_future(t, now)).then_some(t)
 }
 
 fn u32_at(b: &[u8], o: usize) -> Option<u32> {
@@ -410,6 +413,8 @@ fn finish(
         Ok(h) if h.truncated => None, // an in-flight or incomplete write
         Ok(h) if !h.ok_json => None,  // an error page or something else that is not usage JSON
         Ok(h) => {
+            // a creation time later than the Date header is a revalidated entry, but it was
+            // already capped to a few minutes after `now`, so a wrong clock cannot win for long
             let observed = match (h.date, found.created) {
                 (Some(d), Some(c)) => Some(d.max(c)),
                 (d, c) => d.or(c).or(found.file_time),
@@ -581,7 +586,7 @@ pub fn scan_usage_entries(dir: &Path) -> CacheScan {
     scan_usage_entries_at(dir, Utc::now())
 }
 
-/// [`scan_usage_entries`] as seen at `now` (an entry creation time more than a day after `now` is
+/// [`scan_usage_entries`] as seen at `now` (an entry creation or file time more than a few minutes after `now` is
 /// not believable and is ignored).
 pub fn scan_usage_entries_at(dir: &Path, now: DateTime<Utc>) -> CacheScan {
     let mut scan = CacheScan {
@@ -613,12 +618,16 @@ pub fn scan_usage_entries_at(dir: &Path, now: DateTime<Utc>) -> CacheScan {
             .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
         {
             match read_whole(&path, MAX_BLOCK_FILE) {
-                Ok(data) => scan_block_file(dir, name, &data, mtime(&path), now, &mut scan.entries),
+                Ok(data) => {
+                    scan_block_file(dir, name, &data, mtime(&path, now), now, &mut scan.entries)
+                }
                 Err(e) => scan.notes.push(format!("{name}: {e}")),
             }
         } else if is_simple_name(name) {
             match read_whole(&path, MAX_STREAM as u64 * 2) {
-                Ok(data) => scan.entries.extend(read_simple(&data, mtime(&path), name)),
+                Ok(data) => scan
+                    .entries
+                    .extend(read_simple(&data, mtime(&path, now), name)),
                 Err(e) => scan.notes.push(format!("{name}: {e}")),
             }
         }
