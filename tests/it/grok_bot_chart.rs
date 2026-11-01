@@ -83,6 +83,7 @@ fn tracker_history_feeds_the_chart_without_an_account_id() {
         Env::new(Os::Linux),
         Box::new(JsonlStore::new(dir.join("b.jsonl"))),
     );
+    t.refresh(now()); // the collector thread builds the list; nothing here reads the file
     let rs = t.readings();
     assert_eq!(rs.len(), 3);
     let d = chart_data(&rs, Kind::Weekly, Range::Day, now());

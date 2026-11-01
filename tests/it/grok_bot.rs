@@ -856,7 +856,9 @@ fn readings_are_read_once_and_refreshed_after_an_append() {
     assert_eq!(tracker.readings().len(), 1);
     f.fresh(51.0);
     tracker.refresh(now() + Duration::minutes(1));
-    assert_eq!(tracker.readings().len(), 3);
+    // a record written behind the tracker's back is not seen: the file is never re-read here;
+    // the append adds only its own record to the in-memory list
+    assert_eq!(tracker.readings().len(), 2);
 }
 
 #[test]
@@ -960,4 +962,54 @@ fn an_old_reading_is_not_restamped_and_a_finished_week_is_not_appended() {
     let t2 = BotTracker::new(f.env(), Box::new(JsonlStore::new(&hist2)));
     t2.refresh(resets() + Duration::days(3));
     assert_eq!(JsonlStore::new(&hist2).read().len(), 0);
+}
+
+#[test]
+fn readings_come_from_memory_after_an_append_and_match_the_file_after_a_prune() {
+    let f = Fx::new();
+    let hist = f.dir.join("usage-grok-bot.jsonl");
+    // an old record already in the file
+    let mut old = grok_bot::record(&BotReading {
+        resets_at: now() - Duration::days(190),
+        ..reading(10.0, 0)
+    });
+    old["ts"] = json!((now() - Duration::days(200)).to_rfc3339());
+    JsonlStore::new(&hist).append(&old).unwrap();
+
+    let tracker = BotTracker::new(f.env(), Box::new(JsonlStore::new(&hist)));
+    // nothing is read until the collector thread has refreshed
+    assert!(tracker.readings().is_empty());
+    f.fresh(50.0);
+    tracker.refresh(now());
+    assert_eq!(
+        tracker.readings().len(),
+        2,
+        "built from the file, then the append"
+    );
+
+    // the file is gone: the list is still served from memory, not re-read
+    std::fs::remove_file(&hist).unwrap();
+    assert_eq!(tracker.readings().len(), 2);
+    // a further append adds to the in-memory list
+    f.fresh(51.0);
+    tracker.refresh(now() + Duration::minutes(1));
+    assert_eq!(tracker.readings().len(), 3);
+
+    // a prune rebuilds the list from the pruned file
+    JsonlStore::new(&hist).append(&old).unwrap();
+    JsonlStore::new(&hist)
+        .append(&grok_bot::record(&reading(52.0, 1)))
+        .unwrap();
+    let rep = tracker.prune(now()).unwrap();
+    assert!(rep.changed());
+    assert_eq!(rep.removed, 1);
+    assert_eq!(
+        tracker.readings().len(),
+        JsonlStore::new(&hist).read().len()
+    );
+    assert_eq!(
+        tracker.readings().len(),
+        2,
+        "the 51 % record and the 52 % one"
+    );
 }

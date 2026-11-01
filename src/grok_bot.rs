@@ -347,9 +347,11 @@ pub struct BotTracker {
     saved: Mutex<Option<Saved>>,
     seeded: Mutex<bool>,
     version: AtomicU64,
-    /// The parsed history, read once and dropped when this tracker appends a record, so the
-    /// window thread does not re-read the growing file on every rebuild.
-    cached: Mutex<Option<std::sync::Arc<Vec<crate::reading::Reading>>>>,
+    /// The parsed history. Only the collector thread builds it (at its first refresh, and again
+    /// after an append or a prune) and swaps it in; the window thread only clones the `Arc`, so
+    /// it never reads the file.
+    cached: Mutex<std::sync::Arc<Vec<crate::reading::Reading>>>,
+    built: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -369,7 +371,8 @@ impl BotTracker {
             saved: Mutex::new(None),
             seeded: Mutex::new(false),
             version: AtomicU64::new(0),
-            cached: Mutex::new(None),
+            cached: Mutex::new(std::sync::Arc::new(Vec::new())),
+            built: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -383,7 +386,7 @@ impl BotTracker {
     pub fn prune(&self, now: DateTime<Utc>) -> std::io::Result<crate::store::PruneReport> {
         let rep = self.store.prune(now)?;
         if rep.changed() {
-            *self.cached.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            self.rebuild();
             self.version.fetch_add(1, Ordering::SeqCst);
         }
         Ok(rep)
@@ -394,19 +397,32 @@ impl BotTracker {
         (self.store.describe(), self.store.size())
     }
 
-    /// The stored history as readings (for the Stats view and charts). The file is read once and
-    /// the result kept until this tracker appends a record (it is the only writer).
+    /// The stored history as readings (for the Stats view and charts): a clone of the in-memory
+    /// list the collector thread keeps current. Never touches the file; empty until the first
+    /// refresh has built it.
     pub fn readings(&self) -> std::sync::Arc<Vec<crate::reading::Reading>> {
-        let mut c = self.cached.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(r) = c.as_ref() {
-            return r.clone();
-        }
+        self.cached
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Re-read the history file and swap the result in. Collector thread only.
+    fn rebuild(&self) {
         let mut out = Vec::new();
         self.store
             .read_each(&mut |v| out.push(crate::reading::Reading::from_value(&v)));
-        let r = std::sync::Arc::new(out);
-        *c = Some(r.clone());
-        r
+        *self.cached.lock().unwrap_or_else(|e| e.into_inner()) = std::sync::Arc::new(out);
+        self.built.store(true, Ordering::SeqCst);
+    }
+
+    /// After an append: the list plus the new record, swapped in without reading the file.
+    fn push_reading(&self, rec: &Value) {
+        let cur = self.readings();
+        let mut next = Vec::with_capacity(cur.len() + 1);
+        next.extend(cur.iter().cloned());
+        next.push(crate::reading::Reading::from_value(rec));
+        *self.cached.lock().unwrap_or_else(|e| e.into_inner()) = std::sync::Arc::new(next);
     }
 
     /// Linux with the Grok Bot app but no Grok CLI folder: the CLI collector has nothing to read.
@@ -425,6 +441,9 @@ impl BotTracker {
 
     /// Read the file now. `now` stamps the history record.
     pub fn refresh(&self, now: DateTime<Utc>) {
+        if !self.built.load(Ordering::SeqCst) {
+            self.rebuild();
+        }
         let scan = persistence_dir(&self.env).map(|d| scan_dir(&d));
         let new = scan.as_ref().and_then(|s| s.reading);
         *self.plan.lock().unwrap_or_else(|e| e.into_inner()) = scan.and_then(|s| s.plan);
@@ -470,8 +489,9 @@ impl BotTracker {
         if !due || r.period_ended(now) {
             return;
         }
-        if self.store.append(&record(r)).is_ok() {
-            *self.cached.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        let rec = record(r);
+        if self.store.append(&rec).is_ok() {
+            self.push_reading(&rec);
             *saved = Some(Saved {
                 read_at: r.read_at,
                 pct: r.pct,

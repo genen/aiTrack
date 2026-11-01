@@ -509,6 +509,7 @@ fn the_service_reads_the_grok_bot_history_file() {
         aitrack::sources::Env::new(aitrack::sources::Os::Windows),
         Box::new(JsonlStore::new(&hist)),
     ));
+    tracker.refresh(chrono::Utc::now()); // the collector thread builds the list
     let cfg = ServiceConfig {
         roots: Roots {
             claude_projects: dir.join("claude/projects"),
