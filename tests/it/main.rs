@@ -40,6 +40,7 @@ mod pricing;
 mod projects_cli;
 mod prune_script;
 mod release_review;
+mod release_workflows;
 mod retention;
 mod review;
 mod settings_layout;

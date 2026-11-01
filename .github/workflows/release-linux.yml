@@ -43,7 +43,7 @@ jobs:
       channel: ${{ steps.version.outputs.channel }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # the build number in the app (aitrack --version) is the commit count
           fetch-depth: 0
@@ -75,6 +75,7 @@ jobs:
           channel=stable
           if printf '%s\n' "$version" | grep -Eq '(^|[.-])beta($|[.-])'; then channel=beta; fi
           {
+            echo "<!-- aitrack-notes:linux:begin -->"
             echo "version=$version"
             echo "tag=$tag"
             echo "publish=$publish"
@@ -106,7 +107,7 @@ jobs:
           fi
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Check formatting
         run: cargo fmt --check
@@ -146,7 +147,7 @@ jobs:
           dpkg-deb -I "$deb"
 
       - name: Keep the deb
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: aiTrack-${{ steps.version.outputs.version }}-linux-amd64-deb
           path: dist/aitrack_*_amd64.deb
@@ -160,7 +161,7 @@ jobs:
       contents: write
     steps:
       - name: Get the deb
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: aiTrack-${{ needs.build.outputs.version }}-linux-amd64-deb
 
@@ -189,6 +190,7 @@ jobs:
             echo '```'
             sha256sum "$deb" | sed "s|  .*|  $asset|"
             echo '```'
+            echo "<!-- aitrack-notes:linux:end -->"
           } > linux-notes.md
 
           # The tag has to point at the commit this run built.
@@ -234,7 +236,24 @@ jobs:
           # overwrite a section another run added in between. Re-read after each write and add the
           # section again until it is there (a concurrency group cannot do this: it keeps only one
           # waiting run per group, and there are three workflows).
+          # strip_section begin
           marker="Linux SHA256:"
+          key="linux"
+          prose="Linux: Ubuntu 22.04"
+          # Cuts this workflow's section out of the notes text (stdin to stdout), so a Replace rerun puts a
+          # fresh one in its place. The current format sits between two HTML comments, prose and checksums
+          # together. A release made before the comments existed is cut from the first line of the prose to
+          # the closing code fence. Other systems' sections stay; runs of blank lines collapse to one.
+          strip_section() {
+            awk -v b="<!-- aitrack-notes:${key}:begin -->" -v e="<!-- aitrack-notes:${key}:end -->" -v p="$prose" -v m="$marker" '
+              mode == 0 && index($0, b) == 1 { mode = 1; next }
+              mode == 1 { if (index($0, e) == 1) mode = 0; next }
+              mode == 0 && index($0, p) == 1 { mode = 2; next }
+              mode == 2 { if (index($0, m) == 1) { mode = 3; fence = 0 }; next }
+              mode == 3 { if ($0 ~ /^```/) { fence++; if (fence == 2) mode = 0 }; next }
+              { blank = ($0 ~ /^[ \t\r]*$/); if (blank && lastblank) next; lastblank = blank; print }'
+          }
+          # strip_section end
           hashes=$(grep -E '^[0-9a-f]{64} ' linux-notes.md)
           # True when the notes hold this section with exactly the checksums of this run's files.
           section_current() {
@@ -251,9 +270,10 @@ jobs:
               if section_current "$body"; then
                 return 0
               fi
-              # A section from an earlier run of this workflow (Replace) is cut out, from its marker line
-              # to the closing code fence, so the new checksums take its place.
-              body=$(printf '%s\n' "$body" | awk -v m="$marker" 'skip == 0 && index($0, m) == 1 { skip = 1; fence = 0; next } skip == 1 { if ($0 ~ /^```/) { fence++; if (fence == 2) skip = 0 }; next } { print }')
+              # A section from an earlier run of this workflow (Replace) is cut out, prose and checksums
+              # (between its begin and end comments; an older release without them is cut from the first
+              # line of the prose to the closing code fence), so the new section takes its place.
+              body=$(printf '%s\n' "$body" | strip_section)
               { printf '%s\n\n' "$body"; cat linux-notes.md; } > notes.md
               gh release edit "$TAG" --notes-file notes.md
               sleep $((2 + RANDOM % 4))

@@ -46,7 +46,7 @@ jobs:
       mode: ${{ steps.mode.outputs.mode }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # the build number in the app (aitrack --version) is the commit count
           fetch-depth: 0
@@ -78,6 +78,7 @@ jobs:
           channel=stable
           if printf '%s\n' "$version" | grep -Eq '(^|[.-])beta($|[.-])'; then channel=beta; fi
           {
+            echo "<!-- aitrack-notes:macos:begin -->"
             echo "version=$version"
             echo "tag=$tag"
             echo "publish=$publish"
@@ -98,7 +99,7 @@ jobs:
           fi
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Check formatting
         run: cargo fmt --check
@@ -179,14 +180,14 @@ jobs:
           ./scripts/mac-contents-check.sh zip "dist/aiTrack-${{ steps.version.outputs.version }}-macos-arm64.zip"
 
       - name: Keep the dmg
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: aiTrack-${{ steps.version.outputs.version }}-macos-arm64-dmg
           path: dist/aiTrack-${{ steps.version.outputs.version }}-macos-arm64.dmg
           if-no-files-found: error
 
       - name: Keep the zip
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: aiTrack-${{ steps.version.outputs.version }}-macos-arm64-zip
           path: dist/aiTrack-${{ steps.version.outputs.version }}-macos-arm64.zip
@@ -200,12 +201,12 @@ jobs:
       contents: write
     steps:
       - name: Get the dmg
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: aiTrack-${{ needs.build.outputs.version }}-macos-arm64-dmg
 
       - name: Get the zip
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: aiTrack-${{ needs.build.outputs.version }}-macos-arm64-zip
 
@@ -231,7 +232,7 @@ jobs:
           case "$MODE" in
             notarized-*) trust="These builds are signed with a Developer ID certificate and notarized by Apple, so they open normally: open the dmg and drag aiTrack to Applications." ;;
             signed) trust="These builds are signed with a Developer ID certificate but not notarized, so macOS may still ask you to approve the app once: open the dmg, drag aiTrack to Applications, then right-click it and choose Open (or System Settings > Privacy & Security > Open Anyway)." ;;
-            *) trust="These builds are ad-hoc signed, not notarised, so macOS asks you to approve the app once: open the dmg, drag aiTrack to Applications, then right-click it and choose Open (or System Settings > Privacy & Security > Open Anyway)." ;;
+            *) trust="These builds are ad-hoc signed, not notarized, so macOS asks you to approve the app once: open the dmg, drag aiTrack to Applications, then right-click it and choose Open (or System Settings > Privacy & Security > Open Anyway)." ;;
           esac
           {
             echo "macOS 12 or newer, Apple Silicon (M1 and later) only."
@@ -241,6 +242,7 @@ jobs:
             echo '```'
             sha256sum "$dmg" "$zip"
             echo '```'
+            echo "<!-- aitrack-notes:macos:end -->"
           } > mac-notes.md
 
           # The tag has to point at the commit this run built.
@@ -286,7 +288,24 @@ jobs:
           # overwrite a section another run added in between. Re-read after each write and add the
           # section again until it is there (a concurrency group cannot do this: it keeps only one
           # waiting run per group, and there are three workflows).
+          # strip_section begin
           marker="macOS SHA256:"
+          key="macos"
+          prose="macOS 12 or newer"
+          # Cuts this workflow's section out of the notes text (stdin to stdout), so a Replace rerun puts a
+          # fresh one in its place. The current format sits between two HTML comments, prose and checksums
+          # together. A release made before the comments existed is cut from the first line of the prose to
+          # the closing code fence. Other systems' sections stay; runs of blank lines collapse to one.
+          strip_section() {
+            awk -v b="<!-- aitrack-notes:${key}:begin -->" -v e="<!-- aitrack-notes:${key}:end -->" -v p="$prose" -v m="$marker" '
+              mode == 0 && index($0, b) == 1 { mode = 1; next }
+              mode == 1 { if (index($0, e) == 1) mode = 0; next }
+              mode == 0 && index($0, p) == 1 { mode = 2; next }
+              mode == 2 { if (index($0, m) == 1) { mode = 3; fence = 0 }; next }
+              mode == 3 { if ($0 ~ /^```/) { fence++; if (fence == 2) mode = 0 }; next }
+              { blank = ($0 ~ /^[ \t\r]*$/); if (blank && lastblank) next; lastblank = blank; print }'
+          }
+          # strip_section end
           hashes=$(grep -E '^[0-9a-f]{64} ' mac-notes.md)
           # True when the notes hold this section with exactly the checksums of this run's files.
           section_current() {
@@ -303,9 +322,10 @@ jobs:
               if section_current "$body"; then
                 return 0
               fi
-              # A section from an earlier run of this workflow (Replace) is cut out, from its marker line
-              # to the closing code fence, so the new checksums take its place.
-              body=$(printf '%s\n' "$body" | awk -v m="$marker" 'skip == 0 && index($0, m) == 1 { skip = 1; fence = 0; next } skip == 1 { if ($0 ~ /^```/) { fence++; if (fence == 2) skip = 0 }; next } { print }')
+              # A section from an earlier run of this workflow (Replace) is cut out, prose and checksums
+              # (between its begin and end comments; an older release without them is cut from the first
+              # line of the prose to the closing code fence), so the new section takes its place.
+              body=$(printf '%s\n' "$body" | strip_section)
               { printf '%s\n\n' "$body"; cat mac-notes.md; } > notes.md
               gh release edit "$TAG" --notes-file notes.md
               sleep $((2 + RANDOM % 4))

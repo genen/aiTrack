@@ -26,7 +26,9 @@ py=python3
 if ! "$py" -c 'import markdown' 2>/dev/null; then
   echo "Installing markdown==3.7 into a throwaway venv."
   "$py" -m venv "$tmp/venv"
-  "$tmp/venv/bin/pip" install --quiet --disable-pip-version-check markdown==3.7
+  # Pinned by hash (the py3-none-any wheel of markdown 3.7, which has no dependencies); only a wheel is accepted.
+  printf '%s\n' 'markdown==3.7 --hash=sha256:7eb6df5690b81a1d7942992c97fad2938e956e79df20cbc6186e9c3a77b1c803' > "$tmp/requirements.txt"
+  "$tmp/venv/bin/pip" install --quiet --disable-pip-version-check --require-hashes --only-binary :all: -r "$tmp/requirements.txt"
   py="$tmp/venv/bin/python"
 fi
 

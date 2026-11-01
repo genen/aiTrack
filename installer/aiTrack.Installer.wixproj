@@ -5,8 +5,9 @@
     <OutputName>aiTrack</OutputName>
     <DebugSymbols>false</DebugSymbols>
     <!-- All-users Start menu and desktop shortcuts use per-user folder names with HKCU key paths. ICE38, ICE43 and
-         ICE57 disagree about HKLM versus HKCU for that case (same as the Afterglow installer). -->
-    <SuppressIces>ICE38;ICE43;ICE57</SuppressIces>
+         ICE57 disagree about HKLM versus HKCU for that case (same as the Afterglow installer). ICE61 warns about the
+         upgrade range that includes its own version, which AllowSameVersionUpgrades in Package.wxs asks for. -->
+    <SuppressIces>ICE38;ICE43;ICE57;ICE61</SuppressIces>
     <DefineConstants>Version=$(ProductVersion);UpgradeCode=$(UpgradeCode);ExePath=$(ExePath);IconPath=$(IconPath);LicenseRtf=$(LicenseRtf);LicenseTxt=$(LicenseTxt);ReadmePath=$(ReadmePath);NoticesPath=$(NoticesPath)</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
