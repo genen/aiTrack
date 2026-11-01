@@ -3,6 +3,15 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.15] - 2026-11-01
+
+### Added
+- Settings > About has a **Donate** link (row "Support aiTrack") that opens the PayPal donation page.
+
+### Removed
+- The "Developed by Sir Gene" row with the contact address and the License row from Settings > About. About now
+  shows only the project link and the Donate link (plus the display backend on Linux).
+
 ## [0.5.14] - 2026-11-01
 
 Stable release with everything in 0.5.14-beta below. No changes of its own.

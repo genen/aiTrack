@@ -1548,10 +1548,8 @@ pub const HELP_URL: &str = "https://github.com/genen/aiTrack#readme";
 
 /// The project page (Settings > About).
 pub const REPO_URL: &str = "https://github.com/genen/aiTrack";
-/// The licence text in the repository.
-pub const LICENSE_URL: &str = "https://github.com/genen/aiTrack/blob/main/LICENSE";
-/// Where to write to the developer.
-pub const CONTACT_EMAIL: &str = "aitrack@sirgene.com";
+/// The PayPal donation page (Settings > About > Donate).
+pub const DONATE_URL: &str = "https://www.paypal.com/donate/?hosted_button_id=YR6YMJ953Y9CE";
 
 /// Open [`HELP_URL`] in the default browser through `spawner` (`ShellExecuteW "open"` on Windows),
 /// logging the attempt next to the launcher's log. Returns whether it worked.
