@@ -37,7 +37,7 @@ This guide is for people who just want to run it. Deeper technical notes are at 
 
 Claude, Grok, ChatGPT and Gemini limit how much you can use them. Claude has a **5-hour session** limit and a **7-day weekly**
 limit. Grok has one **weekly** credit pool. ChatGPT (its Codex limits) has a **5-hour**
-and a **weekly** limit. Gemini (in Google Antigravity) has a **weekly** limit per group of models. Each tool shows its own numbers in its own place, and it is easy to
+and a **weekly** limit. Gemini (in Google Antigravity) has a **weekly** limit per group of models, and on paid plans a **5-hour** one too. Each tool shows its own numbers in its own place, and it is easy to
 hit a limit without seeing it coming.
 
 aiTrack puts those numbers in one small window:
@@ -375,8 +375,9 @@ it says **Codex login expired**, open Codex once so it renews the sign-in.
 
 Since June 2026, Google's free and Google AI Pro / Ultra plans use Gemini for coding through **Google Antigravity**:
 the Antigravity desktop app and its command-line tool `agy`. Both show the same usage page, and so does the Gemini
-block: a **Weekly** bar for the **Gemini models** (Gemini Flash and Pro). Antigravity also offers Claude and GPT models
-with a weekly limit of their own; that one is shown in the tooltip under **Other models**. Antigravity refills these
+block: a **Weekly** bar for the **Gemini models** (Gemini Flash and Pro), and on plans that have one a **Session** bar
+for their 5-hour limit. Antigravity also offers Claude and GPT models with limits of their own, and paid plans may list
+more groups (such as Gemini 4 Argon); those are shown in the tooltips under **Other models**. Antigravity refills these
 limits gradually, so a bar can go down as well as up between readings. There is no fixed reset: the tooltip says when
 the limit will be **full again** instead. An Antigravity Business (Google Workspace / Google Cloud) account has no weekly limits: its usage
 is billed in Google Cloud. When agy lists no limits and its own log says it signed in through Google Cloud, the block
@@ -389,7 +390,7 @@ never reads Antigravity's sign-in, which stays in your system's credential store
 
 The Gemini block appears when `agy` is installed: `C:\Users\<you>\AppData\Local\agy\bin\agy.exe` on Windows,
 `~/.local/bin/agy` on a Mac or Linux, or anywhere on your `PATH`. If it says **Antigravity is not signed in**, run
-`agy` once and sign in. If Antigravity ever adds a shorter limit to its usage page, it appears as a **Session** bar.
+`agy` once and sign in.
 The Stats view and the history chart work as for the other tools. The Gemini app and gemini.google.com have their own
 limits that Google does not make readable, so they are not shown.
 

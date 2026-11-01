@@ -778,7 +778,14 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
         })
         .collect();
     if kind == Kind::Session && !models.is_empty() {
-        t.push(tip("By model", Tone::Muted));
+        t.push(tip(
+            if v.id == crate::vendor::VendorId::Antigravity {
+                "Other models"
+            } else {
+                "By model"
+            },
+            Tone::Muted,
+        ));
         for m in models.iter() {
             let reset = resets_in(m.resets_at.as_deref(), now)
                 .map(|r| format!(" \u{b7} resets in {r}"))

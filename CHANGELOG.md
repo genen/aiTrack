@@ -26,6 +26,9 @@ Fixes from a full code review of the whole app.
 - A settings or alerts file that cannot be read (for example one saved as UTF-16) is backed up to `.bak` before it is
   replaced, and is left untouched if the backup fails.
 - Windows without Windows Terminal: launching the Grok CLI, Codex or Antigravity in a Command Prompt works again.
+- Gemini: on a paid plan, the Gemini 5-hour limit is the Session bar and the weekly bar always comes from "Gemini
+  Models", even when a paid plan lists another Gemini group (such as Gemini 4 Argon) first; that group and the Claude
+  and GPT limits are listed under "Other models" in both tooltips.
 - Stats: with the Stats view open during active use, the transcript scan and price refresh run every 5 minutes again.
 - Windows installer: installing a stable version over the beta of the same number (or a rebuilt MSI) upgrades in place
   instead of adding a second aiTrack entry.
