@@ -3,6 +3,12 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.20] - 2026-11-01
+
+### Changed
+- README: a note that the 90-day history cleanup relies on a correct system clock, and that a wrong clock may delete
+  past usage history.
+
 ## [0.5.19] - 2026-11-01
 
 ### Added
