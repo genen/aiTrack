@@ -36,6 +36,7 @@ mod live;
 mod macos_bundle;
 mod pace;
 mod placement;
+mod plan_windows;
 mod pricing;
 mod projects_cli;
 mod prune_script;
