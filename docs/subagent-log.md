@@ -47,3 +47,13 @@ line to both files for every subagent.
 | 2026-11-01 | reviewer-Ines: Opus review of the Gemini (Antigravity) vendor (PR #30, heavy on changed lines; read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
 | 2026-11-01 | reviewer-Pavel: Opus re-review of the Gemini review fixes (PR #30, commit 66f1efc; read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
 | 2026-11-01 | reviewer-Priya: Opus review of the About donation QR code (PR #33; read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-11-01 | Rosa, release CI coder: review mediums 8-10 (MSI same-version upgrade, pinned actions and pip hash, release-notes sections) | claude-sonnet-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-11-01 | Felix, toast and alerts coder: review mediums 3, 4, 15, 16 (test toast off UI thread, macOS raise, Codex resumed sessions, Stats rescan) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-11-01 | Nadia, staleness and Codex coder: review mediums 1, 2, 5 (Claude last value, stale predictive alerts, Codex banked resets) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-11-01 | Omar, cache and pricing coder: review mediums 6, 7, 11, 13, 14 (future cache times, Opus 4 price, Grok Bot history, unreadable settings, cmd title) | claude-sonnet-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-11-01 | Priya, Claude-vendor reviewer: full Opus review of Claude sources, cache, transcripts, pricing (read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-11-01 | Tomas, vendors reviewer: full Opus review of Grok, Grok Bot, Codex, Gemini (read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-11-01 | Hana, collector and security reviewer: full Opus review of collector, prune, credentials, network (read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-11-01 | Mateo, UI reviewer: full Opus review of the UI and PR #33 (read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-11-01 | Ines, build and release CI reviewer: full Opus review of workflows and scripts (read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-11-01 | Lena, review verifier: checked Codex's outside review claims against main (read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
