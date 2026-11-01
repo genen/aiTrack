@@ -32,6 +32,9 @@ pub const WARN_PCT: f64 = 90.0;
 pub const PREDICT_MIN: f64 = 30.0;
 /// Fired-event records older than this are dropped.
 pub const PRUNE_DAYS: i64 = 10;
+/// After a [`retry_later`] answer the notifier is not asked again for this many minutes (macOS
+/// permission still undecided): the alerts stay unsent and are offered again after that.
+pub const RETRY_BACKOFF_MIN: i64 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlertKind {
@@ -62,7 +65,9 @@ impl AlertKind {
 }
 
 /// Wraps a notifier: a usage alert (see [`AlertKind::raises_window`]) also sets `raise`, which the
-/// window reads to come to the front. Set whether or not the toast could be shown.
+/// window reads to come to the front. Set once the notifier's answer is final, whether or not the
+/// toast could be shown, but never on a [`retry_later`] answer: that alert is offered again at a
+/// later poll, and the window must not jump to the front every time it waits.
 pub struct Raising<'a> {
     pub inner: &'a dyn Notifier,
     pub raise: &'a AtomicBool,
@@ -70,10 +75,12 @@ pub struct Raising<'a> {
 
 impl Notifier for Raising<'_> {
     fn notify(&self, n: &Notification) -> Result<(), String> {
-        if n.kind.raises_window() {
+        let r = self.inner.notify(n);
+        let retry = r.as_ref().is_err_and(|e| is_retry_later(e));
+        if n.kind.raises_window() && !retry {
             self.raise.store(true, Ordering::Relaxed);
         }
-        self.inner.notify(n)
+        r
     }
 }
 
@@ -112,13 +119,13 @@ impl Notification {
     }
 }
 
-/// Prefix of a [`Notifier`] error meaning "not shown yet, try again at the next poll" (for example
-/// macOS notification permission not decided yet). Any other error is final: the alert stays
+/// Prefix of a [`Notifier`] error meaning "not shown yet, try again later" (for example macOS
+/// notification permission not decided yet; retried after [`RETRY_BACKOFF_MIN`]). Any other error is final: the alert stays
 /// recorded as sent and is not repeated every minute. A notifier that deliberately shows nothing
 /// (the user turned its notifications off) returns `Ok`.
 pub const RETRY_LATER: &str = "[retry later] ";
 
-/// An error for [`Notifier::notify`] that makes the alert be offered again at the next poll.
+/// An error for [`Notifier::notify`] that makes the alert be offered again at a later poll.
 pub fn retry_later(why: &str) -> String {
     format!("{RETRY_LATER}{why}")
 }
@@ -188,6 +195,8 @@ pub struct Alerts {
     path: PathBuf,
     state: Mutex<AlertState>,
     options: Mutex<AlertOptions>,
+    /// Set after a [`retry_later`] answer: until then alerts wait without asking the notifier.
+    retry_after: Mutex<Option<DateTime<Utc>>>,
 }
 
 /// The override from [`INFO_PCT_ENV`] when it is set to a number (clamped).
@@ -271,6 +280,7 @@ impl Alerts {
             path,
             state: Mutex::new(state),
             options: Mutex::new(AlertOptions::default()),
+            retry_after: Mutex::new(None),
         }
     }
 
@@ -458,14 +468,23 @@ impl Alerts {
             n.options = options;
         }
         // An alert that could not be shown yet is not left marked as sent: it is offered again at
-        // the next poll. Other failures are logged and final.
+        // a later poll, but the notifier is not asked again before RETRY_BACKOFF_MIN has passed.
+        // Other failures are logged and final.
         let mut delivered = Vec::new();
         let mut retry: Vec<(String, Vec<String>)> = Vec::new();
+        let mut retry_after = self.retry_after.lock().unwrap_or_else(|e| e.into_inner());
         for (n, u) in sent.into_iter().zip(undo) {
+            if retry_after.is_some_and(|t| now < t) {
+                retry.push(u);
+                continue;
+            }
             match notifier.notify(&n) {
                 Ok(()) => delivered.push(n),
                 Err(e) if is_retry_later(&e) => {
-                    log_line(&format!("notification will be retried: {e}"));
+                    log_line(&format!(
+                        "notification will be retried in {RETRY_BACKOFF_MIN} min: {e}"
+                    ));
+                    *retry_after = Some(now + Duration::minutes(RETRY_BACKOFF_MIN));
                     retry.push(u);
                 }
                 Err(e) => {
@@ -474,6 +493,7 @@ impl Alerts {
                 }
             }
         }
+        drop(retry_after);
         if !retry.is_empty() {
             let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
             for (key, tags) in retry {

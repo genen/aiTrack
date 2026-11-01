@@ -542,3 +542,171 @@ fn the_render_example_never_sends_real_toasts() {
         "no platform notifier in render.rs"
     );
 }
+
+// ------------------------------------------------------------ retry later (macOS permission undecided)
+
+/// Answers "retry later" (permission not decided yet) until `ok` is set; counts the calls.
+#[derive(Default)]
+struct Undecided {
+    calls: Mutex<u32>,
+    ok: std::sync::atomic::AtomicBool,
+    shown: Recorder,
+}
+
+impl Notifier for Undecided {
+    fn notify(&self, n: &Notification) -> Result<(), String> {
+        *self.calls.lock().unwrap() += 1;
+        if self.ok.load(std::sync::atomic::Ordering::SeqCst) {
+            self.shown.notify(n)
+        } else {
+            Err(aitrack::alerts::retry_later("permission not decided yet"))
+        }
+    }
+}
+
+#[test]
+fn a_retry_later_answer_does_not_raise_the_window_and_a_final_one_does() {
+    use aitrack::alerts::Raising;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let flag = AtomicBool::new(false);
+    let undecided = Undecided::default();
+    let r = Raising {
+        inner: &undecided,
+        raise: &flag,
+    };
+    let e = r
+        .notify(&Notification::new("t", "b", AlertKind::Warning))
+        .unwrap_err();
+    assert!(aitrack::alerts::is_retry_later(&e));
+    assert!(!flag.load(Ordering::Relaxed), "raised on retry later");
+
+    // shown: raised
+    undecided.ok.store(true, Ordering::SeqCst);
+    r.notify(&Notification::new("t", "b", AlertKind::Warning))
+        .unwrap();
+    assert!(flag.swap(false, Ordering::Relaxed));
+
+    // a final failure still raises (the in-app state shows the alert)
+    let r = Raising {
+        inner: &Failing,
+        raise: &flag,
+    };
+    r.notify(&Notification::new("t", "b", AlertKind::Limit))
+        .unwrap_err();
+    assert!(flag.load(Ordering::Relaxed));
+}
+
+#[test]
+fn a_retry_later_alert_waits_out_the_backoff_and_is_sent_once_permission_comes() {
+    use aitrack::alerts::{Raising, RETRY_BACKOFF_MIN};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let t = TempDir::new();
+    let a = alerts(&t);
+    let undecided = Undecided::default();
+    let flag = AtomicBool::new(false);
+    let r = Raising {
+        inner: &undecided,
+        raise: &flag,
+    };
+    let p = flat(92.0);
+    assert!(a.evaluate_with("Claude", &p, now(), &r, 75.0).is_empty());
+    assert_eq!(*undecided.calls.lock().unwrap(), 1);
+    // polls within the backoff do not ask the notifier (no wait on the collector thread)
+    for m in [1, 2, RETRY_BACKOFF_MIN - 1] {
+        let at = now() + Duration::minutes(m);
+        assert!(a.evaluate_with("Claude", &p, at, &r, 75.0).is_empty());
+    }
+    assert_eq!(*undecided.calls.lock().unwrap(), 1);
+    assert!(!flag.load(Ordering::Relaxed));
+
+    // after the backoff it is asked again; still undecided: nothing sent, not raised
+    let at = now() + Duration::minutes(RETRY_BACKOFF_MIN);
+    assert!(a.evaluate_with("Claude", &p, at, &r, 75.0).is_empty());
+    assert_eq!(*undecided.calls.lock().unwrap(), 2);
+    assert!(!flag.load(Ordering::Relaxed));
+
+    // permission granted: the waiting alert goes out once, and raises the window
+    undecided.ok.store(true, Ordering::SeqCst);
+    let at = now() + Duration::minutes(2 * RETRY_BACKOFF_MIN);
+    let sent = a.evaluate_with("Claude", &p, at, &r, 75.0);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(undecided.shown.titles(), ["Claude session: 8% left"]);
+    assert!(flag.load(Ordering::Relaxed));
+    let at = now() + Duration::minutes(3 * RETRY_BACKOFF_MIN);
+    assert!(a.evaluate_with("Claude", &p, at, &r, 75.0).is_empty());
+    assert_eq!(undecided.shown.titles().len(), 1);
+}
+
+/// Blocks every notify until `go` is sent.
+struct Slow {
+    go: Mutex<std::sync::mpsc::Receiver<()>>,
+    shown: Recorder,
+}
+
+impl Notifier for Slow {
+    fn notify(&self, n: &Notification) -> Result<(), String> {
+        let _ = self
+            .go
+            .lock()
+            .unwrap()
+            .recv_timeout(StdDuration::from_secs(10));
+        self.shown.notify(n)
+    }
+}
+
+#[test]
+fn the_test_toast_is_sent_in_the_background_one_at_a_time() {
+    use aitrack::app::TestToast;
+    let t = TempDir::new();
+    let (app, _, _) = app_over_history(&t, 10.0);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let slow = Arc::new(Slow {
+        go: Mutex::new(rx),
+        shown: Recorder::default(),
+    });
+    app.set_notifier(slow.clone());
+    assert_eq!(app.test_notification_state(), TestToast::Idle);
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let d = done.clone();
+    let t0 = Instant::now();
+    assert!(app.start_test_notification(AlertKind::Warning, move || {
+        d.store(true, std::sync::atomic::Ordering::SeqCst)
+    }));
+    // returned at once although the notifier is still blocked
+    assert!(t0.elapsed() < StdDuration::from_secs(2));
+    assert_eq!(
+        app.test_notification_state(),
+        TestToast::Sending(AlertKind::Warning)
+    );
+    assert_eq!(
+        aitrack::ui::test_toast_text(&app.test_notification_state()).as_deref(),
+        Some("Sending the warning style...")
+    );
+    // a second press while sending does nothing
+    assert!(!app.start_test_notification(AlertKind::Limit, || {}));
+    assert!(!app.take_raise());
+
+    tx.send(()).unwrap();
+    wait("the test send to finish", &|| {
+        done.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    assert_eq!(
+        app.test_notification_state(),
+        TestToast::Done(AlertKind::Warning, Ok(()))
+    );
+    assert_eq!(slow.shown.titles(), ["Claude session: 10% left"]);
+    assert!(app.take_raise());
+
+    // a retry-later answer is reported without its prefix and does not raise
+    app.set_notifier(Arc::new(Undecided::default()));
+    let (dtx, drx) = std::sync::mpsc::channel();
+    assert!(app.start_test_notification(AlertKind::Info, move || {
+        let _ = dtx.send(());
+    }));
+    drx.recv_timeout(StdDuration::from_secs(10)).unwrap();
+    assert_eq!(
+        aitrack::ui::test_toast_text(&app.test_notification_state()).as_deref(),
+        Some("Could not send: permission not decided yet")
+    );
+    assert!(!app.take_raise());
+}

@@ -58,9 +58,14 @@ fn an_alert_that_could_not_be_shown_yet_is_offered_again() {
     let a = alerts_in(&t);
     assert!(a.evaluate("Claude", &flat(93.0), now(), &Later).is_empty());
     let rec = Recorder::default();
-    assert_eq!(a.evaluate("Claude", &flat(93.0), now(), &rec).len(), 1);
+    // within the backoff the notifier is not asked again; the alert keeps waiting
+    let soon = now() + Duration::minutes(alerts::RETRY_BACKOFF_MIN - 1);
+    assert!(a.evaluate("Claude", &flat(93.0), soon, &rec).is_empty());
+    assert!(rec.0.lock().unwrap().is_empty());
+    let later = now() + Duration::minutes(alerts::RETRY_BACKOFF_MIN);
+    assert_eq!(a.evaluate("Claude", &flat(93.0), later, &rec).len(), 1);
     // once shown it is not repeated, also after a reload from alerts.json
     assert!(alerts_in(&t)
-        .evaluate("Claude", &flat(93.0), now(), &rec)
+        .evaluate("Claude", &flat(93.0), later, &rec)
         .is_empty());
 }

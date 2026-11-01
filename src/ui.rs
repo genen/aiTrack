@@ -171,7 +171,6 @@ pub struct AitrackUi {
     default_range_at: Option<(VendorId, Kind, bool, Instant)>,
     custom: String,
     custom_local: String,
-    test_result: Option<String>,
     copied_at: Option<Instant>,
     startup_error: Option<String>,
     on_top_sent: Option<bool>,
@@ -284,7 +283,6 @@ impl AitrackUi {
             default_range_at: None,
             custom: String::new(),
             custom_local: String::new(),
-            test_result: None,
             copied_at: None,
             startup_error: None,
             on_top_sent: None,
@@ -1456,37 +1454,38 @@ impl AitrackUi {
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 4.0;
-                let toggled_general = section_card(
-                    ui,
-                    pal,
-                    "General",
-                    "general",
-                    v.sections.general,
-                    &mut sec_rects,
-                    |ui| {
-                    ui.label(
-                        RichText::new("Update frequency")
-                            .font(prop(13.0))
-                            .color(pal.foreground),
-                    );
-                    ui.horizontal(|ui| {
-                        for p in view::presets(v.interval_min) {
-                            if pill(ui, pal, p.label, p.selected).clicked() {
-                                self.app.set_interval(p.minutes);
-                            }
-                        }
-                    });
-                    if view::fast_warning(v.interval_min) {
-                        ui.label(
+                let toggled_general =
+                    section_card(
+                        ui,
+                        pal,
+                        "General",
+                        "general",
+                        v.sections.general,
+                        &mut sec_rects,
+                        |ui| {
+                            ui.label(
+                                RichText::new("Update frequency")
+                                    .font(prop(13.0))
+                                    .color(pal.foreground),
+                            );
+                            ui.horizontal(|ui| {
+                                for p in view::presets(v.interval_min) {
+                                    if pill(ui, pal, p.label, p.selected).clicked() {
+                                        self.app.set_interval(p.minutes);
+                                    }
+                                }
+                            });
+                            if view::fast_warning(v.interval_min) {
+                                ui.label(
                             RichText::new(
                                 "Polling every minute may hit rate limits. 15 is recommended.",
                             )
                             .font(prop(11.5))
                             .color(pal.orange),
                         );
-                    }
-                    divider(ui, pal);
-                    setting_row(
+                            }
+                            divider(ui, pal);
+                            setting_row(
                         ui,
                         pal,
                         "Custom (minutes)",
@@ -1508,46 +1507,46 @@ impl AitrackUi {
                             }
                         },
                     );
-                    divider(ui, pal);
-                    setting_row(
-                        ui,
-                        pal,
-                        "Local refresh (seconds)",
-                        "Re-reads the Claude app's files",
-                        |ui| {
-                            let r = ui.add(
-                                egui::TextEdit::singleline(&mut self.custom_local)
-                                    .desired_width(56.0)
-                                    .font(mono(12.0)),
+                            divider(ui, pal);
+                            setting_row(
+                                ui,
+                                pal,
+                                "Local refresh (seconds)",
+                                "Re-reads the Claude app's files",
+                                |ui| {
+                                    let r = ui.add(
+                                        egui::TextEdit::singleline(&mut self.custom_local)
+                                            .desired_width(56.0)
+                                            .font(mono(12.0)),
+                                    );
+                                    if r.lost_focus() {
+                                        if let Ok(n) = self.custom_local.trim().parse::<f64>() {
+                                            if n.is_finite() && n > 0.0 {
+                                                self.app.set_local_interval(n);
+                                            }
+                                        }
+                                    }
+                                    if !r.has_focus() {
+                                        self.custom_local =
+                                            fmt_minutes(self.app.settings.get().local_interval_sec);
+                                    }
+                                },
                             );
-                            if r.lost_focus() {
-                                if let Ok(n) = self.custom_local.trim().parse::<f64>() {
-                                    if n.is_finite() && n > 0.0 {
-                                        self.app.set_local_interval(n);
+                            divider(ui, pal);
+                            let note = self
+                                .startup_error
+                                .clone()
+                                .unwrap_or_else(|| "Launch when you sign in".into());
+                            setting_row(ui, pal, start_at_login_label(), &note, |ui| {
+                                if toggle(ui, pal, v.startup).clicked() {
+                                    match self.app.set_startup(!v.startup) {
+                                        Ok(()) => self.startup_error = None,
+                                        Err(e) => self.startup_error = Some(e),
                                     }
                                 }
-                            }
-                            if !r.has_focus() {
-                                self.custom_local =
-                                    fmt_minutes(self.app.settings.get().local_interval_sec);
-                            }
+                            });
                         },
                     );
-                    divider(ui, pal);
-                    let note = self
-                        .startup_error
-                        .clone()
-                        .unwrap_or_else(|| "Launch when you sign in".into());
-                    setting_row(ui, pal, start_at_login_label(), &note, |ui| {
-                        if toggle(ui, pal, v.startup).clicked() {
-                            match self.app.set_startup(!v.startup) {
-                                Ok(()) => self.startup_error = None,
-                                Err(e) => self.startup_error = Some(e),
-                            }
-                        }
-                    });
-                    },
-                );
                 if let Some(o) = toggled_general {
                     self.app.settings.set_section("general", o);
                 }
@@ -1559,12 +1558,7 @@ impl AitrackUi {
                     v.sections.appearance,
                     &mut sec_rects,
                     |ui| {
-                    setting_row(
-                        ui,
-                        pal,
-                        "Layout",
-                        "",
-                        |ui| {
+                        setting_row(ui, pal, "Layout", "", |ui| {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 for (label, horizontal) in
                                     [("Horizontal", true), ("Vertical", false)]
@@ -1576,37 +1570,36 @@ impl AitrackUi {
                                     }
                                 }
                             });
-                        },
-                    );
-                    divider(ui, pal);
-                    setting_row(ui, pal, "Theme", "Window colors", |ui| {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            for t in ThemeChoice::ALL.into_iter().rev() {
-                                let r = pill(ui, pal, t.label(), v.theme == t);
-                                theme_rects.push((t, r.rect));
-                                if r.clicked() {
-                                    self.app.settings.set_theme(t);
-                                }
-                            }
                         });
-                    });
-                    divider(ui, pal);
-                    setting_row(ui, pal, "Logos", "", |ui| {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            for b in BadgeVariant::ALL.into_iter().rev() {
-                                let mut r = pill(ui, pal, b.label(), v.badge_style == b);
-                                if b == BadgeVariant::Auto {
-                                    r = r.on_hover_text(
+                        divider(ui, pal);
+                        setting_row(ui, pal, "Theme", "Window colors", |ui| {
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                for t in ThemeChoice::ALL.into_iter().rev() {
+                                    let r = pill(ui, pal, t.label(), v.theme == t);
+                                    theme_rects.push((t, r.rect));
+                                    if r.clicked() {
+                                        self.app.settings.set_theme(t);
+                                    }
+                                }
+                            });
+                        });
+                        divider(ui, pal);
+                        setting_row(ui, pal, "Logos", "", |ui| {
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                for b in BadgeVariant::ALL.into_iter().rev() {
+                                    let mut r = pill(ui, pal, b.label(), v.badge_style == b);
+                                    if b == BadgeVariant::Auto {
+                                        r = r.on_hover_text(
                                         "Dark logos on a dark window, light logos on a light one",
                                     );
+                                    }
+                                    variant_rects.push((b, r.rect));
+                                    if r.clicked() {
+                                        self.app.set_badge_style(b);
+                                    }
                                 }
-                                variant_rects.push((b, r.rect));
-                                if r.clicked() {
-                                    self.app.set_badge_style(b);
-                                }
-                            }
+                            });
                         });
-                    });
                     },
                 );
                 if let Some(o) = toggled_appearance {
@@ -1620,126 +1613,134 @@ impl AitrackUi {
                     v.sections.display,
                     &mut sec_rects,
                     |ui| {
-                    setting_row(ui, pal, "Show remaining", "Count down what is left", |ui| {
-                        if toggle(ui, pal, v.remaining()).clicked() {
-                            self.app.set_direction(if v.remaining() {
-                                Direction::Used
-                            } else {
-                                Direction::Remaining
-                            });
-                        }
-                    });
-                    divider(ui, pal);
-                    setting_row(
-                        ui,
-                        pal,
-                        "Window position",
-                        "Reopens where you left it",
-                        |ui| {
-                            if pill(ui, pal, "Reset", false).clicked() {
-                                self.reset_window(ui.ctx());
+                        setting_row(ui, pal, "Show remaining", "Count down what is left", |ui| {
+                            if toggle(ui, pal, v.remaining()).clicked() {
+                                self.app.set_direction(if v.remaining() {
+                                    Direction::Used
+                                } else {
+                                    Direction::Remaining
+                                });
                             }
-                        },
-                    );
-                    divider(ui, pal);
-                    setting_row(
-                        ui,
-                        pal,
-                        "Always on top",
-                        if crate::placement::on_top_unavailable() {
-                            "Not available on native Wayland (see README)"
-                        } else {
-                            "Keep the window above others"
-                        },
-                        |ui| {
-                            if toggle(ui, pal, v.on_top).clicked() {
-                                self.app.set_on_top(!v.on_top);
-                            }
-                        },
-                    );
-                    for (name, found, track, is_claude) in [
-                        (
-                            "Show Claude",
-                            self.app.claude_detected(),
-                            Track::from_opt(v.claude_enabled),
-                            true,
-                        ),
-                        (
-                            "Show Grok",
-                            self.app.grok_detected(),
-                            Track::from_opt(v.grok_enabled),
-                            false,
-                        ),
-                        (
-                            "Show ChatGPT",
-                            self.app.codex_detected(),
-                            Track::from_opt(v.codex_enabled),
-                            false,
-                        ),
-                        (
-                            "Show Gemini",
-                            self.app.antigravity_detected(),
-                            Track::from_opt(v.antigravity_enabled),
-                            false,
-                        ),
-                    ] {
-                        let codex = name == "Show ChatGPT";
-                        let gemini = name == "Show Gemini";
-                        if !is_claude && !codex && !gemini && self.app.grok.is_none() {
-                            continue;
-                        }
-                        if codex && self.app.codex.is_none() {
-                            continue;
-                        }
-                        if gemini && self.app.antigravity.is_none() {
-                            continue;
-                        }
+                        });
                         divider(ui, pal);
-                        let subtitle = if found {
-                            format!("Found on this {}", crate::util::this_machine())
-                        } else {
-                            "Not found".to_string()
-                        };
-                        setting_row(ui, pal, name, &subtitle, |ui| {
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                for t in Track::ALL.into_iter().rev() {
-                                    let r = pill(ui, pal, t.label(), track == t);
-                                    track_rects.push((format!("{}:{}", name, t.label()), r.rect));
-                                    if r.clicked() {
-                                        if is_claude {
-                                            self.app.set_claude_track(t);
-                                        } else if codex {
-                                            self.app.set_codex_track(t);
-                                        } else if gemini {
-                                            self.app.set_antigravity_track(t);
-                                        } else {
-                                            self.app.set_grok_track(t);
+                        setting_row(
+                            ui,
+                            pal,
+                            "Window position",
+                            "Reopens where you left it",
+                            |ui| {
+                                if pill(ui, pal, "Reset", false).clicked() {
+                                    self.reset_window(ui.ctx());
+                                }
+                            },
+                        );
+                        divider(ui, pal);
+                        setting_row(
+                            ui,
+                            pal,
+                            "Always on top",
+                            if crate::placement::on_top_unavailable() {
+                                "Not available on native Wayland (see README)"
+                            } else {
+                                "Keep the window above others"
+                            },
+                            |ui| {
+                                if toggle(ui, pal, v.on_top).clicked() {
+                                    self.app.set_on_top(!v.on_top);
+                                }
+                            },
+                        );
+                        for (name, found, track, is_claude) in [
+                            (
+                                "Show Claude",
+                                self.app.claude_detected(),
+                                Track::from_opt(v.claude_enabled),
+                                true,
+                            ),
+                            (
+                                "Show Grok",
+                                self.app.grok_detected(),
+                                Track::from_opt(v.grok_enabled),
+                                false,
+                            ),
+                            (
+                                "Show ChatGPT",
+                                self.app.codex_detected(),
+                                Track::from_opt(v.codex_enabled),
+                                false,
+                            ),
+                            (
+                                "Show Gemini",
+                                self.app.antigravity_detected(),
+                                Track::from_opt(v.antigravity_enabled),
+                                false,
+                            ),
+                        ] {
+                            let codex = name == "Show ChatGPT";
+                            let gemini = name == "Show Gemini";
+                            if !is_claude && !codex && !gemini && self.app.grok.is_none() {
+                                continue;
+                            }
+                            if codex && self.app.codex.is_none() {
+                                continue;
+                            }
+                            if gemini && self.app.antigravity.is_none() {
+                                continue;
+                            }
+                            divider(ui, pal);
+                            let subtitle = if found {
+                                format!("Found on this {}", crate::util::this_machine())
+                            } else {
+                                "Not found".to_string()
+                            };
+                            setting_row(ui, pal, name, &subtitle, |ui| {
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    for t in Track::ALL.into_iter().rev() {
+                                        let r = pill(ui, pal, t.label(), track == t);
+                                        track_rects
+                                            .push((format!("{}:{}", name, t.label()), r.rect));
+                                        if r.clicked() {
+                                            if is_claude {
+                                                self.app.set_claude_track(t);
+                                            } else if codex {
+                                                self.app.set_codex_track(t);
+                                            } else if gemini {
+                                                self.app.set_antigravity_track(t);
+                                            } else {
+                                                self.app.set_grok_track(t);
+                                            }
                                         }
                                     }
+                                });
+                            });
+                        }
+                        if self.app.grok.is_some() && self.app.grok_cli_present() {
+                            divider(ui, pal);
+                            let running = self.app.grok_refreshing();
+                            // the outcome stays here until the next click (the window is covered)
+                            let offset = chrono::Local::now().offset().local_minus_utc();
+                            let subtitle = self
+                                .app
+                                .grok_refresh_status()
+                                .text(offset)
+                                .unwrap_or_else(|| {
+                                    "Starts the Grok CLI briefly to fetch usage".into()
+                                });
+                            let subtitle = subtitle.as_str();
+                            setting_row(ui, pal, "Refresh Grok now", subtitle, |ui| {
+                                let r = pill(
+                                    ui,
+                                    pal,
+                                    if running { "Refreshing" } else { "Refresh" },
+                                    false,
+                                );
+                                self.settings_refresh_rect = Some(r.rect);
+                                if r.clicked() && !running {
+                                    let ctx = ui.ctx().clone();
+                                    self.app.refresh_grok(move || ctx.request_repaint());
                                 }
                             });
-                        });
-                    }
-                    if self.app.grok.is_some() && self.app.grok_cli_present() {
-                        divider(ui, pal);
-                        let running = self.app.grok_refreshing();
-                        // the outcome stays here until the next click (the window is covered)
-                        let offset = chrono::Local::now().offset().local_minus_utc();
-                        let subtitle = self
-                            .app
-                            .grok_refresh_status()
-                            .text(offset)
-                            .unwrap_or_else(|| "Starts the Grok CLI briefly to fetch usage".into());
-                        let subtitle = subtitle.as_str();
-                        setting_row(ui, pal, "Refresh Grok now", subtitle, |ui| {
-                            let r = pill(ui, pal, if running { "Refreshing" } else { "Refresh" }, false);
-                            self.settings_refresh_rect = Some(r.rect);
-                            if r.clicked() && !running {
-                                let ctx = ui.ctx().clone();
-                                self.app.refresh_grok(move || ctx.request_repaint());
-                            }
-                        });
-                    }
+                        }
                     },
                 );
                 if let Some(o) = toggled_display {
@@ -1753,50 +1754,64 @@ impl AitrackUi {
                     v.sections.notifications,
                     &mut sec_rects,
                     |ui| {
-                    setting_row(
-                        ui,
-                        pal,
-                        "Usage alerts",
-                        "Toasts as limits get close",
-                        |ui| {
-                            if toggle(ui, pal, v.notifications).clicked() {
-                                self.app.set_notifications(!v.notifications);
-                            }
-                        },
-                    );
-                    ui.add_space(4.0);
-                    setting_row_tip(ui, pal, "Alert sounds", "A reminder sound for warnings and limits", alert_sounds_tip(), |ui| {
-                        let resp = toggle(ui, pal, v.alert_sounds);
-                        if resp.clicked() {
-                            self.app.settings.set_alert_sounds(!v.alert_sounds);
-                        }
-                        hover_note(resp, pal, "Alert sounds", alert_sounds_tip());
-                    });
-                    ui.add_space(4.0);
-                    ui.label(RichText::new("Send a test toast").font(prop(11.5)).color(pal.muted));
-                    ui.horizontal(|ui| {
-                        for (label, kind) in [
-                            ("Info", crate::alerts::AlertKind::Info),
-                            ("Warning", crate::alerts::AlertKind::Warning),
-                            ("Limit", crate::alerts::AlertKind::Limit),
-                        ] {
-                            if pill(ui, pal, label, false).clicked() {
-                                self.test_result = Some(match self.app.send_test_notification(kind) {
-                                    Ok(()) => format!(
-                                        "Sent the {} style. If nothing appeared, see notify.log in ~/.aitrack",
-                                        label.to_lowercase()
-                                    ),
-                                    Err(e) => format!("Could not send: {e}"),
-                                });
-                            }
-                        }
-                    });
-                    if let Some(r) = &self.test_result {
-                        ui.add(
-                            egui::Label::new(RichText::new(r).font(prop(11.5)).color(pal.muted))
-                                .wrap(),
+                        setting_row(
+                            ui,
+                            pal,
+                            "Usage alerts",
+                            "Toasts as limits get close",
+                            |ui| {
+                                if toggle(ui, pal, v.notifications).clicked() {
+                                    self.app.set_notifications(!v.notifications);
+                                }
+                            },
                         );
-                    }
+                        ui.add_space(4.0);
+                        setting_row_tip(
+                            ui,
+                            pal,
+                            "Alert sounds",
+                            "A reminder sound for warnings and limits",
+                            alert_sounds_tip(),
+                            |ui| {
+                                let resp = toggle(ui, pal, v.alert_sounds);
+                                if resp.clicked() {
+                                    self.app.settings.set_alert_sounds(!v.alert_sounds);
+                                }
+                                hover_note(resp, pal, "Alert sounds", alert_sounds_tip());
+                            },
+                        );
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new("Send a test toast")
+                                .font(prop(11.5))
+                                .color(pal.muted),
+                        );
+                        // the send runs on a background thread (a notifier can take seconds); the
+                        // buttons wait while one is in flight
+                        let test = self.app.test_notification_state();
+                        let sending = matches!(test, crate::app::TestToast::Sending(_));
+                        ui.horizontal(|ui| {
+                            for (label, kind) in [
+                                ("Info", crate::alerts::AlertKind::Info),
+                                ("Warning", crate::alerts::AlertKind::Warning),
+                                ("Limit", crate::alerts::AlertKind::Limit),
+                            ] {
+                                if pill(ui, pal, label, false).clicked() && !sending {
+                                    let ctx = ui.ctx().clone();
+                                    self.app.start_test_notification(kind, move || {
+                                        ctx.request_repaint()
+                                    });
+                                }
+                            }
+                        });
+                        if let Some(r) = test_toast_text(&test) {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(r).font(prop(11.5)).color(pal.muted),
+                                )
+                                .wrap(),
+                            );
+                        }
                     },
                 );
                 if let Some(o) = toggled_notifications {
@@ -1810,40 +1825,51 @@ impl AitrackUi {
                     v.sections.data,
                     &mut sec_rects,
                     |ui| {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(view::RETENTION_TEXT)
-                                .font(prop(11.5))
-                                .color(pal.muted),
-                        )
-                        .wrap(),
-                    );
-                    ui.add_space(2.0);
-                    for (file, size) in self.app.data_files() {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(file).font(mono(11.5)).color(pal.foreground));
-                            ui.label(
-                                RichText::new(size.map_or("none yet".into(), crate::store::human_size))
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(view::RETENTION_TEXT)
+                                    .font(prop(11.5))
+                                    .color(pal.muted),
+                            )
+                            .wrap(),
+                        );
+                        ui.add_space(2.0);
+                        for (file, size) in self.app.data_files() {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(file).font(mono(11.5)).color(pal.foreground),
+                                );
+                                ui.label(
+                                    RichText::new(
+                                        size.map_or("none yet".into(), crate::store::human_size),
+                                    )
                                     .font(mono(11.5))
                                     .color(pal.muted),
-                            );
-                        });
-                    }
-                    ui.add_space(4.0);
-                    let result = self.app.prune_result();
-                    let running = result.as_deref() == Some("");
-                    if pill(ui, pal, if running { "Pruning..." } else { "Prune now" }, false)
+                                );
+                            });
+                        }
+                        ui.add_space(4.0);
+                        let result = self.app.prune_result();
+                        let running = result.as_deref() == Some("");
+                        if pill(
+                            ui,
+                            pal,
+                            if running { "Pruning..." } else { "Prune now" },
+                            false,
+                        )
                         .clicked()
-                        && !running
-                    {
-                        self.app.prune_now();
-                    }
-                    if let Some(r) = result.filter(|r| !r.is_empty()) {
-                        ui.add(
-                            egui::Label::new(RichText::new(r).font(prop(11.5)).color(pal.muted))
+                            && !running
+                        {
+                            self.app.prune_now();
+                        }
+                        if let Some(r) = result.filter(|r| !r.is_empty()) {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(r).font(prop(11.5)).color(pal.muted),
+                                )
                                 .wrap(),
-                        );
-                    }
+                            );
+                        }
                     },
                 );
                 if let Some(o) = toggled_data {
@@ -1857,30 +1883,32 @@ impl AitrackUi {
                     v.sections.diagnostics,
                     &mut sec_rects,
                     |ui| {
-                    let copied = self
-                        .copied_at
-                        .is_some_and(|t| t.elapsed() < Duration::from_millis(1500));
-                    if pill(ui, pal, if copied { "Copied" } else { "Copy log" }, false).clicked() {
-                        ui.ctx().copy_text(view::copy_log(&st.diagnostics));
-                        self.copied_at = Some(Instant::now());
-                    }
-                    ui.add_space(4.0);
-                    if st.diagnostics.is_empty() {
-                        ui.label(
-                            RichText::new("No polls recorded yet.")
-                                .font(mono(11.5))
-                                .color(pal.muted),
-                        );
-                    }
-                    egui::ScrollArea::vertical()
-                        .max_height(DIAG_ROWS_SHOWN as f32 * 17.0)
-                        .id_salt("diag")
-                        .show(ui, |ui| {
-                            ui.spacing_mut().item_spacing.y = 2.0;
-                            for d in st.diagnostics.iter().take(DIAG_ROWS_SHOWN) {
-                                diag_row(ui, pal, d);
-                            }
-                        });
+                        let copied = self
+                            .copied_at
+                            .is_some_and(|t| t.elapsed() < Duration::from_millis(1500));
+                        if pill(ui, pal, if copied { "Copied" } else { "Copy log" }, false)
+                            .clicked()
+                        {
+                            ui.ctx().copy_text(view::copy_log(&st.diagnostics));
+                            self.copied_at = Some(Instant::now());
+                        }
+                        ui.add_space(4.0);
+                        if st.diagnostics.is_empty() {
+                            ui.label(
+                                RichText::new("No polls recorded yet.")
+                                    .font(mono(11.5))
+                                    .color(pal.muted),
+                            );
+                        }
+                        egui::ScrollArea::vertical()
+                            .max_height(DIAG_ROWS_SHOWN as f32 * 17.0)
+                            .id_salt("diag")
+                            .show(ui, |ui| {
+                                ui.spacing_mut().item_spacing.y = 2.0;
+                                for d in st.diagnostics.iter().take(DIAG_ROWS_SHOWN) {
+                                    diag_row(ui, pal, d);
+                                }
+                            });
                     },
                 );
                 if let Some(o) = toggled_diagnostics {
@@ -2766,6 +2794,24 @@ fn section_card(
         }
     });
     toggled
+}
+
+/// The line under the test-toast buttons for the state of the last test send.
+pub fn test_toast_text(t: &crate::app::TestToast) -> Option<String> {
+    use crate::app::TestToast;
+    let style = |k: crate::alerts::AlertKind| format!("{k:?}").to_lowercase();
+    match t {
+        TestToast::Idle => None,
+        TestToast::Sending(k) => Some(format!("Sending the {} style...", style(*k))),
+        TestToast::Done(k, Ok(())) => Some(format!(
+            "Sent the {} style. If nothing appeared, see notify.log in ~/.aitrack",
+            style(*k)
+        )),
+        TestToast::Done(_, Err(e)) => Some(format!(
+            "Could not send: {}",
+            e.strip_prefix(crate::alerts::RETRY_LATER).unwrap_or(e)
+        )),
+    }
 }
 
 fn pill(ui: &mut Ui, pal: &Palette, text: &str, selected: bool) -> Response {

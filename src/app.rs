@@ -47,6 +47,21 @@ pub struct App {
     stats: std::sync::OnceLock<Arc<crate::statsview::StatsService>>,
     /// What the last prune asked for in Settings did (shown under the "Prune now" button).
     prune_result: Arc<Mutex<Option<String>>>,
+    /// The "Send a test toast" buttons: what the last test send is doing (see
+    /// [`App::start_test_notification`]).
+    test_toast: Arc<Mutex<TestToast>>,
+}
+
+/// State of the "Send a test toast" buttons. The send runs on a short-lived thread, because a
+/// notifier can take seconds (macOS waits for the permission answer and the delivery result).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum TestToast {
+    #[default]
+    Idle,
+    /// A test toast of this style is being sent.
+    Sending(AlertKind),
+    /// The last test send of this style finished with this result.
+    Done(AlertKind, Result<(), String>),
 }
 
 /// Log what a prune run did, and keep the summary of an asked-for run for Settings.
@@ -424,6 +439,7 @@ impl App {
             claude_seen: Remembered::new(),
             claude_plan: Mutex::new(None),
             prune_result: Arc::new(Mutex::new(None)),
+            test_toast: Arc::new(Mutex::new(TestToast::Idle)),
         }
         .with_prune_reporting()
     }
@@ -965,13 +981,61 @@ impl App {
     }
 
     /// "Send test notification" buttons: delivers one toast in the style of `kind` (Info, Warning or
-    /// Limit) with the current alert settings, and reports whether delivery worked.
+    /// Limit) with the current alert settings, and reports whether delivery worked. Blocks until the
+    /// notifier answers; the window uses [`App::start_test_notification`] instead.
     pub fn send_test_notification(&self, kind: AlertKind) -> Result<(), String> {
-        let n = self
-            .notifier
+        let n = self.current_notifier();
+        deliver_test(n.as_ref(), &self.raise, self.test_note(kind))
+    }
+
+    /// Start sending a test toast of `kind` on a background thread and return at once. `on_done`
+    /// runs on that thread when the notifier has answered (the window asks for a repaint there).
+    /// Returns `false` and does nothing while an earlier test send is still running.
+    pub fn start_test_notification(
+        &self,
+        kind: AlertKind,
+        on_done: impl FnOnce() + Send + 'static,
+    ) -> bool {
+        {
+            let mut st = self.test_toast.lock().unwrap_or_else(|e| e.into_inner());
+            if matches!(*st, TestToast::Sending(_)) {
+                return false;
+            }
+            *st = TestToast::Sending(kind);
+        }
+        let n = self.current_notifier();
+        let note = self.test_note(kind);
+        let (raise, slot) = (self.raise.clone(), self.test_toast.clone());
+        let started = std::thread::Builder::new()
+            .name("aitrack-test-toast".into())
+            .spawn(move || {
+                let r = deliver_test(n.as_ref(), &raise, note);
+                *slot.lock().unwrap_or_else(|e| e.into_inner()) = TestToast::Done(kind, r);
+                on_done();
+            });
+        if let Err(e) = started {
+            *self.test_toast.lock().unwrap_or_else(|e| e.into_inner()) =
+                TestToast::Done(kind, Err(format!("could not start the send: {e}")));
+        }
+        true
+    }
+
+    /// What the last [`App::start_test_notification`] is doing.
+    pub fn test_notification_state(&self) -> TestToast {
+        self.test_toast
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .clone();
+            .clone()
+    }
+
+    fn current_notifier(&self) -> Arc<dyn Notifier> {
+        self.notifier
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    fn test_note(&self, kind: AlertKind) -> Notification {
         let (title, body) = match kind {
             AlertKind::Info => ("Claude session: 75% used", "Test: an informational alert"),
             AlertKind::Limit => ("Claude session: limit reached", "Test: a limit alert"),
@@ -986,11 +1050,7 @@ impl App {
         );
         // no vendor: the test toast carries the app icon
         note.options = self.settings.alert_options();
-        let raising = Raising {
-            inner: n.as_ref(),
-            raise: &self.raise,
-        };
-        raising.notify(&note)
+        note
     }
 
     /// Did a usage alert fire since the last call? (The window then comes to the front.)
@@ -1504,4 +1564,17 @@ impl App {
         self.settings.update(new, true);
         self.reschedule();
     }
+}
+
+/// Deliver a test toast through `notifier`, raising the window like a real alert would.
+fn deliver_test(
+    notifier: &dyn Notifier,
+    raise: &AtomicBool,
+    note: Notification,
+) -> Result<(), String> {
+    Raising {
+        inner: notifier,
+        raise,
+    }
+    .notify(&note)
 }
