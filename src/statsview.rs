@@ -254,11 +254,16 @@ fn worker(
         drop(s);
         wake();
     };
+    // An absolute deadline, so a stream of Plan requests (one per new reading while Stats is open)
+    // cannot keep pushing the periodic scan back.
+    let mut next_scan = std::time::Instant::now() + cfg.rescan_every;
     loop {
-        match rx.recv_timeout(cfg.rescan_every) {
+        let wait = next_scan.saturating_duration_since(std::time::Instant::now());
+        match rx.recv_timeout(wait) {
             Ok(Cmd::Scan { network }) => {
                 do_scan(network);
                 do_plan();
+                next_scan = std::time::Instant::now() + cfg.rescan_every;
             }
             Ok(Cmd::Plan) => do_plan(),
             Ok(Cmd::Stop) | Err(RecvTimeoutError::Disconnected) => break,
@@ -266,6 +271,7 @@ fn worker(
             Err(RecvTimeoutError::Timeout) => {
                 do_scan(true);
                 do_plan();
+                next_scan = std::time::Instant::now() + cfg.rescan_every;
             }
         }
     }
