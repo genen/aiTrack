@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Statistics over the recorded plan-usage snapshots.
 //!
-//! Readings are grouped into limit windows by their `resets_at` time (5 h session, 7 d weekly).
+//! Readings are grouped into limit windows by their `resets_at` time (5 h session, 7 d weekly);
+//! readings of a window nobody has used yet (its reset moves with the clock) are in none.
 //! The pace is the least-squares slope of the percentage over the current window.
 
 use crate::reading::{Kind, Reading};
@@ -234,14 +235,39 @@ pub fn window_key(reset: DateTime<Utc>) -> i64 {
     reset.timestamp().div_euclid(60)
 }
 
+/// Reset times this close to one seen earlier are the same window: a source that reports the time
+/// left (`reset_after_seconds`, `resets_in_seconds`) rather than the time itself gives a reset that
+/// moves by a few seconds between readings, which the minute alone can split in two.
+pub const RESET_TOLERANCE_MIN: i64 = 5;
+/// A reading at 0 % whose reset lies a whole window away (within this many minutes) belongs to no
+/// window yet: an unused ChatGPT window reports "now + 5 h" (or "now + 7 d") on every poll and only
+/// starts at the first use.
+pub const UNSTARTED_LEAD_MIN: i64 = 2;
+
+/// A reading of a window that has not started: nothing used and the reset a whole window ahead.
+pub fn unstarted(t: DateTime<Utc>, pct: f64, reset: DateTime<Utc>, kind: Kind) -> bool {
+    let len = chrono::Duration::minutes((kind.hours() * 60.0) as i64);
+    pct <= 0.0 && reset - t >= len - chrono::Duration::minutes(UNSTARTED_LEAD_MIN)
+}
+
 /// Identity of a limit window. Normally the (minute-truncated) reset time; a reading that reports
 /// none joins the window of a reset time seen on another reading when it lies inside that window,
 /// otherwise (sources that never report resets: Claude desktop history, `~/.claude.json`) it gets an
 /// inferred window that starts whenever the percentage drops by [`INFERRED_DROP`] points or more.
+/// `Unstarted` marks a stretch of readings of a window nobody has used yet (see [`unstarted`]): they
+/// are no window, and never count as one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WindowKey {
     Reset(i64),
     Inferred(u32),
+    Unstarted(u32),
+}
+
+impl WindowKey {
+    /// A real window (one that counts in the statistics).
+    pub fn is_window(self) -> bool {
+        !matches!(self, WindowKey::Unstarted(_))
+    }
 }
 
 /// A fall of at least this many points between two readings (without a reset time) starts a new window.
@@ -251,32 +277,72 @@ pub const INFERRED_DROP: f64 = 10.0;
 pub type WindowPoint = (DateTime<Utc>, f64, Option<DateTime<Utc>>);
 
 /// The window of every point, oldest first. Points with
-/// a reset time are keyed by it. A point without one is put into the window of the nearest reset
+/// a reset time are keyed by it, or by the first reset time seen within [`RESET_TOLERANCE_MIN`] of
+/// it (so jitter never splits a window, and the key of a window never changes as readings arrive).
+/// A point without one is put into the window of the nearest reset
 /// time (reported by any point) that still lies ahead of it by at most one window length, so a
 /// history sample and a cache sample of the same 5-hour window are one window, not two; if its
 /// percentage fell by [`INFERRED_DROP`] or more since the previous point it starts an inferred
 /// window instead (the window ended early). Points outside every known window are inferred.
+/// Points of a window that has not started ([`unstarted`]) get [`WindowKey::Unstarted`], one per
+/// stretch of them, unless a started window's readings report the same reset time.
 pub fn window_keys(points: &[WindowPoint], kind: Kind) -> Vec<WindowKey> {
     let len = chrono::Duration::minutes((kind.hours() * 60.0) as i64);
     let (slack, tail) = (chrono::Duration::minutes(2), chrono::Duration::minutes(1));
-    // every distinct reset time once, ascending: the nearest one ahead of a point is a binary search
-    let mut resets: Vec<DateTime<Utc>> = points.iter().filter_map(|p| p.2).collect();
-    resets.sort();
-    resets.dedup_by_key(|r| window_key(*r));
+    let tol = chrono::Duration::minutes(RESET_TOLERANCE_MIN);
+    // the reset time that names each point's window (the first one seen near it), in time order;
+    // `resets` holds every such name once, ascending: the nearest one ahead of a point is a
+    // binary search. Readings of a window that has started name it; a reading that looks unstarted
+    // only joins one of those (the first reading of a window, at 0 % a minute in).
+    let mut resets: Vec<DateTime<Utc>> = Vec::new();
+    let near = |resets: &[DateTime<Utc>], rs: DateTime<Utc>| {
+        let at = resets.partition_point(|r| *r < rs - tol);
+        (at, resets.get(at).filter(|r| **r <= rs + tol).copied())
+    };
+    let mut named: Vec<Option<DateTime<Utc>>> = points
+        .iter()
+        .map(|(t, pct, reset)| {
+            let rs = (*reset).filter(|rs| !unstarted(*t, *pct, *rs, kind))?;
+            match near(&resets, rs) {
+                (_, Some(r)) => Some(r),
+                (at, None) => {
+                    resets.insert(at, rs);
+                    Some(rs)
+                }
+            }
+        })
+        .collect();
+    for (name, (_, _, reset)) in named.iter_mut().zip(points) {
+        if let (None, Some(rs)) = (*name, reset) {
+            *name = near(&resets, *rs).1;
+        }
+    }
     let mut out = Vec::with_capacity(points.len());
     let (mut inferred, mut prev_pct): (u32, Option<f64>) = (0, None);
+    let (mut idle, mut prev_idle) = (0u32, false);
     // when the previous point's window ends (its reset time, reported or found)
     let mut prev_end: Option<DateTime<Utc>> = None;
     // a reset window that ended early (a drop inside it): later unstamped points stay inferred
     let mut ended_early: Option<i64> = None;
-    for (t, pct, reset) in points {
+    for ((t, pct, reset), name) in points.iter().zip(named) {
+        if reset.is_some() && name.is_none() {
+            if !prev_idle {
+                idle += 1;
+            }
+            prev_idle = true;
+            prev_pct = Some(*pct);
+            prev_end = None;
+            out.push(WindowKey::Unstarted(idle));
+            continue;
+        }
+        prev_idle = false;
         let dropped = prev_pct.is_some_and(|p| p - pct >= INFERRED_DROP);
         // a fall right after the previous window's own reset time is the ordinary boundary, not an
         // early end of the window the point belongs to
         let boundary = prev_end.is_some_and(|e| e <= *t);
-        let (key, end) = match reset {
-            Some(rs) => (WindowKey::Reset(window_key(*rs)), Some(*rs)),
-            None => {
+        let (key, end) = match (reset, name) {
+            (Some(rs), Some(n)) => (WindowKey::Reset(window_key(n)), Some(*rs)),
+            _ => {
                 let at = resets.partition_point(|r| *r < *t - tail);
                 let covering = resets.get(at).filter(|r| *t >= **r - len - slack).copied();
                 let k = covering.map(window_key);
@@ -409,8 +475,11 @@ pub fn analyze(readings: &[Reading], now: DateTime<Utc>) -> Option<Plan> {
     let mut stats: Vec<WindowStats> = Vec::new();
     for (i, kind) in Kind::ALL.into_iter().enumerate() {
         let (groups, keys) = windows(&ok, kind);
+        // readings of a window nobody used yet are no window
         let peaks: Vec<f64> = groups
-            .values()
+            .iter()
+            .filter(|(k, _)| k.is_window())
+            .map(|(_, pts)| pts)
             .map(|pts| pts.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max))
             .collect();
         stats.push(WindowStats {
@@ -456,6 +525,7 @@ pub fn analyze(readings: &[Reading], now: DateTime<Utc>) -> Option<Plan> {
             .map(|r| ((r - now).num_milliseconds() as f64 / 3.6e6).max(0.0));
         let latest_key = keys.last().copied().flatten();
         let evidence: Vec<(DateTime<Utc>, f64)> = latest_key
+            .filter(|k| k.is_window())
             .and_then(|k| groups.get(&k))
             .map(|pts| {
                 pts.iter()
@@ -474,6 +544,13 @@ pub fn analyze(readings: &[Reading], now: DateTime<Utc>) -> Option<Plan> {
                 .and_then(|k| groups.get(&k))
                 .and_then(|pts| pts.first())
                 .map(|p| format!("i{}", p.0.timestamp()))
+                .unwrap_or_default(),
+            // not a window yet, but an id of its own, so the window before it is over (a recovery
+            // toast still comes) and the stretch keeps one id while its reset moves with the clock
+            Some(WindowKey::Unstarted(_)) => latest_key
+                .and_then(|k| groups.get(&k))
+                .and_then(|pts| pts.first())
+                .map(|p| format!("u{}", p.0.timestamp()))
                 .unwrap_or_default(),
             None => String::new(),
         };

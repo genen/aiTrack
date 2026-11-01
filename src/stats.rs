@@ -570,7 +570,8 @@ fn build_windows(ok: &[Point], kind: Kind) -> (Vec<Win>, Vec<Option<usize>>) {
             continue;
         };
         let reset = b.resets_at.as_deref().and_then(parse_ts);
-        let Some(key) = keys.next() else {
+        // a window nobody has used yet (its reset moves with the clock) is no window
+        let Some(key) = keys.next().filter(|k| k.is_window()) else {
             idx.push(None);
             continue;
         };

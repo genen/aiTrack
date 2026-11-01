@@ -3,6 +3,13 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.18] - 2026-11-01
+
+### Fixed
+- Stats > Plan no longer counts a ChatGPT window nobody used as a window. An unused ChatGPT window reports its reset
+  as a whole window from now, so every idle update used to count as a new window (over a thousand "windows" a month
+  at 0%). Reset times that differ by a few seconds between readings also no longer split one window into two.
+
 ## [0.5.17] - 2026-11-01
 
 Fixes from a full code review of the whole app.
