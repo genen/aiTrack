@@ -240,9 +240,16 @@ fn kind_name(k: Kind) -> &'static str {
     }
 }
 
-fn resets_body(g: &Gauge) -> String {
+/// Vendors whose limits refill gradually instead of resetting (Gemini through Antigravity): no
+/// "reset" toast, and a threshold is announced again once usage has refilled well below it.
+const ROLLING_VENDORS: &[&str] = &["Gemini"];
+/// How far below a threshold a rolling limit must refill before that threshold is armed again.
+const REARM_MARGIN: f64 = 10.0;
+
+fn resets_body(g: &Gauge, rolling: bool) -> String {
     match g.hours_left {
         Some(h) => format!("Resets in {}", left_long(h)),
+        None if rolling => "Refills gradually".into(),
         None => "Reset time unknown".into(),
     }
 }
@@ -328,6 +335,7 @@ impl Alerts {
             let key = format!("{ns}{name}:{}", g.window_id);
             let last_key = format!("{ns}{name}");
             let label = format!("{vendor} {name}");
+            let rolling = ROLLING_VENDORS.contains(&vendor);
             let mut out: Vec<Notification> = Vec::new();
             let mut out_tags: Vec<Vec<String>> = Vec::new();
 
@@ -361,7 +369,18 @@ impl Alerts {
             entry.seen = crate::util::iso(now);
             let fired = |e: &WindowAlerts, f: &str| e.fired.iter().any(|x| x == f);
 
-            if new_window && was_red && g.pct < WARN_PCT && !fired(entry, "rec") {
+            if rolling {
+                // refilled well below a threshold: it may be announced again
+                let mut clear: Vec<&str> = Vec::new();
+                if g.pct < info - REARM_MARGIN {
+                    clear.extend([info_key.as_str(), "p90", "p100", "pred"]);
+                } else if g.pct < WARN_PCT - REARM_MARGIN {
+                    clear.extend(["p90", "p100", "pred"]);
+                }
+                entry.fired.retain(|f| !clear.contains(&f.as_str()));
+            }
+
+            if !rolling && new_window && was_red && g.pct < WARN_PCT && !fired(entry, "rec") {
                 entry.fired.push("rec".into());
                 out_tags.push(vec!["rec".into()]);
                 out.push(Notification::new(
@@ -402,7 +421,7 @@ impl Alerts {
                         _ => format!("{label}: {}% used", js_round(g.pct) as i64),
                     };
                     out_tags.push(tags);
-                    out.push(Notification::new(title, resets_body(g), ak));
+                    out.push(Notification::new(title, resets_body(g, rolling), ak));
                 }
             }
 
@@ -414,7 +433,7 @@ impl Alerts {
                     out_tags.push(vec!["pred".into()]);
                     out.push(Notification::new(
                         format!("{label}: empty in ~{}", left_long(e.empty_in_h)),
-                        resets_body(g),
+                        resets_body(g, rolling),
                         AlertKind::Predictive,
                     ));
                 }

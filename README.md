@@ -377,8 +377,8 @@ the Antigravity desktop app and its command-line tool `agy`. Both show the same 
 block: a **Weekly** bar for the **Gemini models** (Gemini Flash and Pro). Antigravity also offers Claude and GPT models
 with a weekly limit of their own; that one is shown in the tooltip under **Other models**. Antigravity refills these
 limits gradually, so a bar can go down as well as up between readings. There is no fixed reset: the tooltip says when
-the limit will be **full again** instead. An Enterprise (Google Cloud) account may have no per-user limits; then the
-block keeps its last reading and says so.
+the limit will be **full again** instead. An Antigravity Business (Google Workspace / Google Cloud) account has no weekly limits: its usage
+is billed in Google Cloud, and the block keeps its last reading and says so.
 
 aiTrack runs `agy -p /usage --output-format json` in the background at each update (every 15 minutes by default, and
 when you press refresh). That is `agy`'s own read-only usage command: it sends no prompt and uses no quota. aiTrack

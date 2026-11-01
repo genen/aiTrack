@@ -1058,6 +1058,15 @@ pub fn build_detail_at(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Ut
         d.unit = if remaining { "% left" } else { "%" };
         d.resets = Some(match g.hours_left {
             Some(h) => format!("Resets in {}", left(h)),
+            None if v.id == crate::vendor::VendorId::Antigravity => {
+                match v.full_at.filter(|t| *t > now) {
+                    Some(t) => format!(
+                        "Full again in {}",
+                        left((t - now).num_minutes() as f64 / 60.0)
+                    ),
+                    None => "Refills gradually".into(),
+                }
+            }
             None => "Reset time unknown".into(),
         });
         if !is_old(v, now) {

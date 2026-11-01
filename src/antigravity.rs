@@ -44,10 +44,10 @@ const WEEKLY_FROM_H: f64 = 24.0;
 /// more go to the extra limits, not the Weekly bar.
 const WEEKLY_RANGE_H: std::ops::RangeInclusive<f64> = 144.0..=192.0;
 /// The reply's text when agy answered but listed no limit: retried once (a cold run may answer
-/// before the quota is fetched). Seen on 2026-11-01 right after switching agy to a Google Cloud
-/// (Enterprise) account, which may have no per-user limits at all.
+/// before the quota is fetched). Seen on 2026-11-01 on an Antigravity Business account (Google
+/// Workspace sign-in on Agent Platform): no buckets, its usage is billed in Google Cloud.
 pub const EMPTY_REPLY: &str =
-    "Antigravity lists no per-user limits for this account (an Enterprise account may have none)";
+    "Antigravity Business account: usage is billed in Google Cloud, no weekly limits";
 /// The wait before that one retry.
 const EMPTY_RETRY_AFTER: StdDuration = StdDuration::from_secs(5);
 /// The reply's text when agy used the model (a turn or tokens): aiTrack stops running it.
@@ -151,7 +151,13 @@ fn window_hours(b: &serde_json::Map<String, Value>) -> Option<f64> {
     .into_iter()
     .flatten()
     {
-        if t.contains("week") || t.ends_with("7d") {
+        if t.contains("week")
+            || t.ends_with("7d")
+            || t.contains("7_day")
+            || t.contains("7-day")
+            || t.contains("7day")
+            || t.contains("seven")
+        {
             return Some(168.0);
         }
         if t.contains("day") || t.contains("daily") || t.ends_with("24h") || t.ends_with("1d") {
@@ -356,9 +362,21 @@ pub fn parse_usage(body: &Value, now: DateTime<Utc>) -> Result<Sample, String> {
         let arr: Vec<Value> = extra
             .iter()
             .map(|l| {
+                // a main-group bucket that is not the bar says which window it is
+                let name = if is_main(&l.group) && !WEEKLY_RANGE_H.contains(&l.hours) {
+                    let w = match l.hours {
+                        h if h < WEEKLY_FROM_H => format!("{}h", crate::reading::fmt0(h)),
+                        h if h < 48.0 => "daily".into(),
+                        h if h >= 600.0 => "monthly".into(),
+                        h => format!("{} days", crate::reading::fmt0(h / 24.0)),
+                    };
+                    format!("{} ({w})", l.group)
+                } else {
+                    l.group.clone()
+                };
                 json!({
-                    "name": l.group,
-                    "kind": if l.hours >= WEEKLY_FROM_H { "weekly" } else { "session" },
+                    "name": name,
+                    "kind": if l.hours < WEEKLY_FROM_H { "session" } else { "weekly" },
                     "percent": l.pct,
                     // (no reset: see bucket_of)
                 })
@@ -374,7 +392,8 @@ pub fn parse_usage(body: &Value, now: DateTime<Utc>) -> Result<Sample, String> {
     })
 }
 
-/// The command for a usage run: no window, no input, output captured, started in the home folder
+/// The command for a usage run: no window, no input, output captured (the run points it at a
+/// file), started in the home folder
 /// (agy treats its working folder as a workspace; home is one the user already trusts).
 pub fn command(program: &Path, home: Option<&Path>) -> std::process::Command {
     let mut c = std::process::Command::new(program);
@@ -399,41 +418,57 @@ pub fn command(program: &Path, home: Option<&Path>) -> std::process::Command {
     c
 }
 
+/// A new, empty file for agy's output in the temp folder (agy writes to a file, not a pipe: a
+/// helper agy starts may keep its output open after agy exits, and a file never blocks).
+fn output_file() -> Result<(PathBuf, std::fs::File), String> {
+    let dir = std::env::temp_dir();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    for n in 0..8u32 {
+        let p = dir.join(format!(
+            "aitrack-agy-{}-{stamp}-{n}.json",
+            std::process::id()
+        ));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&p)
+        {
+            Ok(f) => return Ok((p, f)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("could not make a file for agy's output: {e}")),
+        }
+    }
+    Err("could not make a file for agy's output".into())
+}
+
 /// Run agy once and return what it printed (at most 1 MiB, at most [`RUN_TIMEOUT`]).
 pub fn run_usage(
     program: &Path,
     home: Option<&Path>,
     timeout: StdDuration,
 ) -> Result<Vec<u8>, String> {
+    let (path, file) = output_file()?;
+    let result = run_into(program, home, timeout, &path, file);
+    // (a helper still holding the file on Windows keeps it until it exits: best effort)
+    let _ = std::fs::remove_file(&path);
+    result
+}
+
+fn run_into(
+    program: &Path,
+    home: Option<&Path>,
+    timeout: StdDuration,
+    path: &Path,
+    file: std::fs::File,
+) -> Result<Vec<u8>, String> {
     let mut child = command(program, home)
+        .stdout(std::process::Stdio::from(file))
         .spawn()
         .map_err(|e| format!("could not start agy: {e}"))?;
-    let mut out = child.stdout.take().ok_or("could not read agy's output")?;
-    // the reader keeps what it read where the caller can take it even if the pipe never closes
-    // (a helper agy started may hold it open after agy exits)
-    let shared = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (done_tx, done_rx) = std::sync::mpsc::channel::<std::io::Result<()>>();
-    {
-        let shared = shared.clone();
-        std::thread::spawn(move || {
-            let mut chunk = [0u8; 8192];
-            let r = loop {
-                match out.read(&mut chunk) {
-                    Ok(0) => break Ok(()),
-                    Ok(n) => {
-                        let mut b = shared.lock().unwrap_or_else(|e| e.into_inner());
-                        // keep one byte past the cap to tell "too large"; drain the rest so agy
-                        // never blocks on a full pipe
-                        let room = (MAX_OUTPUT_BYTES as usize + 1).saturating_sub(b.len());
-                        b.extend_from_slice(&chunk[..n.min(room)]);
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-                    Err(e) => break Err(e),
-                }
-            };
-            let _ = done_tx.send(r);
-        });
-    }
+    let too_big = || std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_OUTPUT_BYTES);
     let start = Instant::now();
     let code = loop {
         match child.try_wait() {
@@ -446,6 +481,13 @@ pub fn run_usage(
                 return Err(format!("could not watch agy: {e}"));
             }
         }
+        // (agy is still running here, so its pid is still its own)
+        if too_big() {
+            crate::grok_cli::kill_pid(child.id());
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("agy's reply is larger than 1 MiB".into());
+        }
         if start.elapsed() >= timeout {
             crate::grok_cli::kill_pid(child.id());
             let _ = child.kill();
@@ -454,19 +496,10 @@ pub fn run_usage(
         }
         std::thread::sleep(StdDuration::from_millis(100));
     };
-    // agy has exited: its output ends soon, unless something it started holds the pipe; then end
-    // that process group and take what was read
-    let left = timeout
-        .saturating_sub(start.elapsed())
-        .max(StdDuration::from_secs(2));
-    match done_rx.recv_timeout(left) {
-        Ok(r) => r.map_err(|e| format!("could not read agy's output: {e}"))?,
-        Err(_) => {
-            crate::grok_cli::kill_pid(child.id());
-            let _ = done_rx.recv_timeout(StdDuration::from_secs(1));
-        }
-    }
-    let buf = std::mem::take(&mut *shared.lock().unwrap_or_else(|e| e.into_inner()));
+    let mut buf = Vec::new();
+    std::fs::File::open(path)
+        .and_then(|f| f.take(MAX_OUTPUT_BYTES + 1).read_to_end(&mut buf))
+        .map_err(|e| format!("could not read agy's output: {e}"))?;
     if buf.len() as u64 > MAX_OUTPUT_BYTES {
         return Err("agy's reply is larger than 1 MiB".into());
     }
@@ -502,6 +535,9 @@ pub struct AgyUsage {
     pub retry_after: StdDuration,
     /// Set once agy used the model for /usage: no more runs until aiTrack restarts.
     stopped: std::sync::atomic::AtomicBool,
+    /// The last poll's reply listed no limits: do not retry again (an account without per-user
+    /// limits would otherwise run agy twice on every poll).
+    was_empty: std::sync::atomic::AtomicBool,
 }
 
 impl AgyUsage {
@@ -511,6 +547,7 @@ impl AgyUsage {
             timeout: RUN_TIMEOUT,
             retry_after: EMPTY_RETRY_AFTER,
             stopped: std::sync::atomic::AtomicBool::new(false),
+            was_empty: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -541,11 +578,14 @@ impl UsageSource for AgyUsage {
             CollectError::new("Antigravity CLI (agy) not found: install it from antigravity.google")
         })?;
         let mut r = self.run_once(&program, now);
-        if r.as_ref().err().map(String::as_str) == Some(EMPTY_REPLY) {
+        let empty =
+            |r: &Result<Sample, String>| r.as_ref().err().map(String::as_str) == Some(EMPTY_REPLY);
+        if empty(&r) && !self.was_empty.load(Ordering::SeqCst) {
             // a cold agy can answer before it has fetched the quota: one more try
             std::thread::sleep(self.retry_after);
             r = self.run_once(&program, now);
         }
+        self.was_empty.store(empty(&r), Ordering::SeqCst);
         if r.as_ref().err().map(String::as_str) == Some(USED_MODEL) {
             self.stopped.store(true, Ordering::SeqCst);
         }

@@ -307,6 +307,12 @@ fn a_daily_or_monthly_bucket_is_not_the_weekly_bar() {
     assert!(s.session.is_none());
     let limits = &s.raw.as_ref().unwrap()["limits"];
     assert_eq!(limits[0]["percent"], json!(50.0));
+    assert_eq!(limits[0]["name"], json!("Gemini Models (daily)"));
+    // a seven-day id is the weekly one, not "a day"
+    let body = json!({"status": "SUCCESS", "command": {"name": "usage", "data": {"groups": [
+        {"name": "Gemini Models", "buckets": [{"id": "gemini_7_days", "remaining_fraction": 0.7}]}
+    ]}}});
+    assert_eq!(parse_usage(&body, now()).unwrap().weekly.unwrap().pct, 30.0);
 }
 
 #[derive(Default)]
@@ -379,4 +385,76 @@ fn the_weekly_tooltip_says_when_gemini_is_full_again() {
         !text.iter().any(|l| l.contains("reset time unknown")),
         "{text:?}"
     );
+}
+
+/// A refilled Gemini limit warns again when usage climbs back, and never says it "reset".
+#[test]
+fn a_refilled_gemini_limit_warns_again_without_a_reset_toast() {
+    let dir = common::TempDir::new();
+    let alerts = aitrack::alerts::Alerts::load(dir.join("alerts-antigravity.json"));
+    let rec = Recorder::default();
+    let start = now();
+    // up to 92, a slow refill to 40 over three days (no 10-point step), back up to 92
+    let mut used: Vec<f64> = vec![80.0, 92.0];
+    used.extend((1..=26).map(|i| 92.0 - 2.0 * i as f64));
+    used.extend([50.0, 60.0, 70.0, 80.0, 92.0]);
+    let mut readings = Vec::new();
+    let mut warnings = 0;
+    for (i, pct) in used.iter().enumerate() {
+        let at = start + Duration::hours(3 * i as i64);
+        let body = json!({"status": "SUCCESS", "command": {"name": "usage", "data": {"groups": [
+            {"name": "Gemini Models", "buckets": [{"id": "gemini-weekly", "window": "weekly",
+              "remaining_fraction": 1.0 - pct / 100.0, "reset_time": t(at + Duration::days(7))}]}
+        ]}}});
+        let mut r = sample_record(
+            &parse_usage(&body, at).unwrap(),
+            antigravity::SOURCE_USAGE,
+            false,
+        );
+        r["vendor"] = json!("antigravity");
+        readings.push(Reading::from_value(&r));
+        let plan = aitrack::analysis::analyze(&readings, at).unwrap();
+        for n in alerts.evaluate("Gemini", &plan, at, &rec) {
+            assert!(!n.title.contains("reset"), "{}", n.title);
+            if n.title.contains("left") {
+                warnings += 1;
+                assert_eq!(n.body, "Refills gradually");
+            }
+        }
+    }
+    assert_eq!(warnings, 2, "the 90% warning fires again after the refill");
+}
+
+#[test]
+fn readings_saved_with_a_moving_reset_do_not_keep_it() {
+    let r = Reading::from_value(&json!({"ok": true, "ts": t(now()), "source": "agy-usage",
+        "weekly": {"pct": 20.0, "resets_at": t(now() + Duration::days(7)), "resets_carried": true}}));
+    let w = r.weekly.unwrap();
+    assert_eq!((w.resets_at, w.carried), (None, false));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_helper_holding_agys_output_open_does_not_hold_the_poll() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = common::TempDir::new();
+    let p = d.path().join("agy-helper");
+    let body = serde_json::to_string(&real_reply())
+        .unwrap()
+        .replace('\'', "");
+    // agy prints its reply and exits, leaving a child that keeps its output open
+    std::fs::write(
+        &p,
+        format!("#!/bin/sh\nprintf '%s\\n' '{body}'\n(sleep 20) &\nexit 0\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let start = std::time::Instant::now();
+    let out = antigravity::run_usage(&p, None, std::time::Duration::from_secs(20)).unwrap();
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(5),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(reply_json(&out).is_some());
 }
