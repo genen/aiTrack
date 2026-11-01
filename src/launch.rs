@@ -1550,6 +1550,8 @@ pub const HELP_URL: &str = "https://github.com/genen/aiTrack#readme";
 pub const REPO_URL: &str = "https://github.com/genen/aiTrack";
 /// The licence text in the repository.
 pub const LICENSE_URL: &str = "https://github.com/genen/aiTrack/blob/main/LICENSE";
+/// The PayPal donation page (Settings > About > Donate).
+pub const DONATE_URL: &str = "https://www.paypal.com/donate/?hosted_button_id=YR6YMJ953Y9CE";
 /// Where to write to the developer.
 pub const CONTACT_EMAIL: &str = "aitrack@sirgene.com";
 

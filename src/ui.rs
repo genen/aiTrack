@@ -1933,7 +1933,7 @@ impl AitrackUi {
         }
     }
 
-    /// Settings > About: project link, developer and contact, license.
+    /// Settings > About: project link, developer and contact, license, donation link.
     fn about_body(&mut self, ui: &mut Ui, pal: &Palette, rects: &mut Vec<(String, Rect)>) {
         // (the build line is at the bottom of Settings; here the name links to the project)
         let mut open_repo = false;
@@ -1984,6 +1984,26 @@ impl AitrackUi {
             self.open_about_link(
                 crate::launch::LICENSE_URL,
                 "Could not open the license page",
+            );
+        }
+        ui.add_space(4.0);
+        let mut open_donate = false;
+        setting_row_ui(
+            ui,
+            pal,
+            "Support aiTrack",
+            |ui| {
+                let r = link_label(ui, pal, "Donate", crate::launch::DONATE_URL);
+                rects.push(("donate".into(), r.rect));
+                open_donate = r.clicked();
+            },
+            "",
+            |_| {},
+        );
+        if open_donate {
+            self.open_about_link(
+                crate::launch::DONATE_URL,
+                "Could not open the donation page",
             );
         }
     }

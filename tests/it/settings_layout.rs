@@ -378,7 +378,7 @@ mod view {
             c.lock().unwrap().push(u.to_owned());
             Ok(())
         });
-        for key in ["repo", "license"] {
+        for key in ["repo", "license", "donate"] {
             let p = about_center(&w, key);
             w.click(p);
         }
@@ -386,7 +386,8 @@ mod view {
             *calls.lock().unwrap(),
             [
                 "https://github.com/genen/aiTrack",
-                "https://github.com/genen/aiTrack/blob/main/LICENSE"
+                "https://github.com/genen/aiTrack/blob/main/LICENSE",
+                "https://www.paypal.com/donate/?hosted_button_id=YR6YMJ953Y9CE"
             ]
         );
         w.ui.url_opener = Arc::new(|_| Err("no handler".into()));
@@ -404,6 +405,13 @@ mod view {
             w.ui.launch_notice().as_deref(),
             Some("Could not open the license page")
         );
+        w.ui.set_launch_notice("");
+        let p = about_center(&w, "donate");
+        w.click(p);
+        assert_eq!(
+            w.ui.launch_notice().as_deref(),
+            Some("Could not open the donation page")
+        );
     }
 
     #[test]
@@ -413,8 +421,8 @@ mod view {
         let keys: Vec<&str> = w.ui.about_rects.iter().map(|r| r.0.as_str()).collect();
         assert_eq!(
             keys,
-            ["repo", "license"],
-            "two links: no buttons, Email, Copy or build-line controls"
+            ["repo", "license", "donate"],
+            "three links: no buttons, Email, Copy or build-line controls"
         );
         let names: Vec<&str> = w.ui.setting_rows.iter().map(|r| r.0.as_str()).collect();
         assert!(!names.contains(&"Contact"), "{names:?}");
@@ -430,7 +438,12 @@ mod view {
             let mut w = Win::new(light, None);
             open_about(&mut w);
             let names: Vec<&str> = w.ui.setting_rows.iter().map(|r| r.0.as_str()).collect();
-            for want in ["aiTrack", "Developed by Sir Gene", "License"] {
+            for want in [
+                "aiTrack",
+                "Developed by Sir Gene",
+                "License",
+                "Support aiTrack",
+            ] {
                 assert!(names.contains(&want), "{want} in {names:?}");
             }
             for (title, label, control) in &w.ui.setting_rows {
