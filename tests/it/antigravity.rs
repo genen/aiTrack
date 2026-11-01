@@ -49,12 +49,15 @@ fn the_real_reply_gives_the_gemini_weekly_bar_and_the_other_group() {
     assert!(s.session.is_none());
     let w = s.weekly.as_ref().unwrap();
     assert_eq!(w.pct, 17.1, "used = 1 - remaining_fraction");
-    assert_eq!(
-        w.resets_at.as_deref().and_then(aitrack::util::parse_ts),
-        aitrack::util::parse_ts("2026-11-08T01:12:50Z")
-    );
+    // reset_time is when the bucket is full again, not a window end: kept apart, never a reset
+    assert_eq!(w.resets_at, None);
     let rec = sample_record(&s, antigravity::SOURCE_USAGE, false);
     let r = Reading::from_value(&rec);
+    assert_eq!(
+        r.full_at.as_deref().and_then(aitrack::util::parse_ts),
+        aitrack::util::parse_ts("2026-11-08T01:12:50Z")
+    );
+    assert_eq!(r.limits[0].resets_at, None);
     assert_eq!(r.limits.len(), 1);
     assert_eq!(r.limits[0].name, "Claude and GPT models");
     assert_eq!(r.limits[0].kind, "weekly");
@@ -76,12 +79,10 @@ fn a_five_hour_bucket_becomes_the_session_bar_in_either_spelling() {
     ]}}});
     let s = parse_usage(&body, now()).unwrap();
     assert_eq!(s.session.as_ref().unwrap().pct, 15.0);
+    assert_eq!(s.session.as_ref().unwrap().resets_at, None);
     assert_eq!(
-        s.session
-            .as_ref()
-            .unwrap()
-            .resets_at
-            .as_deref()
+        s.raw.as_ref().unwrap()["full_at"]["session"]
+            .as_str()
             .and_then(aitrack::util::parse_ts),
         Some(reset5)
     );
@@ -264,4 +265,118 @@ fn gemini_without_a_reading_is_a_placeholder_and_follows_its_setting() {
     assert!(!set.get().antigravity_on(true));
     let again = aitrack::settings::Settings::load(dir.join("s.json"));
     assert_eq!(again.get().antigravity_enabled, Some(false));
+}
+
+#[test]
+fn an_empty_reply_a_model_turn_or_another_command_is_never_a_reading() {
+    // Gene's PC right after switching agy to an Enterprise account (2026-11-01)
+    let empty = json!({"conversation_id": "", "status": "SUCCESS", "response": "", "duration_seconds": 0,
+        "num_turns": 0, "usage": {"input_tokens": 0, "output_tokens": 0, "thinking_tokens": 0,
+        "cache_read_tokens": 0, "total_tokens": 0}, "command": {"name": "usage", "data": {"groups": []}}});
+    assert_eq!(
+        parse_usage(&empty, now()).unwrap_err(),
+        antigravity::EMPTY_REPLY
+    );
+    let mut turned = real_reply();
+    turned["num_turns"] = json!(1);
+    assert_eq!(
+        parse_usage(&turned, now()).unwrap_err(),
+        antigravity::USED_MODEL
+    );
+    let mut tokens = real_reply();
+    tokens["usage"]["total_tokens"] = json!(120);
+    assert_eq!(
+        parse_usage(&tokens, now()).unwrap_err(),
+        antigravity::USED_MODEL
+    );
+    let mut other = real_reply();
+    other["command"]["name"] = json!("model");
+    assert!(parse_usage(&other, now()).is_err());
+}
+
+#[test]
+fn a_daily_or_monthly_bucket_is_not_the_weekly_bar() {
+    let body = json!({"status": "SUCCESS", "command": {"name": "usage", "data": {"groups": [
+        {"name": "Gemini Models", "buckets": [
+            {"id": "gemini-daily", "window": "daily", "remaining_fraction": 0.5},
+            {"id": "gemini-weekly", "window": "weekly", "remaining_fraction": 0.9}
+        ]}
+    ]}}});
+    let s = parse_usage(&body, now()).unwrap();
+    assert_eq!(s.weekly.as_ref().unwrap().pct, 10.0);
+    assert!(s.session.is_none());
+    let limits = &s.raw.as_ref().unwrap()["limits"];
+    assert_eq!(limits[0]["percent"], json!(50.0));
+}
+
+#[derive(Default)]
+struct Recorder(std::sync::Mutex<Vec<aitrack::alerts::Notification>>);
+
+impl aitrack::alerts::Notifier for Recorder {
+    fn notify(&self, n: &aitrack::alerts::Notification) -> Result<(), String> {
+        self.0.lock().unwrap().push(n.clone());
+        Ok(())
+    }
+}
+
+/// Antigravity's reset time moves with every poll (it is "full again at"), and usage refills a
+/// little between polls: still one window, each alert once, no "back to" toast, no false pace.
+#[test]
+fn a_moving_reset_and_gradual_refill_do_not_repeat_alerts() {
+    let dir = common::TempDir::new();
+    let alerts = aitrack::alerts::Alerts::load(dir.join("alerts-antigravity.json"));
+    let rec = Recorder::default();
+    let start = now();
+    let used = [92.0, 92.5, 91.0, 89.0, 90.5, 93.0, 91.5, 89.5, 90.0];
+    let mut readings = Vec::new();
+    let mut per_poll = Vec::new();
+    for (i, pct) in used.iter().enumerate() {
+        let at = start + Duration::minutes(15 * i as i64);
+        let body = json!({"status": "SUCCESS", "num_turns": 0, "command": {"name": "usage", "data": {"groups": [
+            {"name": "Gemini Models", "buckets": [{"id": "gemini-weekly", "window": "weekly",
+              "remaining_fraction": 1.0 - pct / 100.0,
+              "reset_time": t(at + Duration::days(7) - Duration::minutes(3))}]}
+        ]}}});
+        let s = parse_usage(&body, at).unwrap();
+        let mut r = sample_record(&s, antigravity::SOURCE_USAGE, false);
+        r["vendor"] = json!("antigravity");
+        readings.push(Reading::from_value(&r));
+        let plan = aitrack::analysis::analyze(&readings, at).unwrap();
+        let w = plan.weekly.as_ref().unwrap();
+        assert!(
+            w.hours_left.is_none(),
+            "no reset, so no 'empty before reset' warning"
+        );
+        per_poll.push(alerts.evaluate("Gemini", &plan, at, &rec).len());
+    }
+    assert!(per_poll[1..].iter().all(|n| *n == 0), "{per_poll:?}");
+    let sent = rec.0.lock().unwrap();
+    assert!(!sent.is_empty(), "the first poll at 92% alerts");
+    assert!(
+        sent.iter()
+            .all(|n| !n.title.contains("Back to") && !n.body.contains("Back to")),
+        "{:?}",
+        sent.iter().map(|n| n.title.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn the_weekly_tooltip_says_when_gemini_is_full_again() {
+    let at = Utc::now();
+    let mut rs = readings(at);
+    for r in rs.iter_mut() {
+        r.weekly.as_mut().unwrap().resets_at = None;
+        r.full_at = Some(t(at + Duration::days(6) + Duration::hours(23)));
+    }
+    let v = gemini_view(&rs, at);
+    let text: Vec<String> = v.rows.iter().map(tip_text).collect();
+    assert!(
+        text.iter()
+            .any(|l| l.contains("refills gradually: full again in")),
+        "{text:?}"
+    );
+    assert!(
+        !text.iter().any(|l| l.contains("reset time unknown")),
+        "{text:?}"
+    );
 }

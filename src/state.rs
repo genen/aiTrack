@@ -62,6 +62,8 @@ pub struct CodexState {
     pub models: Vec<ModelLimit>,
     pub credits: Option<crate::reading::CreditBalance>,
     pub banked_resets: Option<u64>,
+    /// Antigravity: when the weekly limit will be full again (newest reading).
+    pub full_at: Option<String>,
     /// Tracking is switched on (setting, or automatic because the Codex folder exists).
     pub enabled: bool,
 }
@@ -352,6 +354,7 @@ fn build_plan_state(
         models,
         credits: newest.and_then(|r| r.credits.clone()),
         banked_resets: newest.and_then(|r| r.banked_resets),
+        full_at: newest.and_then(|r| r.full_at.clone()),
         enabled,
     }
 }

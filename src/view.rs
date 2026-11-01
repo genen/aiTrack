@@ -687,7 +687,24 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
         };
     }
     let old = is_old(v, now);
-    let mut t = vec![tip(reset_line(g, label), Tone::Normal)];
+    let first = match (v.id, kind) {
+        // Antigravity refills gradually: no reset, only when it is full again
+        (crate::vendor::VendorId::Antigravity, Kind::Weekly) if g.hours_left.is_none() => {
+            match v.full_at.filter(|t| *t > now) {
+                Some(t) => {
+                    let h = (t - now).num_minutes() as f64 / 60.0;
+                    format!(
+                        "{label} refills gradually: full again in {} ({})",
+                        left_long(h),
+                        clock_text(t.with_timezone(&Local), h >= 20.0)
+                    )
+                }
+                None => format!("{label} refills gradually"),
+            }
+        }
+        _ => reset_line(g, label),
+    };
+    let mut t = vec![tip(first, Tone::Normal)];
     if let Some(n) = pace_note(g).filter(|_| !old) {
         t.push(tip(n.text, if n.warn { Tone::Warn } else { Tone::Muted }));
     }

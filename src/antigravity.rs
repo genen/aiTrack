@@ -40,6 +40,18 @@ const MAX_OUTPUT_BYTES: u64 = 1024 * 1024;
 const RUN_TIMEOUT: StdDuration = StdDuration::from_secs(60);
 /// A bucket shorter than this many hours is a session-type window, otherwise a weekly one.
 const WEEKLY_FROM_H: f64 = 24.0;
+/// A bucket counts as the weekly one between these lengths (hours); other lengths of a day or
+/// more go to the extra limits, not the Weekly bar.
+const WEEKLY_RANGE_H: std::ops::RangeInclusive<f64> = 144.0..=192.0;
+/// The reply's text when agy answered but listed no limit: retried once (a cold run may answer
+/// before the quota is fetched). Seen on 2026-11-01 right after switching agy to a Google Cloud
+/// (Enterprise) account, which may have no per-user limits at all.
+pub const EMPTY_REPLY: &str =
+    "Antigravity lists no per-user limits for this account (an Enterprise account may have none)";
+/// The wait before that one retry.
+const EMPTY_RETRY_AFTER: StdDuration = StdDuration::from_secs(5);
+/// The reply's text when agy used the model (a turn or tokens): aiTrack stops running it.
+pub const USED_MODEL: &str = "Antigravity usage: agy sent /usage to the model instead of answering it (that uses quota), so aiTrack stopped running agy until it restarts";
 
 /// The `agy` program names on this platform.
 fn exe_names(os: Os) -> &'static [&'static str] {
@@ -80,7 +92,8 @@ pub fn find_agy(env: &Env) -> Option<PathBuf> {
     let names = exe_names(env.os);
     let mut dirs = install_dirs(env);
     if let Some(path) = std::env::var_os("PATH") {
-        dirs.extend(std::env::split_paths(&path));
+        // relative entries ("", ".") would check one folder and run from another
+        dirs.extend(std::env::split_paths(&path).filter(|d| d.is_absolute()));
     }
     dirs.iter()
         .flat_map(|d| names.iter().map(move |n| d.join(n)))
@@ -141,8 +154,11 @@ fn window_hours(b: &serde_json::Map<String, Value>) -> Option<f64> {
         if t.contains("week") || t.ends_with("7d") {
             return Some(168.0);
         }
-        if t.contains("day") || t.ends_with("24h") || t.ends_with("1d") {
+        if t.contains("day") || t.contains("daily") || t.ends_with("24h") || t.ends_with("1d") {
             return Some(24.0);
+        }
+        if t.contains("month") || t.ends_with("30d") {
+            return Some(720.0);
         }
         if let Some(h) = t
             .rsplit(|c: char| !c.is_ascii_alphanumeric())
@@ -217,11 +233,15 @@ fn is_main(group: &str) -> bool {
     group.eq_ignore_ascii_case(MAIN_GROUP) || group.to_ascii_lowercase().starts_with("gemini")
 }
 
+/// Antigravity's `reset_time` is when the bucket will be full again (usage refills gradually, an
+/// unused bucket says "now + 7 days"), not the end of a fixed window: it moves on every poll, and
+/// analysis and alerts key windows by the reset time. So the bucket has no reset; the time is kept
+/// apart (`raw.full_at`) for the tooltip.
 fn bucket_of(l: &Limit) -> Bucket {
     Bucket {
         carried: false,
         pct: l.pct,
-        resets_at: l.resets_at.map(iso),
+        resets_at: None,
     }
 }
 
@@ -258,29 +278,60 @@ fn failure_text(body: &Value) -> String {
 
 /// Parse agy's `/usage` JSON reply into a sample.
 pub fn parse_usage(body: &Value, now: DateTime<Utc>) -> Result<Sample, String> {
+    // a reply that took a model turn or tokens means agy no longer treats /usage as a command
+    let turns = body.get("num_turns").and_then(Value::as_f64).unwrap_or(0.0);
+    let tokens = body
+        .get("usage")
+        .and_then(|u| u.get("total_tokens"))
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    if turns > 0.0 || tokens > 0.0 {
+        return Err(USED_MODEL.into());
+    }
     if let Some(s) = body.get("status").and_then(Value::as_str) {
         if !s.eq_ignore_ascii_case("success") {
             return Err(failure_text(body));
         }
     }
-    let data = body
+    let command = body
         .get("command")
-        .and_then(|c| c.get("data"))
+        .ok_or("unexpected Antigravity usage reply (no command data)")?;
+    if let Some(n) = command.get("name").and_then(Value::as_str) {
+        if !n.eq_ignore_ascii_case("usage") {
+            return Err(format!(
+                "unexpected Antigravity usage reply (command {:?})",
+                n.chars().take(40).collect::<String>()
+            ));
+        }
+    }
+    let data = command
+        .get("data")
         .filter(|d| d.is_object())
         .ok_or("unexpected Antigravity usage reply (no command data)")?;
     let limits = limits_of(data);
+    if limits.is_empty() {
+        return Err(EMPTY_REPLY.into());
+    }
     let (mut session, mut weekly) = (None, None);
+    let mut full_at = serde_json::Map::new();
     let mut extra = Vec::new();
     for l in &limits {
         if is_main(&l.group) {
-            let slot = if l.hours >= WEEKLY_FROM_H {
-                &mut weekly
+            let slot = if WEEKLY_RANGE_H.contains(&l.hours) {
+                Some(("weekly", &mut weekly))
+            } else if l.hours < WEEKLY_FROM_H {
+                Some(("session", &mut session))
             } else {
-                &mut session
+                None
             };
-            if slot.is_none() {
-                *slot = Some(bucket_of(l));
-                continue;
+            if let Some((kind, slot)) = slot {
+                if slot.is_none() {
+                    *slot = Some(bucket_of(l));
+                    if let Some(t) = l.resets_at {
+                        full_at.insert(kind.into(), json!(iso(t)));
+                    }
+                    continue;
+                }
             }
         }
         extra.push(l);
@@ -289,6 +340,9 @@ pub fn parse_usage(body: &Value, now: DateTime<Utc>) -> Result<Sample, String> {
         return Err("Antigravity usage reply has no Gemini limit".into());
     }
     let mut raw = serde_json::Map::new();
+    if !full_at.is_empty() {
+        raw.insert("full_at".into(), Value::Object(full_at));
+    }
     // a plan name, should agy ever add one to the reply
     if let Some(t) = ["tier", "userTier", "tierDisplayName", "plan"]
         .iter()
@@ -306,7 +360,7 @@ pub fn parse_usage(body: &Value, now: DateTime<Utc>) -> Result<Sample, String> {
                     "name": l.group,
                     "kind": if l.hours >= WEEKLY_FROM_H { "weekly" } else { "session" },
                     "percent": l.pct,
-                    "resets_at": l.resets_at.map(iso),
+                    // (no reset: see bucket_of)
                 })
             })
             .collect();
@@ -355,16 +409,31 @@ pub fn run_usage(
         .spawn()
         .map_err(|e| format!("could not start agy: {e}"))?;
     let mut out = child.stdout.take().ok_or("could not read agy's output")?;
-    let reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let r = (&mut out)
-            .take(MAX_OUTPUT_BYTES + 1)
-            .read_to_end(&mut buf)
-            .map(|_| buf);
-        // drain the rest so agy never blocks on a full pipe
-        let _ = std::io::copy(&mut out, &mut std::io::sink());
-        r
-    });
+    // the reader keeps what it read where the caller can take it even if the pipe never closes
+    // (a helper agy started may hold it open after agy exits)
+    let shared = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<std::io::Result<()>>();
+    {
+        let shared = shared.clone();
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 8192];
+            let r = loop {
+                match out.read(&mut chunk) {
+                    Ok(0) => break Ok(()),
+                    Ok(n) => {
+                        let mut b = shared.lock().unwrap_or_else(|e| e.into_inner());
+                        // keep one byte past the cap to tell "too large"; drain the rest so agy
+                        // never blocks on a full pipe
+                        let room = (MAX_OUTPUT_BYTES as usize + 1).saturating_sub(b.len());
+                        b.extend_from_slice(&chunk[..n.min(room)]);
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(e) => break Err(e),
+                }
+            };
+            let _ = done_tx.send(r);
+        });
+    }
     let start = Instant::now();
     let code = loop {
         match child.try_wait() {
@@ -373,6 +442,7 @@ pub fn run_usage(
             Err(e) => {
                 crate::grok_cli::kill_pid(child.id());
                 let _ = child.kill();
+                let _ = child.wait();
                 return Err(format!("could not watch agy: {e}"));
             }
         }
@@ -384,10 +454,19 @@ pub fn run_usage(
         }
         std::thread::sleep(StdDuration::from_millis(100));
     };
-    let buf = reader
-        .join()
-        .map_err(|_| "could not read agy's output".to_string())?
-        .map_err(|e| format!("could not read agy's output: {e}"))?;
+    // agy has exited: its output ends soon, unless something it started holds the pipe; then end
+    // that process group and take what was read
+    let left = timeout
+        .saturating_sub(start.elapsed())
+        .max(StdDuration::from_secs(2));
+    match done_rx.recv_timeout(left) {
+        Ok(r) => r.map_err(|e| format!("could not read agy's output: {e}"))?,
+        Err(_) => {
+            crate::grok_cli::kill_pid(child.id());
+            let _ = done_rx.recv_timeout(StdDuration::from_secs(1));
+        }
+    }
+    let buf = std::mem::take(&mut *shared.lock().unwrap_or_else(|e| e.into_inner()));
     if buf.len() as u64 > MAX_OUTPUT_BYTES {
         return Err("agy's reply is larger than 1 MiB".into());
     }
@@ -419,6 +498,10 @@ pub fn reply_json(out: &[u8]) -> Option<Value> {
 pub struct AgyUsage {
     pub env: Env,
     pub timeout: StdDuration,
+    /// The wait before retrying a reply that listed no limits.
+    pub retry_after: StdDuration,
+    /// Set once agy used the model for /usage: no more runs until aiTrack restarts.
+    stopped: std::sync::atomic::AtomicBool,
 }
 
 impl AgyUsage {
@@ -426,7 +509,17 @@ impl AgyUsage {
         Self {
             env,
             timeout: RUN_TIMEOUT,
+            retry_after: EMPTY_RETRY_AFTER,
+            stopped: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    fn run_once(&self, program: &Path, now: DateTime<Utc>) -> Result<Sample, String> {
+        let out = run_usage(program, self.env.home.as_deref(), self.timeout)
+            .map_err(|e| format!("Antigravity usage: {e}"))?;
+        let body = reply_json(&out)
+            .ok_or_else(|| "unexpected (non-JSON) Antigravity usage reply".to_string())?;
+        parse_usage(&body, now)
     }
 }
 
@@ -440,14 +533,23 @@ impl UsageSource for AgyUsage {
     }
 
     fn read(&self, now: DateTime<Utc>) -> Result<Observation, CollectError> {
+        use std::sync::atomic::Ordering;
+        if self.stopped.load(Ordering::SeqCst) {
+            return Err(CollectError::new(USED_MODEL));
+        }
         let program = find_agy(&self.env).ok_or_else(|| {
             CollectError::new("Antigravity CLI (agy) not found: install it from antigravity.google")
         })?;
-        let out = run_usage(&program, self.env.home.as_deref(), self.timeout)
-            .map_err(|e| CollectError::new(format!("Antigravity usage: {e}")))?;
-        let body = reply_json(&out)
-            .ok_or_else(|| CollectError::new("unexpected (non-JSON) Antigravity usage reply"))?;
-        let sample = parse_usage(&body, now).map_err(CollectError::new)?;
+        let mut r = self.run_once(&program, now);
+        if r.as_ref().err().map(String::as_str) == Some(EMPTY_REPLY) {
+            // a cold agy can answer before it has fetched the quota: one more try
+            std::thread::sleep(self.retry_after);
+            r = self.run_once(&program, now);
+        }
+        if r.as_ref().err().map(String::as_str) == Some(USED_MODEL) {
+            self.stopped.store(true, Ordering::SeqCst);
+        }
+        let sample = r.map_err(CollectError::new)?;
         Ok(Observation {
             latest: sample,
             history: vec![],

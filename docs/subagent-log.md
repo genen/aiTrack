@@ -44,3 +44,4 @@ line to both files for every subagent.
 | 2026-10-24 | reviewer-Maya: Opus review of the horizontal layout (PR #27, heavy on changed lines; read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
 | 2026-10-24 | reviewer-Tomas: Opus review of the Claude plan tooltip (PR #28, heavy on changed lines; read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
 | 2026-11-01 | logo-Maya: original Gemini/Antigravity badge mark in the style of the other vendor marks, with previews | claude-sonnet-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-11-01 | reviewer-Ines: Opus review of the Gemini (Antigravity) vendor (PR #30, heavy on changed lines; read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |

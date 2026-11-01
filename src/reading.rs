@@ -56,6 +56,8 @@ pub struct Reading {
     pub credits: Option<CreditBalance>,
     /// Codex: banked early resets still available (`raw.banked_resets`).
     pub banked_resets: Option<u64>,
+    /// Antigravity: when the weekly limit will be full again (`raw.full_at.weekly`).
+    pub full_at: Option<String>,
 }
 
 /// A credits balance (Codex): unlimited, or a number of credits left.
@@ -193,6 +195,12 @@ impl Reading {
                 .get("raw")
                 .and_then(|r| r.get("banked_resets"))
                 .and_then(Value::as_u64),
+            full_at: v
+                .get("raw")
+                .and_then(|r| r.get("full_at"))
+                .and_then(|f| f.get("weekly"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
         }
     }
 

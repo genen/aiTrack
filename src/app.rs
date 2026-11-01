@@ -246,6 +246,30 @@ impl CliProbe {
         }
         cached.is_some_and(|(_, v)| v)
     }
+
+    /// Like [`get`](Self::get), but the very first answer is taken here and now (once), so a
+    /// window that has just opened does not show the tool as missing.
+    fn get_after_first(self: &Arc<Self>) -> bool {
+        let first = self
+            .value
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_none();
+        if first {
+            let detect = self
+                .detect
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let found = detect();
+            let mut v = self.value.lock().unwrap_or_else(|e| e.into_inner());
+            if v.is_none() {
+                *v = Some((Instant::now(), found));
+            }
+            return found;
+        }
+        self.get()
+    }
 }
 
 /// State of the "Refresh Grok" control.
@@ -520,7 +544,8 @@ impl App {
             local,
             detect,
             "alerts-codex.json",
-            "Codex",
+            // (the name alert titles and their saved keys use, as before the shared helper)
+            "ChatGPT",
             crate::settings::Values::codex_on,
         );
         self.codex = Some(part);
@@ -540,6 +565,11 @@ impl App {
             "Gemini",
             crate::settings::Values::antigravity_on,
         );
+        // finding agy walks PATH, which can stall on a network share: the window reads an answer
+        // refreshed in the background (the collector's own gate still asks directly)
+        let probe = CliProbe::new(part.detect.clone());
+        let mut part = part;
+        part.detect = Arc::new(move || probe.get_after_first());
         self.antigravity = Some(part);
         self
     }

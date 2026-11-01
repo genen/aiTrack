@@ -376,7 +376,9 @@ Since June 2026, Google's free and Google AI Pro / Ultra plans use Gemini for co
 the Antigravity desktop app and its command-line tool `agy`. Both show the same usage page, and so does the Gemini
 block: a **Weekly** bar for the **Gemini models** (Gemini Flash and Pro). Antigravity also offers Claude and GPT models
 with a weekly limit of their own; that one is shown in the tooltip under **Other models**. Antigravity refills these
-limits gradually, so a bar can go down as well as up between readings.
+limits gradually, so a bar can go down as well as up between readings. There is no fixed reset: the tooltip says when
+the limit will be **full again** instead. An Enterprise (Google Cloud) account may have no per-user limits; then the
+block keeps its last reading and says so.
 
 aiTrack runs `agy -p /usage --output-format json` in the background at each update (every 15 minutes by default, and
 when you press refresh). That is `agy`'s own read-only usage command: it sends no prompt and uses no quota. aiTrack
@@ -799,7 +801,7 @@ What a reading holds: the percentages, reset times, spend and per-model limits f
 the whole answer from the Claude usage service. It does **not** hold your sign-in token, your organization id,
 your email or anything you wrote. The Grok record holds only the percentage, the reset time and your plan name. The Codex record holds the
 percentages, reset times, plan name, credit balance and per-model limits, never your account id or sign-in. The
-Gemini record holds the percentages and reset times of each model group.
+Gemini record holds the percentages of each model group and when each will be full again.
 
 aiTrack only **reads** the folders of Claude, Grok and Codex. It never changes them. For Gemini it only runs `agy`'s
 usage command.
@@ -1228,8 +1230,12 @@ When the `agy` CLI is found (`%LOCALAPPDATA%\agy\bin\agy.exe`, `~/.local/bin/agy
 **agy-usage**: `agy -p /usage --output-format json`, started with no window and no input in the home folder, at most
 60 seconds and 1 MiB of output. The reply's `command.data.groups[].buckets[]` carry `window`, `remaining_fraction`
 and `reset_time` (camelCase accepted too). The "Gemini Models" group fills the bars (a bucket shorter than a day is
-the Session row, the weekly one the Weekly row); every other group is a per-model line (**Other models**). A reply
-that is not `SUCCESS` becomes the error ("not signed in" says to run agy once). aiTrack never touches Antigravity's
+the Session row, a 6-8 day one the Weekly row); every other bucket is a per-model line (**Other models**).
+`reset_time` is when the bucket is full again (it moves with every poll while usage refills), so it is stored as
+`raw.full_at` and never as the window's reset: windows are inferred from the readings, and alerts fire once per window.
+A reply that is not `SUCCESS` becomes the error ("not signed in" says to run agy once). A reply with no groups is
+retried once after 5 seconds, then recorded as a failed poll (the last reading stays, never 0%). A reply that took a
+model turn or tokens means agy sent `/usage` to the model: aiTrack stops running agy until it restarts. aiTrack never touches Antigravity's
 credentials and makes no network call of its own for Gemini.
 
 Readings go to `usage-antigravity.jsonl` (records carry `"vendor": "antigravity"`). Settings > Display > "Show

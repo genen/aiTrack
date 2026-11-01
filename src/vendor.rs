@@ -81,6 +81,9 @@ pub struct Vendor {
     pub credit_note: Option<String>,
     /// Codex: banked early resets still available.
     pub banked_resets: Option<u64>,
+    /// Gemini (Antigravity): when the weekly limit will be full again. Its usage refills
+    /// gradually, so there is no fixed reset; this replaces the "resets in" line.
+    pub full_at: Option<DateTime<Utc>>,
 }
 
 impl Vendor {
@@ -107,6 +110,7 @@ impl Vendor {
             bot_gauge: None,
             credit_note: None,
             banked_resets: None,
+            full_at: None,
         }
     }
 
@@ -232,6 +236,7 @@ pub fn plan_vendor(id: VendorId, c: &crate::state::CodexState, now: DateTime<Utc
             v.tier = c.tier.clone();
             v.credit_note = c.credits.as_ref().and_then(|b| b.text());
             v.banked_resets = c.banked_resets.filter(|n| *n > 0);
+            v.full_at = c.full_at.as_deref().and_then(crate::util::parse_ts);
             v.current = crate::state::grok_reading_is_shown(p, now);
         }
         None => {
