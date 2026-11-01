@@ -1933,7 +1933,7 @@ impl AitrackUi {
         }
     }
 
-    /// Settings > About: project link and donation link (plus the display backend on Linux).
+    /// Settings > About: project link, donation QR code and link (plus the display backend on Linux).
     fn about_body(&mut self, ui: &mut Ui, pal: &Palette, rects: &mut Vec<(String, Rect)>) {
         // (the build line is at the bottom of Settings; here the name links to the project)
         let mut open_repo = false;
@@ -1953,19 +1953,24 @@ impl AitrackUi {
             self.open_about_link(crate::launch::REPO_URL, "Could not open the project page");
         }
         ui.add_space(4.0);
-        let mut open_donate = false;
-        setting_row_ui(
+        setting_row(
             ui,
             pal,
             "Support aiTrack",
-            |ui| {
-                let r = link_label(ui, pal, "Donate", crate::launch::DONATE_URL);
-                rects.push(("donate".into(), r.rect));
-                open_donate = r.clicked();
-            },
-            "",
+            "Scan with your phone or click Donate",
             |_| {},
         );
+        // PayPal's QR code for the donation page, with the Donate link under it; both open the page
+        let mut open_donate = false;
+        ui.vertical_centered(|ui| {
+            let r = donate_qr(ui);
+            rects.push(("donate_qr".into(), r.rect));
+            open_donate |= r.clicked();
+            ui.add_space(2.0);
+            let r = link_label(ui, pal, "Donate", crate::launch::DONATE_URL);
+            rects.push(("donate".into(), r.rect));
+            open_donate |= r.clicked();
+        });
         if open_donate {
             self.open_about_link(
                 crate::launch::DONATE_URL,
@@ -3527,6 +3532,88 @@ fn tri_icon(p: &Painter, pal: &Palette, c: Pos2, color: Color32) {
         Stroke::new(1.2_f32, pal.panel),
     );
     p.circle_filled(c + vec2(0.0, 2.7), 0.7, pal.panel);
+}
+
+/// PayPal's own QR code for the donation page (it encodes [`crate::launch::DONATE_URL`] plus
+/// `&source=qr`), read module by module from the image PayPal gives out: 33 x 33, `#` = dark.
+pub const DONATE_QR: [&str; 33] = [
+    "#######...#.#..#########..#######",
+    "#.....#.#.#..#.###..###...#.....#",
+    "#.###.#.....#.##..####..#.#.###.#",
+    "#.###.#.###.#.#.#..#..#.#.#.###.#",
+    "#.###.#..#.......#.###.#..#.###.#",
+    "#.....#.##.##.####...##.#.#.....#",
+    "#######.#.#.#.#.#.#.#.#.#.#######",
+    ".........###..##....####.........",
+    "#####.####.#.#..##..#..###.#.#.#.",
+    "...##.....#.#..######..#.##...###",
+    ".###.####.#..####.#...#......#.#.",
+    "#..#.#..#...#.......####...##.#..",
+    ".#....#.###.######..#..###..##...",
+    "##..#..##.....#...###.##..#....##",
+    ".#....#..#.###.##...#.#.#......#.",
+    "#.#.....####..###.#.###..#.#..#..",
+    "###.####.##########.#.#.##.##..#.",
+    "#####..##.#.##...#.##..#..#..#.##",
+    "##.##.#.#.#.#####....#...###.#.#.",
+    ".......#...##.##...#.#.#...#..#..",
+    "#.#.#.####...##.#.....###...#..#.",
+    "##.###.#..##..#..#.##..##.#..#.##",
+    "#..##.#..##...##..#.#.#..#####.#.",
+    "#...#....#..#.#....####...#.###..",
+    "#.#.#.#.###..##....##.########..#",
+    "........#..#..###...###.#...###.#",
+    "#######.##...#.####....##.#.##.#.",
+    "#.....#..#.....##.#.#####...#####",
+    "#.###.#.####.##..##...#.######.#.",
+    "#.###.#.##.##..##..#####.#.####..",
+    "#.###.#.###..#.###..####..##.#.#.",
+    "#.....#.#.#...##..#.##......###..",
+    "#######.#.#.###.#.....#####..#.#.",
+];
+
+/// Draws [`DONATE_QR`] black on white with the standard 4-module quiet zone, in both themes (phones
+/// read dark-on-light codes most reliably). Clickable, with a pointing hand and the URL on hover.
+fn donate_qr(ui: &mut Ui) -> Response {
+    const MODULE: f32 = 3.0;
+    const QUIET: f32 = 4.0 * MODULE;
+    let n = DONATE_QR.len() as f32;
+    let side = n * MODULE + 2.0 * QUIET;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(side, side), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        painter.rect_filled(rect, 2.0, Color32::WHITE);
+        // one plain mesh (no anti-aliased edges) with module edges snapped to whole pixels, so no
+        // grey hairline seams appear between neighbouring modules at any display scale
+        let ppp = ui.ctx().pixels_per_point();
+        let snap = |v: f32| (v * ppp).round() / ppp;
+        let origin = rect.min + egui::vec2(QUIET, QUIET);
+        let edge_x = |i: usize| snap(origin.x + i as f32 * MODULE);
+        let edge_y = |i: usize| snap(origin.y + i as f32 * MODULE);
+        let mut mesh = egui::Mesh::default();
+        for (y, row) in DONATE_QR.iter().enumerate() {
+            let bytes = row.as_bytes();
+            let mut x = 0;
+            while x < bytes.len() {
+                if bytes[x] != b'#' {
+                    x += 1;
+                    continue;
+                }
+                let start = x;
+                while x < bytes.len() && bytes[x] == b'#' {
+                    x += 1;
+                }
+                let run = Rect::from_min_max(
+                    egui::pos2(edge_x(start), edge_y(y)),
+                    egui::pos2(edge_x(x), edge_y(y + 1)),
+                );
+                mesh.add_colored_rect(run, Color32::BLACK);
+            }
+        }
+        painter.add(egui::Shape::mesh(mesh));
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(crate::launch::DONATE_URL)
 }
 
 /// A small underlined link; hovering shows `url`. Returns the response (check `clicked()`).
