@@ -1307,6 +1307,7 @@ pub fn diagnose(env: &Env, now: DateTime<Utc>) -> String {
     o.push_str(&crate::grok::diagnose(env, now));
     o.push_str(&crate::grok_bot::diagnose(env, now));
     o.push_str(&crate::codex::diagnose(env, now));
+    o.push_str(&crate::antigravity::diagnose(env, now));
     o
 }
 

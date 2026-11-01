@@ -1391,6 +1391,158 @@ pub fn launch_codex_async(log: PathBuf, done: impl FnOnce(bool) + Send + 'static
     }
 }
 
+// ---------------------------------------------------------------- Antigravity (Gemini)
+
+/// Start-menu / macOS app name of Google Antigravity's desktop app. Exact match only.
+pub const ANTIGRAVITY_NAME: &str = "Antigravity";
+
+/// The `shell:AppsFolder` targets of the Antigravity desktop app that Windows lists (Start entries
+/// named exactly "Antigravity").
+pub fn antigravity_targets(apps: &[StartApp]) -> Vec<String> {
+    let mut ids: Vec<String> = apps
+        .iter()
+        .filter(|a| a.name.eq_ignore_ascii_case(ANTIGRAVITY_NAME))
+        .map(|a| a.app_id.clone())
+        .collect();
+    ids.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    ids.into_iter()
+        .map(|id| format!("shell:AppsFolder\\{id}"))
+        .collect()
+}
+
+/// Windows: 1. the Antigravity desktop app as Windows lists it, 2. the `agy` CLI in a new terminal
+/// window. Stops at the first that starts. Nothing is typed into the CLI.
+pub fn launch_antigravity(env: &CodexLaunchEnv, spawner: &dyn Spawner) -> Vec<Attempt> {
+    let mut tried = Vec::new();
+    let apps = match spawner.capture(
+        Path::new("powershell.exe"),
+        &[
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-Command".into(),
+            START_APPS_SCRIPT.into(),
+        ],
+    ) {
+        Ok(t) => parse_start_apps(&t),
+        Err(_) => Vec::new(),
+    };
+    for t in antigravity_targets(&apps) {
+        let r = spawner.run(Path::new("explorer.exe"), std::slice::from_ref(&t));
+        let ok = r.is_ok();
+        tried.push(Attempt {
+            method: format!("Antigravity app {t}"),
+            ok,
+            detail: r.err(),
+        });
+        if ok {
+            return tried;
+        }
+    }
+    match &env.cli {
+        Some(cli) => {
+            let dir = env.home.clone().unwrap_or_else(|| PathBuf::from("."));
+            let (prog, args) = terminal_command_titled("Antigravity", cli, &dir, env.wt.as_deref());
+            let r = spawner.run(&prog, &args);
+            tried.push(Attempt {
+                method: format!("agy CLI in a terminal ({})", prog.display()),
+                ok: r.is_ok(),
+                detail: r.err(),
+            });
+        }
+        None => tried.push(Attempt {
+            method: "agy CLI in a terminal".into(),
+            ok: false,
+            detail: Some("no Antigravity app or agy CLI found".into()),
+        }),
+    }
+    tried
+}
+
+/// macOS: 1. `open -a Antigravity`, 2. the `agy` CLI in a new Terminal window.
+pub fn launch_antigravity_mac(
+    home: Option<&Path>,
+    cli: Option<&Path>,
+    spawner: &dyn Spawner,
+) -> Vec<Attempt> {
+    let r = spawner.run(
+        Path::new(OPEN_PROGRAM),
+        &["-a".into(), ANTIGRAVITY_NAME.into()],
+    );
+    let ok = r.is_ok();
+    let mut tried = vec![Attempt {
+        method: format!("open -a {ANTIGRAVITY_NAME}"),
+        ok,
+        detail: r.err(),
+    }];
+    if ok {
+        return tried;
+    }
+    if let Some(cli) = cli {
+        let dir = home.unwrap_or_else(|| Path::new("."));
+        let r = spawner.run(
+            Path::new(OSASCRIPT_PROGRAM),
+            &terminal_osascript_args(cli, dir),
+        );
+        tried.push(Attempt {
+            method: "agy CLI in Terminal (osascript)".into(),
+            ok: r.is_ok(),
+            detail: r.err(),
+        });
+    }
+    tried
+}
+
+/// Launch Antigravity (Gemini) on a short-lived thread; `done(ok)` runs on that thread. Linux
+/// opens the `agy` CLI in a terminal window (as Codex's CLI is).
+pub fn launch_antigravity_async(log: PathBuf, done: impl FnOnce(bool) + Send + 'static) {
+    let spawn = std::thread::Builder::new()
+        .name("aitrack-launch-antigravity".into())
+        .spawn(move || {
+            let env = crate::sources::Env::from_process();
+            let cli = crate::antigravity::find_agy(&env);
+            let tried = if cfg!(target_os = "macos") {
+                launch_antigravity_mac(env.home.as_deref(), cli.as_deref(), &SystemSpawner)
+            } else if cfg!(target_os = "linux") {
+                let path = std::env::var_os("PATH");
+                let terms =
+                    linux_terminals(std::env::var_os("TERMINAL").as_deref(), path.as_deref());
+                launch_codex_linux(cli.as_deref(), &terms, &SystemSpawner)
+                    .into_iter()
+                    .map(|mut a| {
+                        a.method = a.method.replace("codex", "agy");
+                        a.detail = a.detail.map(|d| d.replace("codex", "agy"));
+                        a
+                    })
+                    .collect()
+            } else {
+                let wt = env
+                    .localappdata
+                    .as_ref()
+                    .map(|l| l.join("Microsoft").join("WindowsApps").join("wt.exe"))
+                    .filter(|p| p.is_file());
+                let cenv = CodexLaunchEnv {
+                    localappdata: env.localappdata.clone(),
+                    home: env.home.clone(),
+                    cli,
+                    wt,
+                };
+                launch_antigravity(&cenv, &SystemSpawner)
+            };
+            let line = log_text(&tried).replace("claude desktop launch", "antigravity launch");
+            append_log(&log, &line);
+            done(succeeded(&tried));
+        });
+    if spawn.is_err() {
+        append_log(
+            &log_path(),
+            &format!(
+                "{}  antigravity launch: could not start a thread",
+                crate::util::now_iso()
+            ),
+        );
+    }
+}
+
 /// Where "Open help" goes. One place to change when a real help page exists.
 pub const HELP_URL: &str = "https://github.com/genen/aiTrack#readme";
 

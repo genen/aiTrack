@@ -75,6 +75,19 @@ fn real_codex_launcher() -> Launcher {
     })
 }
 
+fn real_antigravity_launcher() -> Launcher {
+    Arc::new(|ctx, msg| {
+        let (ctx, msg) = (ctx.clone(), msg.clone());
+        crate::launch::launch_antigravity_async(crate::launch::log_path(), move |ok| {
+            if !ok {
+                *msg.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(("Could not launch Antigravity".into(), Instant::now()));
+            }
+            ctx.request_repaint();
+        });
+    })
+}
+
 struct ChartCache {
     version: u64,
     vendor: VendorId,
@@ -131,6 +144,8 @@ pub struct AitrackUi {
     pub grok_launcher: Launcher,
     /// What a click on the Codex badge does (the real launcher by default; tests inject a fake).
     pub codex_launcher: Launcher,
+    /// What a click on the Gemini badge does (opens Antigravity; tests inject a fake).
+    pub antigravity_launcher: Launcher,
     /// Screen rect of the Grok block's Refresh control from the last frame, when shown.
     pub refresh_rect: Option<Rect>,
     /// Screen rect of the "Refresh Grok now" button in Settings, when shown.
@@ -166,7 +181,7 @@ pub struct AitrackUi {
     /// Stats view: the selected ranges, and the readings versions the plan numbers were asked for.
     pub proj_range: ProjRange,
     pub plan_range: StatsRange,
-    plan_versions: Option<(u64, u64, u64)>,
+    plan_versions: Option<(u64, u64, u64, u64)>,
     /// Screen rect of each range choice of the Stats view (for tests / the render tool).
     pub stats_rects: Vec<(String, Rect)>,
     /// Screen rect of the header's logo from the last frame (tests / the render tool).
@@ -252,6 +267,7 @@ impl AitrackUi {
             launcher: real_launcher(),
             grok_launcher: real_grok_launcher(),
             codex_launcher: real_codex_launcher(),
+            antigravity_launcher: real_antigravity_launcher(),
             refresh_rect: None,
             settings_refresh_rect: None,
             mock_refresh: None,
@@ -1123,12 +1139,16 @@ impl AitrackUi {
                 // in the small window a click does nothing (the window is dragged by any part)
                 let launchable = !small
                     && self.launch_enabled
-                    && matches!(vv.id, VendorId::Claude | VendorId::Grok | VendorId::Codex);
+                    && matches!(
+                        vv.id,
+                        VendorId::Claude | VendorId::Grok | VendorId::Codex | VendorId::Antigravity
+                    );
                 let variant = st.settings.badge_style;
                 if vendor_header(ui, pal, vv, launchable, variant, &mut self.badge_rects) {
                     let launcher = match vv.id {
                         VendorId::Grok => self.grok_launcher.clone(),
                         VendorId::Codex => self.codex_launcher.clone(),
+                        VendorId::Antigravity => self.antigravity_launcher.clone(),
                         _ => self.launcher.clone(),
                     };
                     launcher(ui.ctx(), &self.launch_msg);
@@ -1656,12 +1676,22 @@ impl AitrackUi {
                             Track::from_opt(v.codex_enabled),
                             false,
                         ),
+                        (
+                            "Show Gemini",
+                            self.app.antigravity_detected(),
+                            Track::from_opt(v.antigravity_enabled),
+                            false,
+                        ),
                     ] {
                         let codex = name == "Show ChatGPT";
-                        if !is_claude && !codex && self.app.grok.is_none() {
+                        let gemini = name == "Show Gemini";
+                        if !is_claude && !codex && !gemini && self.app.grok.is_none() {
                             continue;
                         }
                         if codex && self.app.codex.is_none() {
+                            continue;
+                        }
+                        if gemini && self.app.antigravity.is_none() {
                             continue;
                         }
                         divider(ui, pal);
@@ -1680,6 +1710,8 @@ impl AitrackUi {
                                             self.app.set_claude_track(t);
                                         } else if codex {
                                             self.app.set_codex_track(t);
+                                        } else if gemini {
+                                            self.app.set_antigravity_track(t);
                                         } else {
                                             self.app.set_grok_track(t);
                                         }
@@ -1888,6 +1920,7 @@ impl AitrackUi {
         self.launcher = Arc::new(|_, _| {});
         self.grok_launcher = Arc::new(|_, _| {});
         self.codex_launcher = Arc::new(|_, _| {});
+        self.antigravity_launcher = Arc::new(|_, _| {});
     }
 
     // ------------------------------------------------------------ about
@@ -1969,6 +2002,10 @@ impl AitrackUi {
             self.app.history.version(),
             self.app.grok.as_ref().map_or(0, |g| g.history.version()),
             self.app.codex.as_ref().map_or(0, |c| c.history.version()),
+            self.app
+                .antigravity
+                .as_ref()
+                .map_or(0, |c| c.history.version()),
         );
         if self.plan_versions != Some(versions) {
             self.plan_versions = Some(versions);
@@ -2938,7 +2975,7 @@ fn badge_painter(v: VendorId) -> Option<BadgePainter> {
         VendorId::Claude => Some(paint_claude_mark),
         VendorId::Grok => Some(paint_grok_mark),
         VendorId::Codex => Some(paint_codex_mark),
-        _ => None,
+        VendorId::Antigravity => Some(paint_antigravity_mark),
     }
 }
 
@@ -3156,6 +3193,34 @@ fn paint_codex_mark(p: &Painter, badge: Rect, ink: Color32) {
     }
 }
 
+/// The Gemini / Antigravity mark: a four-point sparkle whose arms are concave, tapered blades of
+/// unequal length (long above, short to the right), set a few degrees off the vertical, with a
+/// small round spark orbiting in the gap at the upper right. Mirror-free and deliberately
+/// uneven, so it recalls a sparkle without tracing Google's mark.
+fn paint_antigravity_mark(p: &Painter, badge: Rect, ink: Color32) {
+    // (angle in degrees clockwise from up, length as a share of the badge)
+    const ARMS: [(f32, f32); 4] = [(0.0, 0.43), (90.0, 0.31), (180.0, 0.36), (270.0, 0.38)];
+    let c = badge.center() + vec2(-0.02, 0.02) * badge.width();
+    let size = badge.width();
+    let tilt = -8.0_f32;
+    for (deg, len) in ARMS {
+        let a = (deg + tilt).to_radians();
+        let dir = vec2(a.sin(), -a.cos());
+        let reach = size * len;
+        // concave flanks: the half-width falls off quickly, then runs out to a fine point
+        taper(
+            p,
+            c,
+            c + dir * reach,
+            |t| size * 0.105 * (1.0 - t).powf(1.7) + 0.04,
+            ink,
+        );
+    }
+    p.circle_filled(c, size * 0.06, ink);
+    let a = (-38.0_f32).to_radians();
+    p.circle_filled(c + vec2(a.sin(), -a.cos()) * size * 0.33, size * 0.058, ink);
+}
+
 /// Vendor badge + name, and (when a window would run out before it resets) the red warning right
 /// after the name. Fixed height: the warning picks the longest text that fits, never wraps.
 /// Returns true when the (clickable) badge was clicked.
@@ -3184,6 +3249,7 @@ fn vendor_header(
             .on_hover_text(match v.id {
                 VendorId::Grok => "Open Grok",
                 VendorId::Codex => "Open Codex",
+                VendorId::Antigravity => "Open Antigravity",
                 _ => "Open Claude desktop",
             });
         clicked = r.clicked();

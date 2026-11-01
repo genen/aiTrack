@@ -129,15 +129,11 @@ pub fn badge_style(v: VendorId, variant: BadgeVariant, pal: &Palette) -> BadgeSt
             BadgeStyle::new(Fill::Solid(rgb(0x0D0D0D)), rgb(0x10A37F))
         }
         (VendorId::Codex, BadgeVariant::Light) => light(rgb(0x0D0D0D)),
-        // letter badges: the vendor's accent colour
-        (v, BadgeVariant::Filled) => BadgeStyle::new(
-            Fill::Solid(pal.vendor(v)),
-            if pal.dark {
-                pal.background
-            } else {
-                rgb(0xFFFFFF)
-            },
-        ),
+        // Antigravity (Gemini): the blue accent as a soft gradient with a white sparkle
+        (VendorId::Antigravity, BadgeVariant::Filled) => {
+            BadgeStyle::new(Fill::Vertical(rgb(0x5BA3FF), rgb(0x3A7BEA)), rgb(0xFFFFFF))
+        }
+        // other vendors: the vendor's accent colour
         (v, BadgeVariant::Dark) => BadgeStyle::new(dark_fill, pal.vendor(v)),
         (v, BadgeVariant::Light) => light(pal.vendor(v)),
         (_, BadgeVariant::Auto) => unreachable!("resolved above"),

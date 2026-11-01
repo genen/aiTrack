@@ -134,13 +134,17 @@ fn clicking_the_claude_badge_launches_once_with_a_pointer_cursor() {
 }
 
 #[test]
-fn antigravity_badge_is_not_clickable() {
-    let (l, n) = counting();
-    let mut w = Win::new(true, Some(l));
+fn clicking_the_gemini_badge_opens_antigravity_not_claude() {
+    let (claude_l, claude_n) = counting();
+    let (ag_l, ag_n) = counting();
+    let mut w = Win::new(true, Some(claude_l));
+    w.ui.antigravity_launcher = ag_l;
     let p = w.badge(VendorId::Antigravity);
-    assert_ne!(w.hover(p), CursorIcon::PointingHand, "Antigravity badge");
+    assert_eq!(w.hover(p), CursorIcon::PointingHand, "Gemini badge");
+    assert_eq!(ag_n.load(Ordering::SeqCst), 0, "hovering must not launch");
     w.click(p);
-    assert_eq!(n.load(Ordering::SeqCst), 0);
+    assert_eq!(ag_n.load(Ordering::SeqCst), 1);
+    assert_eq!(claude_n.load(Ordering::SeqCst), 0);
 }
 
 #[test]

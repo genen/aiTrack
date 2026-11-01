@@ -3,6 +3,17 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.14-beta] - 2026-11-01
+
+### Added
+- Gemini as a fourth tracked tool, through Google Antigravity (where Google's free and Google AI Pro / Ultra plans use
+  Gemini since June 2026). The Gemini block shows the weekly limit of the Gemini models, with the weekly limit of
+  Antigravity's Claude and GPT models under "Other models" in the tooltip. A shorter limit, should Antigravity add one,
+  becomes a Session bar. Numbers come from `agy -p /usage --output-format json`, Antigravity's own read-only usage
+  command, run in the background at each update; aiTrack never reads Antigravity's sign-in. History chart, Stats plan
+  blocks, alerts, Diagnostics rows, `--sources`, a "Show Gemini" setting, and a badge that opens Antigravity.
+- An original sparkle badge for Gemini.
+
 ## [0.5.13] - 2026-10-24
 
 Stable release with everything since 0.5.3 (the 0.5.4-beta to 0.5.12-beta entries below). No changes of its own.

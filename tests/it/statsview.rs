@@ -64,6 +64,7 @@ fn plan_of(readings: &[Reading]) -> PlanData {
             .collect(),
         grok: None,
         grok_bot: None,
+        antigravity: None,
         codex: None,
     }
 }
@@ -329,6 +330,7 @@ fn the_service_scans_off_thread_wakes_the_window_and_rescans_on_request() {
         claude: Some(history),
         grok: None,
         grok_bot: None,
+        antigravity: None,
         codex: None,
         rescan_every: StdDuration::from_secs(3600),
     };
@@ -520,6 +522,7 @@ fn the_service_reads_the_grok_bot_history_file() {
         grok: None,
         grok_bot: Some(tracker),
         codex: None,
+        antigravity: None,
         rescan_every: StdDuration::from_secs(3600),
     };
     let svc = StatsService::new(cfg);

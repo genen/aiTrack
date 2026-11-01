@@ -530,6 +530,15 @@ impl Poller {
         Self::with_chain_for(crate::codex::build_chain(&Env::from_process()), "codex")
     }
 
+    /// Antigravity's chain (one `agy -p /usage` run); `AITRACK_AGY_CMD` replaces the program in
+    /// test builds only.
+    pub fn antigravity_from_env() -> Self {
+        Self::with_chain_for(
+            crate::antigravity::build_chain(&Env::from_process()),
+            "antigravity",
+        )
+    }
+
     pub fn with_chain(chain: Vec<Box<dyn UsageSource>>) -> Self {
         Self {
             chain,

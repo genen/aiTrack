@@ -22,7 +22,7 @@ use std::path::PathBuf;
 #[cfg(feature = "gui")]
 use std::sync::Arc;
 
-const USAGE: &str = "aiTrack - Claude, Grok and ChatGPT plan usage tracker
+const USAGE: &str = "aiTrack - Claude, Grok, ChatGPT and Gemini plan usage tracker
 
 USAGE:
     aitrack [OPTIONS]
@@ -257,6 +257,7 @@ fn open_window(data: PathBuf) {
     let grok_file = data.with_file_name("usage-grok.jsonl");
     let grok_bot_file = data.with_file_name("usage-grok-bot.jsonl");
     let codex_file = data.with_file_name("usage-codex.jsonl");
+    let antigravity_file = data.with_file_name("usage-antigravity.jsonl");
     let app = Arc::new(
         App::new(
             Box::new(JsonlStore::new(data)),
@@ -276,6 +277,11 @@ fn open_window(data: PathBuf) {
             Box::new(JsonlStore::new(codex_file)),
             Poller::codex_from_env(),
             Arc::new(|| aitrack::codex::detected(&aitrack::sources::Env::from_process())),
+        )
+        .with_antigravity_poller(
+            Box::new(JsonlStore::new(antigravity_file)),
+            Poller::antigravity_from_env(),
+            Arc::new(|| aitrack::antigravity::detected(&aitrack::sources::Env::from_process())),
         )
         .with_stats(
             aitrack::transcripts::Roots::from_env(

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Vendors: one block per provider on the main view. Claude, Grok and Codex have real data
-//! sources; Antigravity exists only as mock data for screenshots.
+//! Vendors: one block per provider on the main view. Claude, Grok, Codex (shown as ChatGPT) and
+//! Antigravity (shown as Gemini) have real data sources.
 
 use crate::analysis::{Gauge, Plan, WindowStats};
 use crate::reading::{Kind, ModelLimit};
@@ -32,7 +32,7 @@ impl VendorId {
         match self {
             VendorId::Claude => "Claude",
             VendorId::Codex => "ChatGPT",
-            VendorId::Antigravity => "Antigravity",
+            VendorId::Antigravity => "Gemini",
             VendorId::Grok => "Grok",
         }
     }
@@ -199,6 +199,9 @@ pub fn from_state_at(s: &State, now: DateTime<Utc>) -> Vec<Vendor> {
     if let Some(c) = s.codex.as_ref().filter(|c| c.enabled) {
         out.push(codex(c, now));
     }
+    if let Some(c) = s.antigravity.as_ref().filter(|c| c.enabled) {
+        out.push(plan_vendor(VendorId::Antigravity, c, now));
+    }
     out.retain(Vendor::has_data);
     out
 }
@@ -206,7 +209,13 @@ pub fn from_state_at(s: &State, now: DateTime<Utc>) -> Vec<Vendor> {
 /// The Codex block: two windows like Claude's, kept however old (dimmed, with the chip) like
 /// Grok's, because its session logs only change when Codex is used.
 pub fn codex(c: &crate::state::CodexState, now: DateTime<Utc>) -> Vendor {
-    let mut v = Vendor::new(VendorId::Codex);
+    plan_vendor(VendorId::Codex, c, now)
+}
+
+/// A block built like Codex's (Codex, and Gemini through Antigravity): its windows from its own
+/// readings, kept however old (dimmed, with the chip), a placeholder row until the first reading.
+pub fn plan_vendor(id: VendorId, c: &crate::state::CodexState, now: DateTime<Utc>) -> Vendor {
+    let mut v = Vendor::new(id);
     v.error = c.collector.error.clone();
     match &c.plan {
         Some(p) => {
@@ -265,6 +274,18 @@ pub fn demo_vendors(now: DateTime<Utc>) -> Vec<Vendor> {
             v.session = Some(demo_gauge(now, Kind::Session, s, sh, sr));
         }
         v.weekly = Some(demo_gauge(now, Kind::Weekly, w, wh, wr));
+        if id == VendorId::Antigravity {
+            v.weekly_only = true;
+            v.session = None;
+            v.source = Some("agy-usage".into());
+            v.observed_at = Some(now);
+            v.models = vec![ModelLimit {
+                name: "Claude and GPT models".into(),
+                kind: "weekly".into(),
+                pct: 12.0,
+                resets_at: v.weekly.as_ref().and_then(|g| g.resets_at.clone()),
+            }];
+        }
         if id == VendorId::Codex {
             v.tier = Some("Plus".into());
             v.source = Some("codex-usage".into());

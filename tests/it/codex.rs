@@ -842,6 +842,7 @@ fn stats_has_codex_session_and_weekly_blocks() {
         claude: vec![],
         grok: None,
         grok_bot: None,
+        antigravity: None,
         codex: Some(
             StatsRange::ALL
                 .into_iter()

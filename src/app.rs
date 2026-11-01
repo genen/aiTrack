@@ -9,7 +9,8 @@ use crate::live::Poller;
 use crate::settings::{Direction, Settings};
 use crate::startup;
 use crate::state::{
-    build_codex_state, build_grok_state, build_state, CodexState, GrokState, State,
+    build_antigravity_state, build_codex_state, build_grok_state, build_state, CodexState,
+    GrokState, State,
 };
 use crate::store::{History, Store};
 use chrono::Utc;
@@ -31,6 +32,8 @@ pub struct App {
     pub grok: Option<GrokPart>,
     /// Codex: its own history file and collector (see [`App::with_codex`]).
     pub codex: Option<CodexPart>,
+    /// Gemini (Antigravity): its own history file and collector (see [`App::with_antigravity`]).
+    pub antigravity: Option<CodexPart>,
     notifier: Arc<Mutex<Arc<dyn Notifier>>>,
     /// A usage alert fired: the window comes to the front (see [`App::take_raise`]).
     raise: Arc<AtomicBool>,
@@ -307,6 +310,7 @@ struct Cached {
     version: u64,
     grok_version: u64,
     codex_version: u64,
+    antigravity_version: u64,
     at: Instant,
     state: State,
 }
@@ -387,6 +391,7 @@ impl App {
             collector,
             grok: None,
             codex: None,
+            antigravity: None,
             notifier,
             raise,
             cache: Mutex::new(None),
@@ -509,22 +514,73 @@ impl App {
         local: Option<PollFn>,
         detect: Detect,
     ) -> Self {
+        let part = self.plan_part(
+            store,
+            full,
+            local,
+            detect,
+            "alerts-codex.json",
+            "Codex",
+            crate::settings::Values::codex_on,
+        );
+        self.codex = Some(part);
+        self
+    }
+
+    /// Add Gemini tracking through Antigravity: its own store and collector, one `agy -p /usage`
+    /// run per full poll. Nothing is run unless Antigravity tracking is on (setting, or automatic
+    /// because `detect()` finds the `agy` CLI).
+    pub fn with_antigravity(mut self, store: Box<dyn Store>, full: PollFn, detect: Detect) -> Self {
+        let part = self.plan_part(
+            store,
+            full,
+            None,
+            detect,
+            "alerts-antigravity.json",
+            "Gemini",
+            crate::settings::Values::antigravity_on,
+        );
+        self.antigravity = Some(part);
+        self
+    }
+
+    /// [`with_antigravity`](Self::with_antigravity) over a real [`Poller`].
+    pub fn with_antigravity_poller(
+        self,
+        store: Box<dyn Store>,
+        poller: Poller,
+        detect: Detect,
+    ) -> Self {
+        let poller = Arc::new(poller);
+        self.with_antigravity(store, Box::new(move |s| poller.poll_once(s)), detect)
+    }
+
+    /// The store, collector and alerts of a vendor shaped like Codex (two windows, its own file).
+    #[allow(clippy::too_many_arguments)]
+    fn plan_part(
+        &self,
+        store: Box<dyn Store>,
+        full: PollFn,
+        local: Option<PollFn>,
+        detect: Detect,
+        alerts_file: &str,
+        alert_name: &'static str,
+        on: fn(&crate::settings::Values, bool) -> bool,
+    ) -> CodexPart {
         let gate = |f: PollFn| -> PollFn {
             let (st, det) = (self.settings.clone(), detect.clone());
             Box::new(move |s| {
-                if st.get().codex_on(det()) {
+                if on(&st.get(), det()) {
                     f(s)
                 } else {
-                    Ok(Value::Null) // Codex not in use: nothing to do, nothing to report
+                    Ok(Value::Null) // not in use: nothing to do, nothing to report
                 }
             })
         };
         let (full, local) = (gate(full), local.map(gate));
         let history = Arc::new(History::new(store));
         let collector = Collector::with_local(history.clone(), self.settings.clone(), full, local);
-        let alerts = Arc::new(Alerts::load(
-            self.settings.path.with_file_name("alerts-codex.json"),
-        ));
+        let alerts = Arc::new(Alerts::load(self.settings.path.with_file_name(alerts_file)));
         {
             let (h, st, n, det) = (
                 history.clone(),
@@ -535,7 +591,7 @@ impl App {
             let up = self.raise.clone();
             collector.set_after_poll(move || {
                 let v = st.get();
-                if !v.notifications || !v.codex_on(det()) {
+                if !v.notifications || !on(&v, det()) {
                     return;
                 }
                 alerts.set_options(st.alert_options());
@@ -551,17 +607,16 @@ impl App {
                     inner: notifier.as_ref(),
                     raise: &up,
                 };
-                alerts.evaluate("ChatGPT", &plan, now, &raising);
+                alerts.evaluate(alert_name, &plan, now, &raising);
             });
         }
         collector.set_on_prune(prune_reporter(self.prune_result.clone()));
-        self.codex = Some(CodexPart {
+        CodexPart {
             history,
             collector,
             detect,
             seen: Remembered::new(),
-        });
-        self
+        }
     }
 
     /// [`with_codex`](Self::with_codex) over a real [`Poller`] (live usage, then the session logs).
@@ -583,6 +638,7 @@ impl App {
             .map(|g| &g.collector)
             .into_iter()
             .chain(self.codex.as_ref().map(|c| &c.collector))
+            .chain(self.antigravity.as_ref().map(|c| &c.collector))
     }
 
     /// Turn on the daily pruning of every history file (the real app; tests leave it off).
@@ -627,7 +683,7 @@ impl App {
                 out.push((name(d), size));
             }
         }
-        if let Some(c) = &self.codex {
+        for c in self.codex.iter().chain(self.antigravity.iter()) {
             out.push((name(c.history.describe()), c.history.size()));
         }
         out
@@ -856,6 +912,7 @@ impl App {
             claude: Some(self.history.clone()),
             grok: self.grok.as_ref().map(|g| g.history.clone()),
             codex: self.codex.as_ref().map(|c| c.history.clone()),
+            antigravity: self.antigravity.as_ref().map(|c| c.history.clone()),
             grok_bot: self.grok.as_ref().and_then(|g| g.bot.get().cloned()),
             rescan_every: crate::statsview::RESCAN_EVERY,
         };
@@ -928,7 +985,7 @@ impl App {
 
     pub fn stop(&self) {
         self.collector.stop();
-        if let Some(c) = &self.codex {
+        for c in self.codex.iter().chain(self.antigravity.iter()) {
             c.collector.stop();
         }
         if let Some(g) = &self.grok {
@@ -972,7 +1029,7 @@ impl App {
             let w = f.clone();
             s.set_waker(w);
         }
-        if let Some(c) = &self.codex {
+        for c in self.codex.iter().chain(self.antigravity.iter()) {
             c.collector.set_waker(f.clone());
         }
         if let Some(g) = &self.grok {
@@ -1000,7 +1057,7 @@ impl App {
         if let Some(g) = &self.grok {
             g.seen.set_ttl(ttl);
         }
-        if let Some(c) = &self.codex {
+        for c in self.codex.iter().chain(self.antigravity.iter()) {
             c.seen.set_ttl(ttl);
         }
     }
@@ -1032,6 +1089,25 @@ impl App {
         self.codex
             .as_ref()
             .is_some_and(|c| self.settings.get().codex_on(c.detected()))
+    }
+
+    /// Was the Antigravity CLI found on this PC (whatever the setting says)?
+    pub fn antigravity_detected(&self) -> bool {
+        self.antigravity.as_ref().is_some_and(|c| c.detected())
+    }
+
+    /// Is Gemini (Antigravity) tracking on (setting, or automatic because `agy` exists)?
+    pub fn antigravity_on(&self) -> bool {
+        self.antigravity
+            .as_ref()
+            .is_some_and(|c| self.settings.get().antigravity_on(c.detected()))
+    }
+
+    pub fn set_antigravity_track(&self, t: crate::settings::Track) {
+        self.settings.set_antigravity_track(t);
+        if let Some(c) = &self.antigravity {
+            c.collector.refresh();
+        }
     }
 
     pub fn set_codex_track(&self, t: crate::settings::Track) {
@@ -1067,9 +1143,10 @@ impl App {
 
     /// The history of a vendor's readings (for its chart).
     pub fn history_for(&self, vendor: crate::vendor::VendorId) -> &Arc<History> {
-        match (vendor, &self.grok, &self.codex) {
-            (crate::vendor::VendorId::Grok, Some(g), _) => &g.history,
-            (crate::vendor::VendorId::Codex, _, Some(c)) => &c.history,
+        match (vendor, &self.grok, &self.codex, &self.antigravity) {
+            (crate::vendor::VendorId::Grok, Some(g), _, _) => &g.history,
+            (crate::vendor::VendorId::Codex, _, Some(c), _) => &c.history,
+            (crate::vendor::VendorId::Antigravity, _, _, Some(a)) => &a.history,
             _ => &self.history,
         }
     }
@@ -1128,11 +1205,13 @@ impl App {
                 .wrapping_add(g.bot.get().map_or(0, |b| b.version()))
         });
         let cver = self.codex.as_ref().map_or(0, |c| c.history.version());
+        let aver = self.antigravity.as_ref().map_or(0, |c| c.history.version());
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(c) = cache.as_mut() {
             if c.version == version
                 && c.grok_version == gver
                 && c.codex_version == cver
+                && c.antigravity_version == aver
                 && c.at.elapsed() < REFRESH_EVERY
             {
                 c.state.settings = settings;
@@ -1145,6 +1224,10 @@ impl App {
                 if let (Some(cs), Some(p)) = (c.state.codex.as_mut(), &self.codex) {
                     cs.collector = p.collector.status();
                     cs.enabled = settings.codex_on(p.detected());
+                }
+                if let (Some(cs), Some(p)) = (c.state.antigravity.as_mut(), &self.antigravity) {
+                    cs.collector = p.collector.status();
+                    cs.enabled = settings.antigravity_on(p.detected());
                 }
                 return c.state.clone();
             }
@@ -1171,6 +1254,13 @@ impl App {
                     None => (None, true),
                 };
                 state.codex = codex;
+                let prev_ag = cache.as_ref().and_then(|c| c.state.antigravity.clone());
+                let (antigravity, ag_real) =
+                    match self.build_antigravity(settings, now, prev_ag.as_ref()) {
+                        Some((c, real)) => (Some(c), real),
+                        None => (None, true),
+                    };
+                state.antigravity = antigravity;
                 // Grok's and Codex's polls (ok or failed) are rows of the same Diagnostics list
                 let mut grok_rows = Vec::new();
                 if let Some(g) = state.grok.as_ref().filter(|g| g.enabled) {
@@ -1180,17 +1270,20 @@ impl App {
                         grok_rows.extend(rows.iter().rev().cloned());
                     }
                 }
-                let codex_rows = state
-                    .codex
-                    .as_ref()
-                    .filter(|c| c.enabled)
-                    .map(|c| c.diagnostics.clone())
-                    .unwrap_or_default();
-                if !grok_rows.is_empty() || !codex_rows.is_empty() {
+                let rows_of = |c: &Option<CodexState>| {
+                    c.as_ref()
+                        .filter(|c| c.enabled)
+                        .map(|c| c.diagnostics.clone())
+                        .unwrap_or_default()
+                };
+                let codex_rows = rows_of(&state.codex);
+                let ag_rows = rows_of(&state.antigravity);
+                if !grok_rows.is_empty() || !codex_rows.is_empty() || !ag_rows.is_empty() {
                     state.diagnostics = crate::state::merged_diagnostics_of(&[
                         &state.diagnostics,
                         &grok_rows,
                         &codex_rows,
+                        &ag_rows,
                     ]);
                 }
                 *cache = Some(Cached {
@@ -1206,6 +1299,7 @@ impl App {
                     } else {
                         cver.wrapping_add(1)
                     },
+                    antigravity_version: if ag_real { aver } else { aver.wrapping_add(1) },
                     at: Instant::now(),
                     state: state.clone(),
                 });
@@ -1290,9 +1384,43 @@ impl App {
         prev: Option<&CodexState>,
     ) -> Option<(CodexState, bool)> {
         let c = self.codex.as_ref()?;
-        let (status, enabled) = (c.collector.status(), settings.codex_on(c.detected()));
-        Some(match c.history.try_snapshot() {
-            Some(r) => (build_codex_state(&r, status, enabled, now), true),
+        let enabled = settings.codex_on(c.detected());
+        Some(Self::build_part(c, enabled, now, prev, build_codex_state))
+    }
+
+    /// Gemini's (Antigravity's) part of the state, as [`build_codex`](Self::build_codex).
+    fn build_antigravity(
+        &self,
+        settings: crate::settings::Values,
+        now: chrono::DateTime<Utc>,
+        prev: Option<&CodexState>,
+    ) -> Option<(CodexState, bool)> {
+        let c = self.antigravity.as_ref()?;
+        let enabled = settings.antigravity_on(c.detected());
+        Some(Self::build_part(
+            c,
+            enabled,
+            now,
+            prev,
+            build_antigravity_state,
+        ))
+    }
+
+    fn build_part(
+        c: &CodexPart,
+        enabled: bool,
+        now: chrono::DateTime<Utc>,
+        prev: Option<&CodexState>,
+        build: fn(
+            &[crate::reading::Reading],
+            crate::collector::Status,
+            bool,
+            chrono::DateTime<Utc>,
+        ) -> CodexState,
+    ) -> (CodexState, bool) {
+        let status = c.collector.status();
+        match c.history.try_snapshot() {
+            Some(r) => (build(&r, status, enabled, now), true),
             None => match prev {
                 Some(p) => {
                     let mut p = p.clone();
@@ -1300,9 +1428,9 @@ impl App {
                     p.enabled = enabled;
                     (p, false)
                 }
-                None => (build_codex_state(&[], status, enabled, now), false),
+                None => (build(&[], status, enabled, now), false),
             },
-        })
+        }
     }
 
     pub fn set_interval(&self, minutes: f64) {

@@ -1,6 +1,6 @@
 # aiTrack
 
-aiTrack is a small window for **Windows**, **macOS** and **Linux** that shows how much of your **Claude**, **Grok** and **ChatGPT** plan
+aiTrack is a small window for **Windows**, **macOS** and **Linux** that shows how much of your **Claude**, **Grok**, **ChatGPT** and **Gemini** plan
 limits you have used. It stays on top of your other windows, updates by itself, and warns you with a normal system
 notification before a limit runs out. The Mac version is for Apple silicon. Linux (new) is a first release for Ubuntu.
 Where this guide names Windows, Mac or Linux, it applies to that system only.
@@ -35,9 +35,9 @@ This guide is for people who just want to run it. Deeper technical notes are at 
 
 ## 1. What aiTrack is
 
-Claude, Grok and ChatGPT limit how much you can use them. Claude has a **5-hour session** limit and a **7-day weekly**
+Claude, Grok, ChatGPT and Gemini limit how much you can use them. Claude has a **5-hour session** limit and a **7-day weekly**
 limit. Grok has one **weekly** credit pool. ChatGPT (its Codex limits) has a **5-hour**
-and a **weekly** limit. Each tool shows its own numbers in its own place, and it is easy to
+and a **weekly** limit. Gemini (in Google Antigravity) has a **weekly** limit per group of models. Each tool shows its own numbers in its own place, and it is easy to
 hit a limit without seeing it coming.
 
 aiTrack puts those numbers in one small window:
@@ -48,7 +48,8 @@ aiTrack puts those numbers in one small window:
 - a Stats view with your token use and cost per project;
 - notifications (Windows toasts, Mac banners or Linux desktop notifications) at 75 %, 90 % and 100 %.
 
-It runs on your computer and reads files that Claude, Grok and Codex already keep there. It only talks to the internet when
+It runs on your computer and reads files that Claude, Grok and Codex already keep there, and asks Google Antigravity's
+own command-line tool for Gemini's numbers. It only talks to the internet when
 those files have nothing recent (see [Files and privacy](#12-files-and-privacy)). A tool's block appears only
 when that tool is installed.
 
@@ -73,6 +74,7 @@ License, version 3 or later (see `LICENSE`).
   - **Claude**: the Claude desktop app, or Claude Code.
   - **Grok**: the Grok command-line tool (the "Grok CLI"). See [section 5](#5-grok-needs-the-grok-cli).
   - **ChatGPT**: the Codex app or the Codex CLI, signed in with your ChatGPT account (see [ChatGPT (Codex)](#chatgpt-codex)).
+  - **Gemini**: the Google Antigravity CLI (`agy`), signed in with your Google account (see [Gemini (Antigravity)](#gemini-antigravity)).
 - To build it yourself: Git and Rust (steps below; on a Mac also the Xcode command line tools; on Linux the build tools and the X11 and Wayland development packages). You do not need Rust to run a downloaded copy.
 
 ## 3. Install and run
@@ -367,6 +369,24 @@ as for Claude, and the Stats view counts Codex tokens and cost per project from 
 
 The ChatGPT block appears when the folder `~/.codex` (or the folder in `CODEX_HOME`) has a sign-in or session logs. If
 it says **Codex login expired**, open Codex once so it renews the sign-in.
+
+### Gemini (Antigravity)
+
+Since June 2026, Google's free and Google AI Pro / Ultra plans use Gemini for coding through **Google Antigravity**:
+the Antigravity desktop app and its command-line tool `agy`. Both show the same usage page, and so does the Gemini
+block: a **Weekly** bar for the **Gemini models** (Gemini Flash and Pro). Antigravity also offers Claude and GPT models
+with a weekly limit of their own; that one is shown in the tooltip under **Other models**. Antigravity refills these
+limits gradually, so a bar can go down as well as up between readings.
+
+aiTrack runs `agy -p /usage --output-format json` in the background at each update (every 15 minutes by default, and
+when you press refresh). That is `agy`'s own read-only usage command: it sends no prompt and uses no quota. aiTrack
+never reads Antigravity's sign-in, which stays in your system's credential store.
+
+The Gemini block appears when `agy` is installed: `C:\Users\<you>\AppData\Local\agy\bin\agy.exe` on Windows,
+`~/.local/bin/agy` on a Mac or Linux, or anywhere on your `PATH`. If it says **Antigravity is not signed in**, run
+`agy` once and sign in. If Antigravity ever adds a shorter limit to its usage page, it appears as a **Session** bar.
+The Stats view and the history chart work as for the other tools. The Gemini app and gemini.google.com have their own
+limits that Google does not make readable, so they are not shown.
 
 ## 5. Grok needs the Grok CLI
 
@@ -677,7 +697,7 @@ At the bottom: **Back**, a **Help** link (it opens this page), and the build lin
 - **Window position**: the window reopens where you left it. **Reset** forgets the position.
 - **Always on top**: keep the window above other windows (on by default). On Linux under native Wayland it shows
   "Not available on native Wayland" (see [Install on Linux](#install-on-linux-new)).
-- **Show Claude**, **Show Grok** and **Show ChatGPT**: **Auto** (show it when the tool is found on this PC; the line under the name says
+- **Show Claude**, **Show Grok**, **Show ChatGPT** and **Show Gemini**: **Auto** (show it when the tool is found on this PC; the line under the name says
   "Found on this PC", on a Mac "Found on this Mac", or "Not found"), **On** (always show it) or **Off** (never).
 - **Refresh Grok now**: starts the Grok CLI in the background to fetch fresh Grok usage. This row only appears when
   the Grok CLI is found. Under the button it shows the result, for example "Refreshed 19:42: weekly 8%", and it
@@ -717,7 +737,7 @@ If a link cannot be opened the status bar says so.
 ## 11. Clicking the logos
 
 Clicking a tool's logo in the window opens that tool. Hover the logo to see "Open Claude desktop" or
-"Open Grok" or "Open Codex".
+"Open Grok", "Open Codex" or "Open Antigravity".
 
 - **Claude logo**: tries the `claude://` link, then the Microsoft Store app, then the classic install in
   `%LOCALAPPDATA%\AnthropicClaude` or `%LOCALAPPDATA%\Programs\Claude`.
@@ -726,14 +746,16 @@ Clicking a tool's logo in the window opens that tool. Hover the logo to see "Ope
   only opens the terminal; it never types anything.
 - **Codex logo**: opens the **Codex** app (the Microsoft Store app, as the Start menu lists it), else the Codex CLI in
   a new terminal window in your home folder.
+- **Gemini logo**: opens the **Antigravity** desktop app as the Start menu lists it, else `agy` in a new terminal
+  window in your home folder.
 
 **On a Mac** the same order is used, started with `open -a`: the Claude app, and for Grok the Grok Bot app, then the
 Grok app, then the Grok CLI in a new Terminal window in your home folder; for Codex the Codex app, then the ChatGPT app,
-then the Codex CLI in a new Terminal window.
+then the Codex CLI in a new Terminal window; for Gemini the Antigravity app, then `agy` in a new Terminal window.
 
 **On Linux** the Claude badge tries `xdg-open claude://`, then the `claude-desktop` command, then a `claude*.desktop`
 entry (through `gio` or `gtk-launch`). The Grok badge runs the Grok CLI in a terminal (`$TERMINAL`,
-`x-terminal-emulator`, `gnome-terminal`, `konsole`, then `xterm`); the Codex badge does the same with the Codex CLI. It
+`x-terminal-emulator`, `gnome-terminal`, `konsole`, then `xterm`); the Codex badge does the same with the Codex CLI, and the Gemini badge with `agy`. It
 only opens the terminal; it never types anything.
 
 If nothing could be started, the status bar says "Could not launch Claude desktop" or "Could not launch Grok". What was
@@ -750,11 +772,12 @@ aiTrack keeps its own files in `C:\Users\<you>\.aitrack\` (written `~/.aitrack`)
 | `usage.jsonl` | Claude readings, one line per poll, including failed polls |
 | `usage-grok.jsonl` | Grok readings |
 | `usage-codex.jsonl` | Codex readings |
+| `usage-antigravity.jsonl` | Gemini (Antigravity) readings |
 | `usage-grok-bot.jsonl` | Grok Bot weekly readings (records with a `bot_weekly` field), appended when the value changes and at most every 15 minutes otherwise |
 | `*.jsonl.bak` | the history file as it was before the last cleanup (replaced at the next one) |
 | `*.jsonl.corrupt` | unreadable lines set aside by a cleanup, if there were any |
 | `settings.json` | your settings |
-| `alerts.json`, `alerts-grok.json`, `alerts-codex.json` | which alerts were already sent |
+| `alerts.json`, `alerts-grok.json`, `alerts-codex.json`, `alerts-antigravity.json` | which alerts were already sent |
 | `transcript-index.json` | a summary of the transcript files for the Stats view |
 | `pricing-cache.json` | the downloaded price list |
 | `pricing-overrides.json` | optional: your own prices (you create it) |
@@ -775,9 +798,11 @@ never dropped.
 What a reading holds: the percentages, reset times, spend and per-model limits from the Claude usage answer, plus
 the whole answer from the Claude usage service. It does **not** hold your sign-in token, your organization id,
 your email or anything you wrote. The Grok record holds only the percentage, the reset time and your plan name. The Codex record holds the
-percentages, reset times, plan name, credit balance and per-model limits, never your account id or sign-in.
+percentages, reset times, plan name, credit balance and per-model limits, never your account id or sign-in. The
+Gemini record holds the percentages and reset times of each model group.
 
-aiTrack only **reads** the folders of Claude, Grok and Codex. It never changes them.
+aiTrack only **reads** the folders of Claude, Grok and Codex. It never changes them. For Gemini it only runs `agy`'s
+usage command.
 
 ### What leaves your PC
 
@@ -788,6 +813,8 @@ aiTrack only **reads** the folders of Claude, Grok and Codex. It never changes t
 - To `raw.githubusercontent.com`: a download of the public price list, about once a day.
 - Clicking **Help** opens this page (https://github.com/genen/aiTrack#readme) in your browser.
 - Starting the Grok CLI (Refresh) makes the CLI contact xAI as it always does.
+- Running `agy -p /usage` makes Antigravity ask Google for your usage, as its own usage page does. aiTrack itself sends
+  nothing to Google.
 
 Nothing else is sent. There is no account, no analytics and no crash reporting. Sign-in tokens go only to those
 three hosts above, over HTTPS, and are never written to any file or log by aiTrack.
@@ -908,10 +935,11 @@ Limits you should know about:
   with brotli cannot be read.
 - **Grok needs the Grok CLI** (section 5). The Grok desktop apps alone are not enough.
 - **Costs in the Stats view are estimates** at list prices.
-- Only Claude, Grok and ChatGPT are supported. For ChatGPT, aiTrack shows the Codex limits of your plan, not chat message caps.
+- Only Claude, Grok, ChatGPT and Gemini are supported. For ChatGPT, aiTrack shows the Codex limits of your plan, not chat
+  message caps. For Gemini it shows Antigravity's limits, not those of the Gemini app.
 
 Roadmap, in this order: the Windows release (done), the Mac version (done), the Linux version (new, first release),
-then more tools (Codex is in; Gemini next).
+then more tools (Codex and Gemini are in).
 
 ---
 
@@ -1191,6 +1219,22 @@ Readings go to `usage-codex.jsonl` (records carry `"vendor": "codex"`). Settings
 (`codex_enabled` in settings.json) overrides detection. Alerts work as for Claude (`alerts-codex.json`). The Stats
 view computes Codex tokens and cost per project from the session logs (`token_count` totals, priced from the live
 LiteLLM list with built-in fallbacks for the GPT-5 family). `aitrack --sources` has a ChatGPT section (counts only).
+
+### Gemini (fourth vendor)
+
+When the `agy` CLI is found (`%LOCALAPPDATA%\agy\bin\agy.exe`, `~/.local/bin/agy`, Homebrew's folders on a Mac, then
+`PATH`), a Gemini block appears. One source:
+
+**agy-usage**: `agy -p /usage --output-format json`, started with no window and no input in the home folder, at most
+60 seconds and 1 MiB of output. The reply's `command.data.groups[].buckets[]` carry `window`, `remaining_fraction`
+and `reset_time` (camelCase accepted too). The "Gemini Models" group fills the bars (a bucket shorter than a day is
+the Session row, the weekly one the Weekly row); every other group is a per-model line (**Other models**). A reply
+that is not `SUCCESS` becomes the error ("not signed in" says to run agy once). aiTrack never touches Antigravity's
+credentials and makes no network call of its own for Gemini.
+
+Readings go to `usage-antigravity.jsonl` (records carry `"vendor": "antigravity"`). Settings > Display > "Show
+Gemini" (`antigravity_enabled` in settings.json) overrides detection. Alerts work as for Claude
+(`alerts-antigravity.json`). `aitrack --sources` has a Gemini section (paths only; agy is not run there).
 
 **Opening Codex.** On Windows the badge opens the Store app as the Start menu lists it (entry "Codex" or an
 `OpenAI.Codex_*` AppID, started with `explorer.exe shell:AppsFolder\<AppID>`), else `codex` in a new terminal.
