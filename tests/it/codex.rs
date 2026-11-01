@@ -1044,3 +1044,74 @@ mod launching {
         assert!(c.contains("OpenAI.Codex_2p2nqsd0c76g0!App"), "{c}");
     }
 }
+
+/// Set a file's modification time to `ago` before now.
+fn touch_ago(p: &std::path::Path, ago: std::time::Duration) {
+    let f = std::fs::OpenOptions::new().write(true).open(p).unwrap();
+    f.set_modified(std::time::SystemTime::now() - ago).unwrap();
+}
+
+#[test]
+fn a_resumed_session_in_an_older_day_folder_is_still_among_the_newest_files() {
+    use std::time::Duration as Std;
+    let h = home();
+    // one clock for the folder names: a fixed "today" handed to the walk
+    let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 24).unwrap();
+    let day = |back: i64| {
+        (today - Duration::days(back))
+            .format("%Y/%m/%d")
+            .to_string()
+    };
+    // 15 sessions in the last three day folders, all written to an hour or more ago
+    for i in 0..15u64 {
+        let p = write_session(
+            &h,
+            &day((i % 3) as i64),
+            &format!("rollout-new-{i:02}.jsonl"),
+            &[r#"{"type":"session_meta"}"#.into()],
+        );
+        touch_ago(&p, Std::from_secs(3600 + i * 60));
+    }
+    // a session from 20 days ago, resumed: written to a minute ago
+    let resumed = write_session(
+        &h,
+        &day(20),
+        "rollout-resumed.jsonl",
+        &[r#"{"type":"session_meta"}"#.into()],
+    );
+    touch_ago(&resumed, Std::from_secs(60));
+    // a file older than the 30-day window is not walked once enough files are found
+    let ancient = write_session(
+        &h,
+        &day(60),
+        "rollout-ancient.jsonl",
+        &[r#"{"type":"session_meta"}"#.into()],
+    );
+    touch_ago(&ancient, Std::from_secs(30));
+
+    let files = codex::newest_log_files_at(&h.env, codex::MAX_LOG_FILES, today);
+    assert_eq!(files.len(), codex::MAX_LOG_FILES);
+    assert_eq!(files[0].path, resumed, "{:?}", files[0].path);
+    assert!(files.iter().all(|f| f.path != ancient));
+    // the rest are the newest of the 15 by modification time
+    let names: Vec<String> = files[1..]
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    let want: Vec<String> = (0..11)
+        .map(|i| format!("rollout-new-{i:02}.jsonl"))
+        .collect();
+    assert_eq!(names, want);
+
+    // with only old folders, the newest ones are still walked (nothing else to show)
+    let h2 = home();
+    let p = write_session(
+        &h2,
+        &day(90),
+        "rollout-only.jsonl",
+        &[r#"{"type":"session_meta"}"#.into()],
+    );
+    let files = codex::newest_log_files_at(&h2.env, codex::MAX_LOG_FILES, today);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, p);
+}
