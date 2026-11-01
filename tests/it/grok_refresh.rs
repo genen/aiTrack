@@ -790,7 +790,7 @@ fn the_terminal_command_runs_grok_alone_in_the_home_folder() {
         vec![
             "/c",
             "start",
-            "Grok",
+            "Grok ",
             "/D",
             "C:/Users/me",
             "C:/tools/grok.exe"
@@ -798,6 +798,26 @@ fn the_terminal_command_runs_grok_alone_in_the_home_folder() {
     );
     // never a prompt: nothing after the program
     assert_eq!(args.last().unwrap(), "C:/tools/grok.exe");
+}
+
+/// Rust's Windows argument quoting (std::sys::windows::args): an argument is wrapped in quotes
+/// only when it is empty or contains a space or a tab.
+fn rust_quotes(arg: &str) -> bool {
+    arg.is_empty() || arg.contains([' ', '\t'])
+}
+
+#[test]
+fn the_cmd_fallback_title_is_quoted_so_start_does_not_run_it_as_a_program() {
+    use aitrack::launch::terminal_command_titled;
+    let (cli, dir) = (Path::new("C:/tools/x.exe"), Path::new("C:/Users/me"));
+    for title in ["Grok", "Codex", "Antigravity"] {
+        let (_, args) = terminal_command_titled(title, cli, dir, None);
+        assert_eq!(args[1], "start");
+        // the argument right after `start` must arrive quoted: that is what makes it a title
+        assert!(rust_quotes(&args[2]), "{title}: {:?}", args[2]);
+        assert_eq!(args[2].trim_end(), title);
+        assert_eq!(args[3], "/D");
+    }
 }
 
 #[test]
