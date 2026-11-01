@@ -3,7 +3,7 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
-## [0.5.15-beta] - 2026-11-01
+## [0.5.15] - 2026-11-01
 
 ### Added
 - Settings > About has a **Donate** link (row "Support aiTrack") that opens the PayPal donation page.
