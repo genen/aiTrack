@@ -197,6 +197,8 @@ pub struct Alerts {
     options: Mutex<AlertOptions>,
     /// Set after a [`retry_later`] answer: until then alerts wait without asking the notifier.
     retry_after: Mutex<Option<DateTime<Utc>>>,
+    /// The state file was unreadable and could not be backed up: never write over it.
+    keep_original: bool,
 }
 
 /// The override from [`INFO_PCT_ENV`] when it is set to a number (clamped).
@@ -267,10 +269,31 @@ impl Alerts {
     /// Load the fired-event state (an unreadable file just starts empty).
     pub fn load(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
-        let state = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|t| serde_json::from_str::<AlertState>(&t).ok())
-            .unwrap_or_default();
+        // Only a missing file is a fresh start. Anything else that cannot be read as the state
+        // (a read error, non-UTF-8 text, bad JSON) is kept as `.bak` before it can be replaced;
+        // if that copy fails, the file is never overwritten this session.
+        let (state, protect) = match std::fs::read(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (AlertState::default(), false),
+            Err(_) => (AlertState::default(), true),
+            Ok(bytes) => match std::str::from_utf8(&bytes)
+                .ok()
+                .and_then(|t| serde_json::from_str::<AlertState>(t).ok())
+            {
+                Some(s) => (s, false),
+                None => (AlertState::default(), true),
+            },
+        };
+        let mut keep_original = false;
+        if protect {
+            let mut bak = path.clone().into_os_string();
+            bak.push(".bak");
+            if let Err(e) = std::fs::copy(&path, &bak) {
+                keep_original = true;
+                log_line(&format!(
+                    "alerts: could not keep the unreadable state file, so it is left as it is: {e}"
+                ));
+            }
+        }
         if let Some(p) = info_pct_override() {
             log_line(&format!(
                 "alert threshold override active: informational alert at {p}% used ({INFO_PCT_ENV}), default is {INFO_PCT}%"
@@ -281,6 +304,7 @@ impl Alerts {
             state: Mutex::new(state),
             options: Mutex::new(AlertOptions::default()),
             retry_after: Mutex::new(None),
+            keep_original,
         }
     }
 
@@ -290,6 +314,9 @@ impl Alerts {
     }
 
     fn save(&self, st: &AlertState) {
+        if self.keep_original {
+            return;
+        }
         if let Some(dir) = self.path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
