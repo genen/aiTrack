@@ -562,3 +562,32 @@ fn other_models_still_follow_the_live_list() {
     // the pinned table has exactly the one entry
     assert_eq!(aitrack::pricing::BUILTIN_OVERRIDES.len(), 1);
 }
+
+#[test]
+fn opus_4_generation_prices_split_correctly() {
+    let t = PriceTable::fallback();
+    let old = Rates::new(15.0, 75.0, 1.5, 18.75, 30.0);
+    let new = Rates::new(5.0, 25.0, 0.5, 6.25, 10.0);
+    for id in [
+        "claude-opus-4",
+        "claude-opus-4-0",
+        "claude-opus-4-20250514",
+        "claude-opus-4-0-20250514",
+        "claude-opus-4-1",
+        "claude-opus-4-1-20250805",
+    ] {
+        assert_eq!(t.price_for(id).0, old, "{id}");
+    }
+    for id in [
+        "claude-opus-4-5",
+        "claude-opus-4-5-20251101",
+        "claude-opus-4-6",
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-opus-4-8-20261001",
+        "claude-opus-5",
+        "claude-opus-5-20270101",
+    ] {
+        assert_eq!(t.price_for(id).0, new, "{id}");
+    }
+}

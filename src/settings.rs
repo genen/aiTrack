@@ -484,17 +484,39 @@ pub struct Settings {
     /// The file existed but could not be read as JSON when it was loaded: the first save keeps it
     /// as `settings.json.bak` instead of silently replacing it with defaults.
     unreadable: std::sync::atomic::AtomicBool,
+    /// The "could not keep the unreadable file" line is logged once.
+    bak_failed_logged: std::sync::atomic::AtomicBool,
 }
 
 impl Settings {
     pub fn load(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
         let mut v = Values::default();
-        let text = std::fs::read_to_string(&path).ok();
-        let parsed = text
-            .as_deref()
-            .and_then(|t| serde_json::from_str::<Value>(t).ok());
-        let unreadable = text.is_some() && !parsed.as_ref().is_some_and(Value::is_object);
+        // Only a missing file means "fresh defaults". Any other read error, text that is not
+        // UTF-8 (for example a UTF-16 file saved by PowerShell) or JSON that is not an object is
+        // an unreadable file: it is kept as `.bak` before anything is written over it.
+        // A read error other than "missing" may be a short lock (antivirus scanning at start-up):
+        // try once more before treating the file as unreadable.
+        let read = match std::fs::read(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                std::fs::read(&path)
+            }
+            r => r,
+        };
+        let (parsed, unreadable) = match read {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (None, false),
+            Err(_) => (None, true),
+            Ok(bytes) => {
+                let parsed = std::str::from_utf8(&bytes)
+                    .ok()
+                    .map(|t| t.strip_prefix('\u{feff}').unwrap_or(t))
+                    .and_then(|t| serde_json::from_str::<Value>(t).ok())
+                    .filter(Value::is_object);
+                let bad = parsed.is_none();
+                (parsed, bad)
+            }
+        };
         if let Some(j) = parsed {
             v.apply(&j);
             // A settings file from before the "Auto" badge look has no choice saved: those users
@@ -507,6 +529,7 @@ impl Settings {
             path,
             values: Mutex::new(v),
             unreadable: std::sync::atomic::AtomicBool::new(unreadable),
+            bak_failed_logged: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -540,16 +563,25 @@ impl Settings {
         if let Some(dir) = self.path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        if self
-            .unreadable
-            .swap(false, std::sync::atomic::Ordering::SeqCst)
-        {
+        if self.unreadable.load(std::sync::atomic::Ordering::SeqCst) {
             let mut bak = self.path.clone().into_os_string();
             bak.push(".bak");
-            if let Err(e) = std::fs::copy(&self.path, &bak) {
-                crate::alerts::log_line(&format!(
-                    "settings: could not keep the unreadable file: {e}"
-                ));
+            match std::fs::copy(&self.path, &bak) {
+                Ok(_) => self
+                    .unreadable
+                    .store(false, std::sync::atomic::Ordering::SeqCst),
+                Err(e) => {
+                    // never overwrite what could not be kept; say so once per session
+                    if !self
+                        .bak_failed_logged
+                        .swap(true, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        crate::alerts::log_line(&format!(
+                            "settings: could not keep the unreadable settings file, so it is left as it is and changes are not saved: {e}"
+                        ));
+                    }
+                    return;
+                }
             }
         }
         let tmp = self.path.with_extension("json.tmp");

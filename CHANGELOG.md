@@ -3,6 +3,40 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.17] - 2026-11-01
+
+Fixes from a full code review of the whole app.
+
+### Fixed
+- Claude keeps showing its last usage when no new reading has come in for a while (dimmed after an hour, with the
+  age chip and no pace). A row shows dashes only once its window has actually reset.
+- "Empty in ~N min" alerts are no longer sent from readings over an hour old. Threshold alerts are unchanged.
+- ChatGPT's banked resets, credits and plan no longer disappear briefly after you use Codex between live checks, and
+  the data-age chip no longer says live usage failed in that case.
+- A Codex session resumed with `codex resume` is read again even after newer sessions were started.
+- Sending a test toast no longer freezes the window; the button shows "Sending..." while it is delivered.
+- macOS: while notification permission has not been decided yet, aiTrack no longer brings its window to the front or
+  pauses polling after every poll; waiting alerts are retried every 5 minutes, and the osascript fallback can no longer
+  hang.
+- A Claude desktop cache entry stamped in the future (a clock that was ahead) is no longer shown as the current reading
+  for up to a day.
+- Without a live price list, Claude Opus 4 and 4.1 are priced at their list price ($15/$75 per million tokens), not a
+  third of it.
+- The Grok Bot history is kept in memory and is no longer re-read on the window's thread after each new reading.
+- A settings or alerts file that cannot be read (for example one saved as UTF-16) is backed up to `.bak` before it is
+  replaced, and is left untouched if the backup fails.
+- Windows without Windows Terminal: launching the Grok CLI, Codex or Antigravity in a Command Prompt works again.
+- Gemini: on a paid plan, the Gemini 5-hour limit is the Session bar and the weekly bar always comes from "Gemini
+  Models", even when a paid plan lists another Gemini group (such as Gemini 4 Argon) first; that group and the Claude
+  and GPT limits are listed under "Other models" in both tooltips.
+- Stats: with the Stats view open during active use, the transcript scan and price refresh run every 5 minutes again.
+- Windows installer: installing a stable version over the beta of the same number (or a rebuilt MSI) upgrades in place
+  instead of adding a second aiTrack entry.
+
+### Changed
+- Release builds pin every GitHub Action to a commit and install the PDF tool with a checked hash.
+- Rerunning a release workflow replaces only that platform's section of the release notes, with no duplicated text.
+
 ## [0.5.16] - 2026-11-01
 
 ### Added

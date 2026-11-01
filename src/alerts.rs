@@ -32,6 +32,9 @@ pub const WARN_PCT: f64 = 90.0;
 pub const PREDICT_MIN: f64 = 30.0;
 /// Fired-event records older than this are dropped.
 pub const PRUNE_DAYS: i64 = 10;
+/// After a [`retry_later`] answer the notifier is not asked again for this many minutes (macOS
+/// permission still undecided): the alerts stay unsent and are offered again after that.
+pub const RETRY_BACKOFF_MIN: i64 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlertKind {
@@ -62,7 +65,9 @@ impl AlertKind {
 }
 
 /// Wraps a notifier: a usage alert (see [`AlertKind::raises_window`]) also sets `raise`, which the
-/// window reads to come to the front. Set whether or not the toast could be shown.
+/// window reads to come to the front. Set once the notifier's answer is final, whether or not the
+/// toast could be shown, but never on a [`retry_later`] answer: that alert is offered again at a
+/// later poll, and the window must not jump to the front every time it waits.
 pub struct Raising<'a> {
     pub inner: &'a dyn Notifier,
     pub raise: &'a AtomicBool,
@@ -70,10 +75,12 @@ pub struct Raising<'a> {
 
 impl Notifier for Raising<'_> {
     fn notify(&self, n: &Notification) -> Result<(), String> {
-        if n.kind.raises_window() {
+        let r = self.inner.notify(n);
+        let retry = r.as_ref().is_err_and(|e| is_retry_later(e));
+        if n.kind.raises_window() && !retry {
             self.raise.store(true, Ordering::Relaxed);
         }
-        self.inner.notify(n)
+        r
     }
 }
 
@@ -112,13 +119,13 @@ impl Notification {
     }
 }
 
-/// Prefix of a [`Notifier`] error meaning "not shown yet, try again at the next poll" (for example
-/// macOS notification permission not decided yet). Any other error is final: the alert stays
+/// Prefix of a [`Notifier`] error meaning "not shown yet, try again later" (for example macOS
+/// notification permission not decided yet; retried after [`RETRY_BACKOFF_MIN`]). Any other error is final: the alert stays
 /// recorded as sent and is not repeated every minute. A notifier that deliberately shows nothing
 /// (the user turned its notifications off) returns `Ok`.
 pub const RETRY_LATER: &str = "[retry later] ";
 
-/// An error for [`Notifier::notify`] that makes the alert be offered again at the next poll.
+/// An error for [`Notifier::notify`] that makes the alert be offered again at a later poll.
 pub fn retry_later(why: &str) -> String {
     format!("{RETRY_LATER}{why}")
 }
@@ -188,6 +195,10 @@ pub struct Alerts {
     path: PathBuf,
     state: Mutex<AlertState>,
     options: Mutex<AlertOptions>,
+    /// Set after a [`retry_later`] answer: until then alerts wait without asking the notifier.
+    retry_after: Mutex<Option<DateTime<Utc>>>,
+    /// The state file was unreadable and could not be backed up: never write over it.
+    keep_original: bool,
 }
 
 /// The override from [`INFO_PCT_ENV`] when it is set to a number (clamped).
@@ -258,10 +269,31 @@ impl Alerts {
     /// Load the fired-event state (an unreadable file just starts empty).
     pub fn load(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
-        let state = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|t| serde_json::from_str::<AlertState>(&t).ok())
-            .unwrap_or_default();
+        // Only a missing file is a fresh start. Anything else that cannot be read as the state
+        // (a read error, non-UTF-8 text, bad JSON) is kept as `.bak` before it can be replaced;
+        // if that copy fails, the file is never overwritten this session.
+        let (state, protect) = match std::fs::read(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (AlertState::default(), false),
+            Err(_) => (AlertState::default(), true),
+            Ok(bytes) => match std::str::from_utf8(&bytes)
+                .ok()
+                .and_then(|t| serde_json::from_str::<AlertState>(t).ok())
+            {
+                Some(s) => (s, false),
+                None => (AlertState::default(), true),
+            },
+        };
+        let mut keep_original = false;
+        if protect {
+            let mut bak = path.clone().into_os_string();
+            bak.push(".bak");
+            if let Err(e) = std::fs::copy(&path, &bak) {
+                keep_original = true;
+                log_line(&format!(
+                    "alerts: could not keep the unreadable state file, so it is left as it is: {e}"
+                ));
+            }
+        }
         if let Some(p) = info_pct_override() {
             log_line(&format!(
                 "alert threshold override active: informational alert at {p}% used ({INFO_PCT_ENV}), default is {INFO_PCT}%"
@@ -271,6 +303,8 @@ impl Alerts {
             path,
             state: Mutex::new(state),
             options: Mutex::new(AlertOptions::default()),
+            retry_after: Mutex::new(None),
+            keep_original,
         }
     }
 
@@ -280,6 +314,9 @@ impl Alerts {
     }
 
     fn save(&self, st: &AlertState) {
+        if self.keep_original {
+            return;
+        }
         if let Some(dir) = self.path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
@@ -320,6 +357,11 @@ impl Alerts {
         let mut sent = Vec::new();
         // per alert in `sent`: its window key and the `fired` tags it set (undone if it must be retried)
         let mut undo: Vec<(String, Vec<String>)> = Vec::new();
+        // the window drops pace and run-out for a reading older than this, so no "empty in" toast
+        // either: the pace of an old sample says nothing about now (the % alerts still apply)
+        let pace_fresh = parse_ts(&plan.last).is_some_and(|t| {
+            (now - t).num_milliseconds() as f64 / 60000.0 <= crate::view::STALE_WARN_MIN
+        });
         for kind in Kind::ALL {
             let Some(g) = plan.gauge(kind) else { continue };
             if g.window_id.is_empty() {
@@ -427,7 +469,10 @@ impl Alerts {
 
             // predictive: on course to run out before the reset, and soon (same rule as the header
             // warning, including its guard against noisy low-usage paces)
-            if let Some(e) = crate::analysis::empty_before_reset(g).filter(|e| !e.at_limit) {
+            if let Some(e) = crate::analysis::empty_before_reset(g)
+                .filter(|e| !e.at_limit)
+                .filter(|_| pace_fresh)
+            {
                 if e.empty_in_h * 60.0 < PREDICT_MIN && !fired(entry, "pred") {
                     entry.fired.push("pred".into());
                     out_tags.push(vec!["pred".into()]);
@@ -458,14 +503,23 @@ impl Alerts {
             n.options = options;
         }
         // An alert that could not be shown yet is not left marked as sent: it is offered again at
-        // the next poll. Other failures are logged and final.
+        // a later poll, but the notifier is not asked again before RETRY_BACKOFF_MIN has passed.
+        // Other failures are logged and final.
         let mut delivered = Vec::new();
         let mut retry: Vec<(String, Vec<String>)> = Vec::new();
+        let mut retry_after = self.retry_after.lock().unwrap_or_else(|e| e.into_inner());
         for (n, u) in sent.into_iter().zip(undo) {
+            if retry_after.is_some_and(|t| now < t) {
+                retry.push(u);
+                continue;
+            }
             match notifier.notify(&n) {
                 Ok(()) => delivered.push(n),
                 Err(e) if is_retry_later(&e) => {
-                    log_line(&format!("notification will be retried: {e}"));
+                    log_line(&format!(
+                        "notification will be retried in {RETRY_BACKOFF_MIN} min: {e}"
+                    ));
+                    *retry_after = Some(now + Duration::minutes(RETRY_BACKOFF_MIN));
                     retry.push(u);
                 }
                 Err(e) => {
@@ -474,6 +528,7 @@ impl Alerts {
                 }
             }
         }
+        drop(retry_after);
         if !retry.is_empty() {
             let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
             for (key, tags) in retry {

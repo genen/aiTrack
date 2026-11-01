@@ -292,7 +292,7 @@ fn fmt_age(h: f64) -> String {
 pub const FALLBACK: &[(&str, Rates)] = &[
     ("claude-opus-4-1", Rates::new(15.0, 75.0, 1.5, 18.75, 30.0)),
     ("claude-opus-4-0", Rates::new(15.0, 75.0, 1.5, 18.75, 30.0)),
-    ("claude-opus-4", Rates::new(5.0, 25.0, 0.5, 6.25, 10.0)),
+    ("claude-opus-4", Rates::new(15.0, 75.0, 1.5, 18.75, 30.0)),
     ("claude-opus-4-5", Rates::new(5.0, 25.0, 0.5, 6.25, 10.0)),
     ("claude-opus-4-6", Rates::new(5.0, 25.0, 0.5, 6.25, 10.0)),
     ("claude-opus-4-7", Rates::new(5.0, 25.0, 0.5, 6.25, 10.0)),

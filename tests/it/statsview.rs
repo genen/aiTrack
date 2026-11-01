@@ -371,6 +371,59 @@ fn the_service_scans_off_thread_wakes_the_window_and_rescans_on_request() {
 }
 
 #[test]
+fn plan_requests_more_often_than_the_rescan_interval_do_not_hold_back_the_scheduled_scan() {
+    let dir = TempDir::new();
+    transcript(dir.path(), "a", "m1", 1000);
+    // a fresh price list: the scheduled scan has no reason to download one
+    let now = Utc::now().to_rfc3339();
+    std::fs::write(
+        dir.join("pricing-cache.json"),
+        json!({"fetched_at": now, "last_attempt": now, "models": {}}).to_string(),
+    )
+    .unwrap();
+    let history = Arc::new(History::new(Box::new(JsonlStore::new(dir.join("u.jsonl")))));
+    history.load();
+    let cfg = ServiceConfig {
+        roots: Roots {
+            claude_projects: dir.join("claude/projects"),
+            grok_home: dir.join("grok"),
+            codex_home: dir.join("codex"),
+            index: Some(dir.join("idx.json")),
+        },
+        prices: Paths::in_dir(dir.path()),
+        tz: Arc::new(|| 0),
+        claude: Some(history),
+        grok: None,
+        grok_bot: None,
+        antigravity: None,
+        codex: None,
+        rescan_every: StdDuration::from_millis(400),
+    };
+    let svc = StatsService::new(cfg);
+    svc.start();
+    wait_for(&svc, |s| s.projects.is_some() && !s.busy);
+    // a new request; only a scan can find it, and nobody asks for one
+    transcript(dir.path(), "a", "m2", 500);
+    let messages = |s: &Snapshot| {
+        s.projects
+            .as_ref()
+            .map_or(0, |r| r.range(ProjRange::All).totals.messages)
+    };
+    // Plan requests every 50 ms (a quarter of the interval and less) for up to 5 s
+    let t0 = Instant::now();
+    while messages(&svc.snapshot()) < 2 {
+        assert!(
+            t0.elapsed() < StdDuration::from_secs(5),
+            "the scheduled scan never ran while Plan requests kept coming"
+        );
+        svc.request_plan();
+        std::thread::sleep(StdDuration::from_millis(50));
+    }
+    svc.stop();
+    svc.join();
+}
+
+#[test]
 fn a_fixed_service_serves_its_snapshot_and_ignores_requests() {
     let svc = StatsService::fixed(snapshot(
         &[req("x", Origin::Claude, 1, 10, None)],
@@ -509,6 +562,7 @@ fn the_service_reads_the_grok_bot_history_file() {
         aitrack::sources::Env::new(aitrack::sources::Os::Windows),
         Box::new(JsonlStore::new(&hist)),
     ));
+    tracker.refresh(chrono::Utc::now()); // the collector thread builds the list
     let cfg = ServiceConfig {
         roots: Roots {
             claude_projects: dir.join("claude/projects"),

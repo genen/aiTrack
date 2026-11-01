@@ -1633,3 +1633,66 @@ fn a_reset_time_from_the_stored_history_is_carried_across_polls_and_restarts() {
     let note = second["note"].as_str().unwrap();
     assert!(note.contains("desktop-cache skipped"), "{note}");
 }
+
+// ------------------------------------------------------------ future-stamped entries
+
+#[test]
+fn a_future_creation_time_does_not_beat_the_servers_date_header() {
+    // creation stamped 3 h ahead (clock was wrong when Chromium stored it); Date is right
+    let date = now() - Duration::minutes(20);
+    let scan = two_entries((20, Some(-180), 50.0), (5, None, 30.0));
+    let future = &scan.entries[0];
+    assert_eq!(future.created, None, "far-future creation is not trusted");
+    assert_eq!(future.observed, Some(date));
+    // the newer real entry wins instead of the future-stamped one
+    assert_eq!(picked_five(&scan).0, 30.0);
+}
+
+#[test]
+fn a_creation_time_just_inside_the_tolerance_is_kept_and_bounded() {
+    let scan = two_entries((20, Some(-3), 50.0), (40, None, 30.0));
+    assert_eq!(scan.entries[0].created, Some(now() + Duration::minutes(3)));
+    assert!(scan.entries[0].observed <= Some(now() + Duration::minutes(5)));
+}
+
+#[test]
+fn a_future_creation_time_without_a_date_header_is_not_trusted() {
+    let t = TempDir::new();
+    let dir = cache_dir(&t);
+    let mut b = Block::new(&dir);
+    b.created = Some((now() + Duration::minutes(6)).timestamp());
+    let headers = vec![("Content-Type", "application/json".to_string())];
+    let meta = response_info(&headers, "200 OK", 3);
+    b.add_raw(
+        &usage_url(ORG_A),
+        &meta,
+        usage_body(10.0, 1.0).to_string().as_bytes(),
+        false,
+    );
+    b.finish();
+    let scan = cache::scan_usage_entries_at(&dir, now());
+    assert_eq!(scan.entries.len(), 1);
+    assert_eq!(scan.entries[0].created, None);
+    assert!(
+        scan.entries[0]
+            .observed
+            .is_none_or(|o| o <= now() + Duration::minutes(5)),
+        "{:?}",
+        scan.entries[0].observed
+    );
+}
+
+#[test]
+fn a_creation_time_far_after_the_date_header_does_not_make_an_old_entry_fresh() {
+    // The clock was 3 h ahead when entry 1 was stored, and has caught up by now: its creation time
+    // is "now" but its Date header says 3 h ago. Entry 2 is a real reading from 1 h ago.
+    let scan = two_entries((180, Some(0), 25.0), (60, None, 23.0));
+    assert_eq!(
+        scan.entries[0].observed,
+        Some(now() - Duration::minutes(180)),
+        "the Date header wins over a creation time hours later"
+    );
+    assert_eq!(picked_five(&scan).0, 23.0, "the newer real entry wins");
+    let scan = two_entries((60, None, 23.0), (180, Some(0), 25.0));
+    assert_eq!(picked_five(&scan).0, 23.0);
+}

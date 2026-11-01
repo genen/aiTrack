@@ -354,7 +354,10 @@ pub fn parse_usage(body: &Value, now: DateTime<Utc>) -> Result<Sample, String> {
         .get("data")
         .filter(|d| d.is_object())
         .ok_or("unexpected Antigravity usage reply (no command data)")?;
-    let limits = limits_of(data);
+    let mut limits = limits_of(data);
+    // "Gemini Models" fills the bars even when another Gemini group (a paid plan's "Gemini 4
+    // Argon", say) is listed before it; a stable sort keeps the reply's order otherwise
+    limits.sort_by_key(|l| !l.group.eq_ignore_ascii_case(MAIN_GROUP));
     if limits.is_empty() {
         return Err(EMPTY_REPLY.into());
     }

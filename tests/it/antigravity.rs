@@ -65,6 +65,68 @@ fn the_real_reply_gives_the_gemini_weekly_bar_and_the_other_group() {
     assert_eq!(r.source.as_deref(), Some("agy-usage"));
 }
 
+/// The reply on the author's PC after moving to a paid personal plan (agy, 2026-11-01): 5-hour
+/// limits in both groups and a third group, "Gemini 4 Argon", with its own weekly limit.
+fn paid_reply() -> Value {
+    json!({
+        "conversation_id": "", "status": "SUCCESS", "duration_seconds": 0, "num_turns": 0,
+        "usage": {"input_tokens": 0, "output_tokens": 0, "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 0},
+        "command": {"name": "usage", "data": {"groups": [
+            {"name": "Gemini Models", "buckets": [
+                {"id": "gemini-weekly", "name": "Weekly Limit Remaining", "window": "weekly", "remaining_fraction": 1, "reset_time": "2026-11-08T05:56:03Z"},
+                {"id": "gemini-5h", "name": "Five Hour Limit Remaining", "window": "5h", "remaining_fraction": 1, "reset_time": "2026-11-01T10:56:03Z"}]},
+            {"name": "Claude and GPT models", "buckets": [
+                {"id": "3p-weekly", "name": "Weekly Limit Remaining", "window": "weekly", "remaining_fraction": 1, "reset_time": "2026-11-08T05:56:03Z"},
+                {"id": "3p-5h", "name": "Five Hour Limit Remaining", "window": "5h", "remaining_fraction": 1, "reset_time": "2026-11-01T10:56:03Z"}]},
+            {"name": "Gemini 4 Argon", "buckets": [
+                {"id": "gemini-argon-wtu-weekly", "name": "Gemini 4 Argon Weekly Limit", "window": "weekly", "remaining_fraction": 0.9654550552368164, "reset_time": "2026-11-08T05:55:14Z"}]}
+        ]}}
+    })
+}
+
+#[test]
+fn a_paid_plan_reply_gives_both_bars_and_lists_the_argon_limit_in_any_group_order() {
+    let mut reordered = paid_reply();
+    reordered["command"]["data"]["groups"]
+        .as_array_mut()
+        .unwrap()
+        .reverse();
+    for body in [paid_reply(), reordered] {
+        let s = parse_usage(&body, now()).unwrap();
+        assert_eq!(
+            s.session.as_ref().unwrap().pct,
+            0.0,
+            "Gemini 5h is the session bar"
+        );
+        assert_eq!(
+            s.weekly.as_ref().unwrap().pct,
+            0.0,
+            "Gemini weekly, never Argon's"
+        );
+        let r = Reading::from_value(&sample_record(&s, antigravity::SOURCE_USAGE, false));
+        let mut got: Vec<(String, String, f64)> = r
+            .limits
+            .iter()
+            .map(|l| {
+                (
+                    l.name.clone(),
+                    l.kind.clone(),
+                    (l.pct * 10.0).round() / 10.0,
+                )
+            })
+            .collect();
+        got.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(
+            got,
+            vec![
+                ("Claude and GPT models".into(), "session".into(), 0.0),
+                ("Claude and GPT models".into(), "weekly".into(), 0.0),
+                ("Gemini 4 Argon".into(), "weekly".into(), 3.5),
+            ]
+        );
+    }
+}
+
 #[test]
 fn a_five_hour_bucket_becomes_the_session_bar_in_either_spelling() {
     let reset5 = now() + Duration::hours(3);

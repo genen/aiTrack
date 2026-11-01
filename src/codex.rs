@@ -649,17 +649,37 @@ fn dated_dirs(dir: &Path) -> Vec<PathBuf> {
     v.into_iter().map(|(_, p)| p).collect()
 }
 
-/// The newest session files (at most `max`), newest first: the dated `sessions` tree is walked
-/// from the newest day back until enough are found, then the archived ones are added.
+/// The newest session files (at most `max`) by modification time, newest first. See
+/// [`newest_log_files_at`]; `today` is the local date (Codex names its day folders by it).
 pub fn newest_log_files(env: &Env, max: usize) -> Vec<LogFile> {
+    newest_log_files_at(env, max, chrono::Local::now().date_naive())
+}
+
+/// The newest session files (at most `max`) by modification time, newest first. Every day folder of
+/// the last [`HISTORY_DAYS`] (+1) days before `today` is listed (metadata only, no file is read), so
+/// a session resumed with `codex resume`, which keeps writing to its file in an older day folder,
+/// is still among the newest. Older folders are walked only until `max` files are found. The
+/// archived sessions are added too.
+pub fn newest_log_files_at(env: &Env, max: usize, today: chrono::NaiveDate) -> Vec<LogFile> {
+    let cutoff = today - Duration::days(HISTORY_DAYS + 1);
+    let num = |p: &Path| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.parse::<u32>().ok())
+    };
     let mut out = Vec::new();
     'walk: for y in dated_dirs(&sessions_dir(env)) {
         for m in dated_dirs(&y) {
             for d in dated_dirs(&m) {
-                files_in(&d, &mut out);
-                if out.len() >= max {
+                let date = match (num(&y), num(&m), num(&d)) {
+                    (Some(y), Some(m), Some(d)) => chrono::NaiveDate::from_ymd_opt(y as i32, m, d),
+                    _ => None,
+                };
+                let recent = date.is_some_and(|x| x >= cutoff);
+                if !recent && out.len() >= max {
                     break 'walk;
                 }
+                files_in(&d, &mut out);
             }
         }
     }

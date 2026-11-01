@@ -1003,7 +1003,11 @@ pub fn terminal_command_titled(
             vec![
                 "/c".into(),
                 "start".into(),
-                title.into(),
+                // `start` takes the first quoted argument as the window title and otherwise runs
+                // it as the program. Rust quotes an argument only if it holds a space, tab or is
+                // empty, so a bare "Grok" would be run as a program; the trailing space forces
+                // the quotes and is invisible in the title bar.
+                format!("{title} "),
                 "/D".into(),
                 dir,
                 cli,

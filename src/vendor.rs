@@ -61,7 +61,8 @@ pub struct Vendor {
     /// Where the newest reading came from (`desktop-history`, ...), for the tooltips.
     pub source: Option<String>,
     pub observed_at: Option<DateTime<Utc>>,
-    /// The newest reading is recent enough to be shown as the present (see `state::reading_is_current`).
+    /// The newest reading is shown as the last known value (see `state::reading_is_shown` and
+    /// `state::claude_reading_is_shown`).
     pub current: bool,
     /// One pool per billing period, no 5-hour window (Grok): no Session row.
     pub weekly_only: bool,
@@ -81,6 +82,9 @@ pub struct Vendor {
     pub credit_note: Option<String>,
     /// Codex: banked early resets still available.
     pub banked_resets: Option<u64>,
+    /// Codex: a live reading exists in the current weekly window (the log chip then does not say
+    /// live usage failed).
+    pub live_in_window: bool,
     /// Gemini (Antigravity): when the weekly limit will be full again. Its usage refills
     /// gradually, so there is no fixed reset; this replaces the "resets in" line.
     pub full_at: Option<DateTime<Utc>>,
@@ -110,6 +114,7 @@ impl Vendor {
             bot_gauge: None,
             credit_note: None,
             banked_resets: None,
+            live_in_window: false,
             full_at: None,
         }
     }
@@ -172,7 +177,8 @@ pub fn from_state_at(s: &State, now: DateTime<Utc>) -> Vec<Vendor> {
     if let Some(p) = s.plan.as_ref().filter(|_| s.claude_on) {
         let mut v = claude(p, &s.models);
         v.tier = s.tier.clone();
-        v.current = crate::state::reading_is_current(p, &s.settings, now);
+        // the last known value stays visible however old (dimmed, with the chip), like the others
+        v.current = crate::state::claude_reading_is_shown(p, now);
         out.push(v);
     }
     if let Some(g) = s.grok.as_ref().filter(|g| g.enabled) {
@@ -236,6 +242,7 @@ pub fn plan_vendor(id: VendorId, c: &crate::state::CodexState, now: DateTime<Utc
             v.tier = c.tier.clone();
             v.credit_note = c.credits.as_ref().and_then(|b| b.text());
             v.banked_resets = c.banked_resets.filter(|n| *n > 0);
+            v.live_in_window = c.live_in_window;
             v.full_at = c.full_at.as_deref().and_then(crate::util::parse_ts);
             v.current = crate::state::grok_reading_is_shown(p, now);
         }

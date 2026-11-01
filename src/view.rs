@@ -370,6 +370,9 @@ pub fn age_chip(v: &Vendor, interval_min: f64, now: DateTime<Utc>) -> Option<Age
         "grok-billing" => format!(
             "Grok billing has not answered since {long}. Check your connection or press refresh."
         ),
+        "codex-log" if v.live_in_window => format!(
+            "From the local Codex session logs (newer than the last live check), last updated {long}. Use Codex or press refresh to update."
+        ),
         "codex-log" => format!(
             "Live usage failed, so this comes from the local Codex session logs, last updated {long}. Use Codex or press refresh to update."
         ),
@@ -611,6 +614,11 @@ fn capitalise(s: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Has the window this gauge's reading belongs to ended (see [`crate::state::window_ended`])?
+fn window_ended(v: &Vendor, g: &Gauge, now: DateTime<Utc>) -> bool {
+    crate::state::window_ended(g, v.observed_at, now)
+}
+
 fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
     let label = row_label(kind);
     let Some(g) = v.gauge(kind) else {
@@ -640,9 +648,10 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
             time: None,
         };
     };
-    if g.reset_passed && v.current {
-        // The reset time this reading reported has passed: its percentage belongs to the window
-        // that just ended. No countdown, no clock time in the past, no pace; wait for a new reading.
+    if window_ended(v, g, now) && v.current {
+        // The reset time this reading reported has passed (or, without one, the reading is older
+        // than the window itself): its percentage belongs to the window that just ended. No
+        // countdown, no clock time in the past, no pace; wait for a new reading.
         let last = v
             .observed_at
             .map(|t| {
@@ -662,7 +671,14 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
             stale: true,
             dim: false,
             tip: vec![tip(
-                format!("{label}: its reset time has passed, waiting for a new reading{last}"),
+                format!(
+                    "{label}: {}, waiting for a new reading{last}",
+                    if g.reset_passed {
+                        "its reset time has passed"
+                    } else {
+                        "its window has ended"
+                    }
+                ),
                 Tone::Warn,
             )],
             secondary: false,
@@ -762,7 +778,14 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
         })
         .collect();
     if kind == Kind::Session && !models.is_empty() {
-        t.push(tip("By model", Tone::Muted));
+        t.push(tip(
+            if v.id == crate::vendor::VendorId::Antigravity {
+                "Other models"
+            } else {
+                "By model"
+            },
+            Tone::Muted,
+        ));
         for m in models.iter() {
             let reset = resets_in(m.resets_at.as_deref(), now)
                 .map(|r| format!(" \u{b7} resets in {r}"))
@@ -1058,7 +1081,7 @@ pub fn build_detail_at(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Ut
     };
     if let (Some(_), false) = (v.gauge(kind), v.current) {
         d.resets = Some("No current data".into());
-    } else if v.gauge(kind).is_some_and(|g| g.reset_passed) {
+    } else if v.gauge(kind).is_some_and(|g| window_ended(v, g, now)) {
         d.resets = Some("Reset passed, waiting for a new reading".into());
     } else if let Some(g) = v.gauge(kind) {
         let shown = if remaining {
@@ -1248,8 +1271,8 @@ pub fn status_line(s: &State, now: DateTime<Utc>) -> StatusLine {
     status_line_of(s, now, false)
 }
 
-/// The line for the plan and collector of `s`; `grok` says they are Grok's or Codex's (the last
-/// value stays shown however old, until its weekly period ends).
+/// The line for the plan and collector of `s`; `grok` says they are Grok's or Codex's. The last
+/// value stays shown however old (Grok's and Codex's until their weekly period ends).
 fn status_line_of(s: &State, now: DateTime<Utc>, grok: bool) -> StatusLine {
     if s.nothing_to_track() {
         return StatusLine {
@@ -1276,15 +1299,16 @@ fn status_line_of(s: &State, now: DateTime<Utc>, grok: bool) -> StatusLine {
         .or_else(|| plan.and_then(|p| parse_ts(&p.last)));
     let age_min = observed.map(|t| (now - t).num_milliseconds() as f64 / 60000.0);
 
+    // the same rule as the rows: an old value is still shown, only an ended period is not
     let current = plan.is_some_and(|p| {
         if grok {
-            crate::state::grok_reading_is_shown(p, now)
+            crate::state::reading_is_shown(p, now)
         } else {
-            crate::state::reading_is_current(p, &s.settings, now)
+            crate::state::claude_reading_is_shown(p, now)
         }
     });
-    // No current reading at all (everything failed, or the newest one is too old): say so plainly,
-    // never leave an old number to pass as the present.
+    // No current reading at all (everything failed, or the newest one's period has ended): say so
+    // plainly, never leave an old number to pass as the present.
     if (plan.is_some() && !current) || (plan.is_none() && c.error.is_some()) {
         let reason = match (&c.error, age_min) {
             (Some(e), _) => short_reason(e),

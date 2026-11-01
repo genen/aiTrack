@@ -844,3 +844,69 @@ fn a_window_called_aitrack_of_another_process_is_not_ours() {
     // without a pid file the title alone decides (as before)
     assert!(is_our_window("aiTrack", 99, None));
 }
+
+#[test]
+fn a_utf16_settings_file_is_kept_byte_for_byte_as_a_backup() {
+    let t = TempDir::new();
+    let path = t.join("settings.json");
+    // what PowerShell's `>` writes: UTF-16 LE with a byte order mark
+    let mut bytes = vec![0xFF, 0xFE];
+    for u in "{\"interval_min\": 5.0}".encode_utf16() {
+        bytes.extend(u.to_le_bytes());
+    }
+    std::fs::write(&path, &bytes).unwrap();
+    let s = Settings::load(&path);
+    assert_eq!(s.get().interval_min, 15.0);
+    s.set_interval(7.0);
+    assert_eq!(std::fs::read(t.join("settings.json.bak")).unwrap(), bytes);
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(saved["interval_min"], 7.0);
+}
+
+#[test]
+fn when_the_backup_cannot_be_made_the_original_is_left_alone() {
+    let t = TempDir::new();
+    let path = t.join("settings.json");
+    std::fs::write(&path, "{ not json").unwrap();
+    // a directory where the backup should go makes the copy fail
+    std::fs::create_dir(t.join("settings.json.bak")).unwrap();
+    let s = Settings::load(&path);
+    s.set_interval(7.0);
+    s.set_interval(8.0);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json");
+    assert!(!t.join("settings.json.tmp").exists());
+    // once the backup can be made, the next save goes through
+    std::fs::remove_dir(t.join("settings.json.bak")).unwrap();
+    s.set_interval(9.0);
+    assert_eq!(
+        std::fs::read_to_string(t.join("settings.json.bak")).unwrap(),
+        "{ not json"
+    );
+    assert!(std::fs::read_to_string(&path).unwrap().contains("9"));
+}
+
+#[test]
+fn a_missing_settings_file_is_a_normal_first_save_without_a_backup() {
+    let t = TempDir::new();
+    let path = t.join("settings.json");
+    let s = Settings::load(&path);
+    s.set_interval(7.0);
+    assert!(path.exists());
+    assert!(!t.join("settings.json.bak").exists());
+}
+
+#[test]
+fn an_unreadable_alerts_file_is_kept_as_a_backup_and_a_missing_one_is_not() {
+    use aitrack::alerts::Alerts;
+    let t = TempDir::new();
+    let path = t.join("alerts.json");
+    std::fs::write(&path, [0xFFu8, 0xFE, 0x7B, 0x00]).unwrap();
+    let _ = Alerts::load(&path);
+    assert_eq!(
+        std::fs::read(t.join("alerts.json.bak")).unwrap(),
+        [0xFFu8, 0xFE, 0x7B, 0x00]
+    );
+    let t2 = TempDir::new();
+    let _ = Alerts::load(t2.join("alerts.json"));
+    assert!(!t2.join("alerts.json.bak").exists());
+}

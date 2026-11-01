@@ -3,7 +3,9 @@
 
      Modelled on the Afterglow installer: WixUI_InstallDir (licence page, folder page, a "Run after install?"
      box on the last page), HKCU key paths for the Start menu and desktop shortcuts, a major upgrade that
-     refuses downgrades. Built by scripts/installer.ps1; the values come in as preprocessor variables:
+     refuses downgrades (but allows the same MSI version: 0.5.N-beta and 0.5.N both map to 0.5.N.0, so the stable
+     build must replace the beta, and a Replace rebuild must replace the earlier one).
+     Built by scripts/installer.ps1; the values come in as preprocessor variables:
        Version      four-part product version, for example 0.1.4.0 (from Cargo.toml)
        UpgradeCode  fixed GUID of this product (hard-coded in installer.ps1, never change it)
        ExePath      target\release\aitrack.exe
@@ -18,7 +20,7 @@
   <Package Name="aiTrack" Manufacturer="aiTrack" Version="$(var.Version)"
            UpgradeCode="$(var.UpgradeCode)" Scope="perMachine" Compressed="yes">
     <SummaryInformation Description="aiTrack: Claude and Grok plan usage tracker" />
-    <MajorUpgrade DowngradeErrorMessage="A newer version of aiTrack is already installed. Remove it first if you want to install an older version." />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of aiTrack is already installed. Remove it first if you want to install an older version." />
     <MediaTemplate EmbedCab="yes" />
 
     <Icon Id="aitrack.ico" SourceFile="$(var.IconPath)" />

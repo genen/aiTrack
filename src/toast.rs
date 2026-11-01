@@ -293,7 +293,7 @@ pub enum FailureAction {
     Osascript,
     /// Show nothing, report `Ok` (the in-app state still shows the alert); log once.
     RespectOptOut,
-    /// Report a retry-later error so the alert is offered again at the next poll.
+    /// Report a retry-later error so the alert is offered again at a later poll.
     RetryLater,
 }
 
@@ -326,24 +326,51 @@ struct MacNotifier;
 #[cfg(target_os = "macos")]
 impl MacNotifier {
     fn osascript(n: &Notification) -> Result<(), String> {
-        let out = std::process::Command::new("/usr/bin/osascript")
+        use std::io::Read;
+        use std::process::Stdio;
+        let fail = |why: String| {
+            crate::alerts::log_line(&why);
+            Err(why)
+        };
+        let mut child = match std::process::Command::new("/usr/bin/osascript")
             .arg("-e")
             .arg(applescript_for(n))
-            .output()
-            .map_err(|e| {
-                let why = format!("osascript could not start: {e}");
-                crate::alerts::log_line(&why);
-                why
-            })?;
-        if out.status.success() {
-            return Ok(());
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => return fail(format!("osascript could not start: {e}")),
+        };
+        // osascript can hang (a stuck notification service): wait at most OSASCRIPT_TIMEOUT, then
+        // kill it, like the Linux notify-send reaper.
+        let started = std::time::Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(st)) if st.success() => return Ok(()),
+                Ok(Some(st)) => {
+                    let mut err = String::new();
+                    if let Some(mut e) = child.stderr.take() {
+                        let _ = e.read_to_string(&mut err);
+                    }
+                    return fail(format!("osascript failed ({st}): {}", err.trim()));
+                }
+                Ok(None) if started.elapsed() >= OSASCRIPT_TIMEOUT => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return fail("osascript timed out".to_string());
+                }
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                Err(e) => return fail(format!("osascript wait failed: {e}")),
+            }
         }
-        let err = String::from_utf8_lossy(&out.stderr);
-        let why = format!("osascript failed ({}): {}", out.status, err.trim());
-        crate::alerts::log_line(&why);
-        Err(why)
     }
 }
+
+/// How long a macOS `osascript` banner may take before it is killed.
+#[cfg(target_os = "macos")]
+const OSASCRIPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 #[cfg(target_os = "macos")]
 impl Notifier for MacNotifier {
@@ -458,8 +485,11 @@ mod mac_native {
 
     /// Ask for permission once per process. The completion handler runs later on a system queue
     /// (the answer is waited for in [`post`]); a refusal is recorded in [`AUTH_STATE`], not in [`FAILED`].
-    fn request_authorization_once(center: &UNUserNotificationCenter) {
+    /// Returns `true` only for the call that sent the request.
+    fn request_authorization_once(center: &UNUserNotificationCenter) -> bool {
+        let mut asked = false;
         AUTH.call_once(|| {
+            asked = true;
             // The delegate goes in before the permission request. The centre only holds it weakly,
             // so the retained object is leaked on purpose: it lives for the rest of the process.
             let delegate: objc2::rc::Retained<AiTrackNotificationDelegate> =
@@ -486,9 +516,11 @@ mod mac_native {
                 &handler,
             );
         });
+        asked
     }
 
-    /// Post `n` and wait (a few seconds at most) for the permission answer and the delivery result.
+    /// Post `n` and wait (a few seconds at most) for the permission answer (first alert only) and
+    /// the delivery result.
     /// `Ok` only when the system accepted the alert; otherwise the failure says what to do next.
     pub fn post(n: &Notification) -> Result<(), NativeFailure> {
         // Without a bundle identifier the notification centre raises an Objective-C exception
@@ -498,9 +530,11 @@ mod mac_native {
         }
         let c = native_content_for(n);
         let center = UNUserNotificationCenter::currentNotificationCenter();
-        request_authorization_once(&center);
+        // Only the alert that asked waits for the answer (the prompt may just have opened); later
+        // ones do not block while the user has still not decided.
+        let asked_now = request_authorization_once(&center);
         let t0 = std::time::Instant::now();
-        while auth_state() == AuthState::Undecided && t0.elapsed() < WAIT {
+        while asked_now && auth_state() == AuthState::Undecided && t0.elapsed() < WAIT {
             std::thread::sleep(Duration::from_millis(50));
         }
         auth_gate(auth_state())?;
