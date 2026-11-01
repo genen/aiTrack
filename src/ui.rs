@@ -172,6 +172,10 @@ pub struct AitrackUi {
     custom: String,
     custom_local: String,
     copied_at: Option<Instant>,
+    /// The clock guard held a prune: scroll the Diagnostics warning into view once it is drawn.
+    diag_scroll: bool,
+    /// Screen rect of the clock warning in Diagnostics from the last frame (tests / render tool).
+    pub prune_warning_rect: Option<Rect>,
     startup_error: Option<String>,
     on_top_sent: Option<bool>,
     chart: Option<ChartCache>,
@@ -284,6 +288,8 @@ impl AitrackUi {
             custom: String::new(),
             custom_local: String::new(),
             copied_at: None,
+            diag_scroll: false,
+            prune_warning_rect: None,
             startup_error: None,
             on_top_sent: None,
             chart: None,
@@ -632,6 +638,18 @@ impl AitrackUi {
                 egui::WindowLevel::AlwaysOnTop,
             ));
             self.on_top_sent = None;
+            ctx.request_repaint();
+        }
+        if self.app.take_show_diagnostics() {
+            // the clock guard held a prune: show why, in Settings > Diagnostics
+            self.screen = Screen::Settings;
+            if small {
+                self.app.settings.set_small(false);
+            }
+            if !st.settings.sections.diagnostics {
+                self.app.settings.set_section("diagnostics", true);
+            }
+            self.diag_scroll = true;
             ctx.request_repaint();
         }
         let vendors = match &self.mock {
@@ -1448,6 +1466,7 @@ impl AitrackUi {
         let mut layout_rects: Vec<(bool, Rect)> = Vec::new();
         let mut sec_rects: Vec<(String, Rect)> = Vec::new();
         let mut about_rects: Vec<(String, Rect)> = Vec::new();
+        self.prune_warning_rect = None;
         ROW_LOG.with(|l| l.borrow_mut().clear());
         TIP_LOG.with(|l| l.borrow_mut().clear());
         let out = egui::ScrollArea::vertical()
@@ -1883,6 +1902,19 @@ impl AitrackUi {
                     v.sections.diagnostics,
                     &mut sec_rects,
                     |ui| {
+                        if let Some(w) = self.app.prune_warning() {
+                            let r = ui.add(
+                                egui::Label::new(
+                                    RichText::new(w).font(prop(12.0)).color(pal.orange),
+                                )
+                                .wrap(),
+                            );
+                            if std::mem::take(&mut self.diag_scroll) {
+                                r.scroll_to_me(Some(Align::Center));
+                            }
+                            self.prune_warning_rect = Some(r.rect);
+                            ui.add_space(4.0);
+                        }
                         let copied = self
                             .copied_at
                             .is_some_and(|t| t.elapsed() < Duration::from_millis(1500));

@@ -12,7 +12,7 @@ use crate::state::{
     build_antigravity_state, build_codex_state, build_grok_state, build_state, CodexState,
     GrokState, State,
 };
-use crate::store::{History, Store};
+use crate::store::{History, PruneGuard, Store};
 use chrono::Utc;
 use serde_json::Value;
 use std::sync::atomic::AtomicBool;
@@ -47,6 +47,12 @@ pub struct App {
     stats: std::sync::OnceLock<Arc<crate::statsview::StatsService>>,
     /// What the last prune asked for in Settings did (shown under the "Prune now" button).
     prune_result: Arc<Mutex<Option<String>>>,
+    /// Holds a prune that would delete too many days at once until the next launch (shared by
+    /// every collector; see [`PruneGuard`]).
+    prune_guard: Arc<PruneGuard>,
+    /// The guard held a prune: the window opens Settings > Diagnostics (see
+    /// [`App::take_show_diagnostics`]).
+    show_diagnostics: Arc<AtomicBool>,
     /// The "Send a test toast" buttons: what the last test send is doing (see
     /// [`App::start_test_notification`]).
     test_toast: Arc<Mutex<TestToast>>,
@@ -64,11 +70,61 @@ pub enum TestToast {
     Done(AlertKind, Result<(), String>),
 }
 
+/// File name of the clock guard's list, next to settings.json.
+pub const PRUNE_GUARD_FILE: &str = "prune-next-launch.json";
+
+/// What a prune reporter needs besides the Settings slot: the guard, and how to tell the user once
+/// it held a prune (a plain toast, the window to the front, Settings > Diagnostics).
+#[derive(Clone)]
+struct PruneTell {
+    guard: Arc<PruneGuard>,
+    notifier: Arc<Mutex<Arc<dyn Notifier>>>,
+    settings: Arc<Settings>,
+    raise: Arc<AtomicBool>,
+    show_diagnostics: Arc<AtomicBool>,
+}
+
+impl PruneTell {
+    /// On the collector thread, after a prune run: the first hold of this run is told once.
+    fn after_run(&self) {
+        if !self.guard.take_first_hold() {
+            return;
+        }
+        crate::alerts::log_line(&format!(
+            "prune held: {} (saved to {})",
+            crate::store::CLOCK_WARNING,
+            self.guard.path().display()
+        ));
+        self.show_diagnostics
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let mut note = Notification::new(
+            "aiTrack: check your clock",
+            crate::store::CLOCK_WARNING,
+            AlertKind::Warning,
+        );
+        note.options = self.settings.alert_options();
+        let notifier = self
+            .notifier
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let raising = Raising {
+            inner: notifier.as_ref(),
+            raise: &self.raise,
+        };
+        if let Err(e) = raising.notify(&note) {
+            crate::alerts::log_line(&format!("clock warning toast failed: {e}"));
+        }
+    }
+}
+
 /// Log what a prune run did, and keep the summary of an asked-for run for Settings.
 fn prune_reporter(
     slot: Arc<Mutex<Option<String>>>,
+    tell: PruneTell,
 ) -> impl Fn(&[crate::collector::PruneResult], bool) + Send + Sync + 'static {
     move |reports, manual| {
+        tell.after_run();
         let mut lines = Vec::new();
         for (name, r) in reports {
             let text = match r {
@@ -424,6 +480,9 @@ impl App {
                 alerts.evaluate("Claude", &plan, now, &raising);
             });
         }
+        let prune_guard = Arc::new(PruneGuard::load(
+            settings.path.with_file_name(PRUNE_GUARD_FILE),
+        ));
         Self {
             history,
             settings,
@@ -439,15 +498,29 @@ impl App {
             claude_seen: Remembered::new(),
             claude_plan: Mutex::new(None),
             prune_result: Arc::new(Mutex::new(None)),
+            prune_guard,
+            show_diagnostics: Arc::new(AtomicBool::new(false)),
             test_toast: Arc::new(Mutex::new(TestToast::Idle)),
         }
         .with_prune_reporting()
     }
 
     fn with_prune_reporting(self) -> Self {
-        self.collector
-            .set_on_prune(prune_reporter(self.prune_result.clone()));
+        self.wire_prune(&self.collector);
         self
+    }
+
+    /// Every prune of `collector` goes through the shared clock guard and is reported.
+    fn wire_prune(&self, collector: &Collector) {
+        collector.set_prune_guard(self.prune_guard.clone());
+        let tell = PruneTell {
+            guard: self.prune_guard.clone(),
+            notifier: self.notifier.clone(),
+            settings: self.settings.clone(),
+            raise: self.raise.clone(),
+            show_diagnostics: self.show_diagnostics.clone(),
+        };
+        collector.set_on_prune(prune_reporter(self.prune_result.clone(), tell));
     }
 
     /// Add Grok tracking: its own store and collector, polled on the same timer structure (live
@@ -518,7 +591,7 @@ impl App {
                 alerts.evaluate("Grok", &plan, now, &raising);
             });
         }
-        collector.set_on_prune(prune_reporter(self.prune_result.clone()));
+        self.wire_prune(&collector);
         self.grok = Some(GrokPart {
             history,
             collector,
@@ -538,7 +611,9 @@ impl App {
             if g.bot.set(bot.clone()).is_ok() {
                 // same thread and schedule as Grok's own history
                 g.collector
-                    .add_pruner(bot.store_info().0, move |now| bot.prune(now));
+                    .add_pruner(bot.store_info().0, move |now, rule| {
+                        bot.prune_limited(now, rule)
+                    });
             }
         }
         self
@@ -656,7 +731,7 @@ impl App {
                 alerts.evaluate(alert_name, &plan, now, &raising);
             });
         }
-        collector.set_on_prune(prune_reporter(self.prune_result.clone()));
+        self.wire_prune(&collector);
         CodexPart {
             history,
             collector,
@@ -703,6 +778,24 @@ impl App {
         for c in self.other_collectors() {
             c.prune_now();
         }
+    }
+
+    /// The Diagnostics text when the clock guard held a prune in this run (and when its state could
+    /// not be saved).
+    pub fn prune_warning(&self) -> Option<String> {
+        self.prune_guard.warning()
+    }
+
+    /// The clock guard (tests, and the files whose prune waits for the next launch).
+    pub fn prune_guard(&self) -> &Arc<PruneGuard> {
+        &self.prune_guard
+    }
+
+    /// `true` once after the clock guard held a prune: the window then opens Settings with the
+    /// Diagnostics section open.
+    pub fn take_show_diagnostics(&self) -> bool {
+        self.show_diagnostics
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
     }
 
     /// What the last "Prune now" did, one line per file (empty while it runs).
