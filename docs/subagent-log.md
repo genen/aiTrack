@@ -59,3 +59,5 @@ line to both files for every subagent.
 | 2026-11-01 | Lena, review verifier: checked Codex's outside review claims against main (read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
 | 2026-11-01 | Kai, PR reviewer: Opus review of PR #34 (0.5.17 review fixes; read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
 | 2026-11-01 | Leo, Stats windows coder: ChatGPT window counting in Stats > Plan; checked Gemini 100% and Grok Bot time-in | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-11-01 | Mira, prune guard coder: hold a prune that would delete 30+ days of history, confirm on next launch | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |
+| 2026-11-01 | Sofia, prune reviewer: Opus review and re-review of the prune guard (read only) | claude-opus-5-5 | model parameter set when the subagent was launched (this session) |

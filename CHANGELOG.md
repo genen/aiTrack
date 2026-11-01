@@ -3,6 +3,15 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.19] - 2026-11-01
+
+### Added
+- History cleanup is now protected against a wrong clock. If the daily 90-day cleanup of a history file would delete
+  more than 30 days of usage history at once (measured from the previous cleanup), aiTrack deletes nothing. It shows a
+  toast and opens Settings > Diagnostics with "Check Clock about to delete 30+ days of history on next launch." The
+  next launch runs the cleanup with the current clock, but never deletes more than the warning covered, so a clock
+  fixed in the meantime only removes records that are really older than 90 days.
+
 ## [0.5.18] - 2026-11-01
 
 ### Fixed
