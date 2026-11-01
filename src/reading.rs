@@ -56,6 +56,8 @@ pub struct Reading {
     pub credits: Option<CreditBalance>,
     /// Codex: banked early resets still available (`raw.banked_resets`).
     pub banked_resets: Option<u64>,
+    /// Antigravity: when the weekly limit will be full again (`raw.full_at.weekly`).
+    pub full_at: Option<String>,
 }
 
 /// A credits balance (Codex): unlimited, or a number of credits left.
@@ -166,15 +168,27 @@ impl Reading {
             used: s.get("used").and_then(Value::as_f64),
             limit: s.get("limit").and_then(Value::as_f64),
         });
+        // Antigravity's reset_time is "full again at", not a window end; readings saved by an
+        // early build carried it as the reset, which must not define windows
+        let agy = v.get("source").and_then(Value::as_str) == Some("agy-usage");
+        let strip = |b: Option<Bucket>| {
+            b.map(|mut b| {
+                if agy {
+                    b.resets_at = None;
+                    b.carried = false;
+                }
+                b
+            })
+        };
         Reading {
             t: parse_ts(&ts),
             ts,
             ok: v.get("ok").and_then(Value::as_bool).unwrap_or(false),
             failed: v.get("ok").and_then(Value::as_bool) == Some(false),
             error: v.get("error").and_then(Value::as_str).map(str::to_owned),
-            session: bucket(v.get("session")),
+            session: strip(bucket(v.get("session"))),
             // Grok Bot records keep their weekly meter under `bot_weekly`
-            weekly: bucket(v.get("weekly")).or_else(|| bucket(v.get("bot_weekly"))),
+            weekly: strip(bucket(v.get("weekly")).or_else(|| bucket(v.get("bot_weekly")))),
             spend,
             limits: v.get("limits").map(model_limits).unwrap_or_default(),
             source: v.get("source").and_then(Value::as_str).map(str::to_owned),
@@ -193,6 +207,12 @@ impl Reading {
                 .get("raw")
                 .and_then(|r| r.get("banked_resets"))
                 .and_then(Value::as_u64),
+            full_at: v
+                .get("raw")
+                .and_then(|r| r.get("full_at"))
+                .and_then(|f| f.get("weekly"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
         }
     }
 

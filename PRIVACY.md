@@ -12,6 +12,10 @@ else.**
 
 aiTrack only **reads** those files. It never changes them.
 
+For Gemini it runs Google Antigravity's own command-line tool, `agy -p /usage`, which prints your usage. aiTrack does
+not read Antigravity's sign-in. When agy lists no limits, aiTrack reads one word from agy's newest log, the sign-in
+type (`consumer` or `gcp`), to say "Likely enterprise account"; it does not read or keep the email or project there.
+
 ## What it stores on your computer
 
 Its own small files in `~/.aitrack` (readings, settings, which alerts were sent, a price list cache, short logs).
@@ -29,7 +33,8 @@ Only these requests, over HTTPS, and only when needed:
 - `raw.githubusercontent.com`: a download of the public model price list, about once a day.
 
 Sign-in tokens go only to the first three hosts, are read fresh for each request, and are never written to a file or a
-log by aiTrack. Starting the Grok CLI (the Refresh button) makes that CLI contact xAI as it normally does.
+log by aiTrack. Starting the Grok CLI (the Refresh button) makes that CLI contact xAI as it normally does, and running
+`agy -p /usage` makes Antigravity ask Google for your usage, as its own usage page does.
 
 ## Updates and contact
 

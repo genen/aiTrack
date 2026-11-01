@@ -1136,7 +1136,9 @@ fn ending_a_refresh_ends_the_wrappers_children_too() {
     use std::os::unix::fs::PermissionsExt;
     let t = TempDir::new();
     let pidfile = t.join("child.pid");
-    let script = t.join("grok");
+    // (not named "grok": a process called grok makes the real-host tests running beside this one
+    // see "the Grok CLI is already open")
+    let script = t.join("grok-wrapper");
     std::fs::write(
         &script,
         format!(

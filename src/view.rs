@@ -274,7 +274,7 @@ const LOCAL_SOURCES: [&str; 5] = [
     "codex-log",
 ];
 /// Sources that ask a service over the network.
-const NETWORK_SOURCES: [&str; 3] = ["oauth", "grok-billing", "codex-usage"];
+const NETWORK_SOURCES: [&str; 4] = ["oauth", "grok-billing", "codex-usage", "agy-usage"];
 
 /// A reading from a local-file source older than this (minutes) gets the data-age chip.
 pub const CHIP_LOCAL_MIN: f64 = 15.0;
@@ -376,6 +376,9 @@ pub fn age_chip(v: &Vendor, interval_min: f64, now: DateTime<Utc>) -> Option<Age
         "codex-usage" => format!(
             "ChatGPT usage has not answered since {long}. Check your connection or press refresh."
         ),
+        "agy-usage" => format!(
+            "Antigravity has not reported usage since {long}. Check that agy is signed in, then press refresh."
+        ),
         "oauth" => format!(
             "The usage service has not answered since {long}. Check your connection or press refresh."
         ),
@@ -420,6 +423,7 @@ pub fn stale_warning(v: &Vendor, now: DateTime<Utc>) -> Option<String> {
             "ChatGPT figures come from the local Codex session logs, which only update when you use Codex."
         }
         "codex-usage" => "ChatGPT usage has not answered recently.",
+        "agy-usage" => "Antigravity has not reported usage recently.",
         "oauth" => "the usage service has not answered recently.",
         "claude-json" => "Claude Code has not refreshed its saved usage.",
         "desktop-cache" | "desktop-history" => "the Claude app has not refreshed its usage cache.",
@@ -560,6 +564,18 @@ pub fn empty_warning(g: &Gauge) -> Option<String> {
 
 /// The header warning of a vendor: the most urgent window that would run out before its reset.
 /// The weekly window is named (`Weekly: empty in ~2d 3h`); the session is the default.
+/// Gemini: Antigravity answered but listed no limits (an Antigravity Business account), shown after
+/// the name instead of leaving only an old reading.
+fn enterprise_note(v: &Vendor) -> Option<HeaderWarn> {
+    (v.id == crate::vendor::VendorId::Antigravity
+        && v.error.as_deref() == Some(crate::antigravity::BUSINESS_REPLY))
+    .then(|| HeaderWarn {
+        kind: Kind::Weekly,
+        full: "Likely enterprise account".into(),
+        compact: "Likely enterprise".into(),
+    })
+}
+
 pub fn header_warning(v: &Vendor) -> Option<HeaderWarn> {
     Kind::ALL
         .iter()
@@ -683,7 +699,24 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
         };
     }
     let old = is_old(v, now);
-    let mut t = vec![tip(reset_line(g, label), Tone::Normal)];
+    let first = match (v.id, kind) {
+        // Antigravity refills gradually: no reset, only when it is full again
+        (crate::vendor::VendorId::Antigravity, Kind::Weekly) if g.hours_left.is_none() => {
+            match v.full_at.filter(|t| *t > now) {
+                Some(t) => {
+                    let h = (t - now).num_minutes() as f64 / 60.0;
+                    format!(
+                        "{label} refills gradually: full again in {} ({})",
+                        left_long(h),
+                        clock_text(t.with_timezone(&Local), h >= 20.0)
+                    )
+                }
+                None => format!("{label} refills gradually"),
+            }
+        }
+        _ => reset_line(g, label),
+    };
+    let mut t = vec![tip(first, Tone::Normal)];
     if let Some(n) = pace_note(g).filter(|_| !old) {
         t.push(tip(n.text, if n.warn { Tone::Warn } else { Tone::Muted }));
     }
@@ -701,6 +734,8 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
         t.push(tip("Live from Grok billing", Tone::Muted));
     } else if v.source.as_deref() == Some("codex-usage") {
         t.push(tip("Live from ChatGPT usage", Tone::Muted));
+    } else if v.source.as_deref() == Some("agy-usage") {
+        t.push(tip("Live from Antigravity (agy)", Tone::Muted));
     } else if let Some(label) = v.source.as_deref().and_then(source_label) {
         let age = v
             .observed_at
@@ -738,9 +773,26 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
             ));
         }
     }
+    // Antigravity: a used-up weekly limit holds back the shorter window's refills too
+    if kind == Kind::Session
+        && v.id == crate::vendor::VendorId::Antigravity
+        && v.weekly.as_ref().is_some_and(|w| w.pct >= 100.0)
+    {
+        t.push(tip(
+            "Weekly limit reached: this window does not refill until the weekly one does",
+            Tone::Warn,
+        ));
+    }
     if kind == Kind::Weekly {
         if !models.is_empty() {
-            t.push(tip("By model", Tone::Muted));
+            t.push(tip(
+                if v.id == crate::vendor::VendorId::Antigravity {
+                    "Other models"
+                } else {
+                    "By model"
+                },
+                Tone::Muted,
+            ));
             for m in models {
                 let reset = resets_in(m.resets_at.as_deref(), now)
                     .map(|r| format!(" \u{b7} resets in {r}"))
@@ -926,7 +978,7 @@ pub fn build_home_for(s: &State, vendors: &[Vendor], now: DateTime<Utc>) -> Home
         v.empty = Some(if s.nothing_to_track() {
             Empty {
                 title: "Nothing to track yet".into(),
-                body: "aiTrack reads usage from the Claude desktop app or Claude Code, the Grok CLI and ChatGPT (Codex). Install and sign in to one of them, then press refresh.".into(),
+                body: "aiTrack reads usage from the Claude desktop app or Claude Code, the Grok CLI, ChatGPT (Codex) and Gemini (the Antigravity CLI). Install and sign in to one of them, then press refresh.".into(),
                 help: true,
             }
         } else if s.loading {
@@ -964,7 +1016,8 @@ pub fn build_home_for(s: &State, vendors: &[Vendor], now: DateTime<Utc>) -> Home
                         .map(|b| bot_row(b, ven.bot_gauge.as_ref(), remaining, now)),
                 )
                 .collect(),
-            warn: header_warning(ven).filter(|_| ven.current && !is_old(ven, now)),
+            warn: enterprise_note(ven)
+                .or_else(|| header_warning(ven).filter(|_| ven.current && !is_old(ven, now))),
             age_chip: age_chip(ven, s.settings.interval_min, now).or_else(|| bot_chip(ven, now)),
         });
     }
@@ -1018,6 +1071,15 @@ pub fn build_detail_at(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Ut
         d.unit = if remaining { "% left" } else { "%" };
         d.resets = Some(match g.hours_left {
             Some(h) => format!("Resets in {}", left(h)),
+            None if v.id == crate::vendor::VendorId::Antigravity => {
+                match v.full_at.filter(|t| *t > now) {
+                    Some(t) => format!(
+                        "Full again in {}",
+                        left((t - now).num_minutes() as f64 / 60.0)
+                    ),
+                    None => "Refills gradually".into(),
+                }
+            }
             None => "Reset time unknown".into(),
         });
         if !is_old(v, now) {
@@ -1170,7 +1232,12 @@ pub fn status_line(s: &State, now: DateTime<Utc>) -> StatusLine {
             grok_view.claude_on = true;
             return status_line_of(&grok_view, now, true);
         }
-        if let Some(c) = s.codex.as_ref().filter(|c| c.enabled) {
+        if let Some(c) = s
+            .codex
+            .as_ref()
+            .filter(|c| c.enabled)
+            .or_else(|| s.antigravity.as_ref().filter(|c| c.enabled))
+        {
             let mut codex_view = s.clone();
             codex_view.plan = c.plan.clone();
             codex_view.collector = c.collector.clone();
@@ -1189,7 +1256,7 @@ fn status_line_of(s: &State, now: DateTime<Utc>, grok: bool) -> StatusLine {
             dot: Dot::Stale,
             text: "No supported tools found".into(),
             full: Some(format!(
-                "None of the Claude desktop app / Claude Code, the Grok CLI or ChatGPT (Codex) was found on this {}.",
+                "None of the Claude desktop app / Claude Code, the Grok CLI, ChatGPT (Codex) or the Antigravity CLI (Gemini) was found on this {}.",
                 crate::util::this_machine()
             )),
         };

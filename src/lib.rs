@@ -9,6 +9,7 @@
 
 pub mod alerts;
 pub mod analysis;
+pub mod antigravity;
 pub mod app;
 pub mod appicon;
 pub mod buildinfo;

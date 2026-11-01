@@ -35,6 +35,9 @@ pub struct State {
     pub claude_on: bool,
     /// Codex (separate history and collector); `None` when the Codex part is not set up.
     pub codex: Option<CodexState>,
+    /// Gemini through Antigravity (separate history and collector, same shape as Codex's);
+    /// `None` when the Antigravity part is not set up.
+    pub antigravity: Option<CodexState>,
 }
 
 impl State {
@@ -43,6 +46,7 @@ impl State {
         !self.claude_on
             && !self.grok.as_ref().is_some_and(|g| g.enabled)
             && !self.codex.as_ref().is_some_and(|c| c.enabled)
+            && !self.antigravity.as_ref().is_some_and(|c| c.enabled)
     }
 }
 
@@ -58,6 +62,8 @@ pub struct CodexState {
     pub models: Vec<ModelLimit>,
     pub credits: Option<crate::reading::CreditBalance>,
     pub banked_resets: Option<u64>,
+    /// Antigravity: when the weekly limit will be full again (newest reading).
+    pub full_at: Option<String>,
     /// Tracking is switched on (setting, or automatic because the Codex folder exists).
     pub enabled: bool,
 }
@@ -146,6 +152,7 @@ pub fn build_state(
         grok: None,
         claude_on: true,
         codex: None,
+        antigravity: None,
     }
 }
 
@@ -163,6 +170,7 @@ impl State {
             grok: None,
             claude_on: true,
             codex: None,
+            antigravity: None,
         }
     }
 }
@@ -196,7 +204,9 @@ pub fn reading_is_current(plan: &Plan, settings: &Values, now: DateTime<Utc>) ->
     let age_min = (now - t).num_milliseconds() as f64 / 60000.0;
     let network = SNAPSHOT_MAX_AGE_MIN.max(settings.interval_min * 2.5 + 2.0);
     let limit = match plan.last_source.as_deref() {
-        Some("oauth") | Some("grok-billing") | Some("codex-usage") | None => network,
+        Some("oauth") | Some("grok-billing") | Some("codex-usage") | Some("agy-usage") | None => {
+            network
+        }
         Some(_) => SNAPSHOT_MAX_AGE_MIN,
     };
     // a Grok or Codex log snapshot of a weekly period that has ended is last week's number
@@ -288,6 +298,27 @@ pub fn build_codex_state(
     enabled: bool,
     now: DateTime<Utc>,
 ) -> CodexState {
+    build_plan_state("ChatGPT", readings, collector, enabled, now)
+}
+
+/// Gemini's (Antigravity's) part of the state, from its own readings.
+pub fn build_antigravity_state(
+    readings: &[Reading],
+    collector: Status,
+    enabled: bool,
+    now: DateTime<Utc>,
+) -> CodexState {
+    build_plan_state("Gemini", readings, collector, enabled, now)
+}
+
+/// A Codex-shaped vendor's state; `label` starts its Diagnostics rows.
+fn build_plan_state(
+    label: &str,
+    readings: &[Reading],
+    collector: Status,
+    enabled: bool,
+    now: DateTime<Utc>,
+) -> CodexState {
     let plan = analyze(readings, now);
     let newest = readings.iter().filter(|r| r.ok).max_by_key(|r| r.t);
     let models = current_models(readings, plan.as_ref(), now);
@@ -300,7 +331,7 @@ pub fn build_codex_state(
             ts: r.ts.clone(),
             ok: r.ok,
             text: format!(
-                "ChatGPT: {}",
+                "{label}: {}",
                 if r.ok {
                     // which source supplied it: tells a live reading from an old log line
                     let src = r
@@ -323,6 +354,7 @@ pub fn build_codex_state(
         models,
         credits: newest.and_then(|r| r.credits.clone()),
         banked_resets: newest.and_then(|r| r.banked_resets),
+        full_at: newest.and_then(|r| r.full_at.clone()),
         enabled,
     }
 }

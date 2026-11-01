@@ -449,6 +449,7 @@ fn stats_snapshot(app: &Arc<App>, populated: bool) -> aitrack::statsview::Snapsh
             .map(|k| (k, compute(r, k, now, 0)))
             .collect(),
         grok_bot: None,
+        antigravity: None,
         grok: None,
         codex: None,
     });

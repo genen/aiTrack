@@ -11,6 +11,7 @@ mod common;
 
 mod alerts;
 mod analysis;
+mod antigravity;
 mod appicon;
 mod badges;
 mod buildinfo;

@@ -44,7 +44,8 @@ fn nothing_installed_means_nothing_present() {
             Presence {
                 claude: false,
                 grok: false,
-                codex: false
+                codex: false,
+                antigravity: false
             },
             "{os:?}"
         );
@@ -129,7 +130,8 @@ fn all_four_combinations() {
             Presence {
                 claude,
                 grok,
-                codex: false
+                codex: false,
+                antigravity: false
             }
         );
     }

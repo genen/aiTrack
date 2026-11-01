@@ -108,7 +108,8 @@ impl Sections {
 }
 
 /// Whether a vendor's panel is shown: follow the detection of its tool, or always / never.
-/// (Stored as `null` / `true` / `false` in `claude_enabled`, `grok_enabled` and `codex_enabled`; the
+/// (Stored as `null` / `true` / `false` in `claude_enabled`, `grok_enabled`, `codex_enabled` and
+/// `antigravity_enabled`; the
 /// older Grok-only "Track Grok" values keep their meaning: `true` = On, `false` = Off, missing = Auto.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Track {
@@ -279,6 +280,8 @@ pub struct Values {
     pub claude_enabled: Option<bool>,
     /// Track Codex usage. `None` = automatic: on when Codex's folder (`~/.codex`) exists.
     pub codex_enabled: Option<bool>,
+    /// Track Gemini (Antigravity) usage. `None` = automatic: on when the `agy` CLI is installed.
+    pub antigravity_enabled: Option<bool>,
     /// Warning / limit / predictive toasts play a reminder sound.
     pub alert_sounds: bool,
     /// Look of the vendor badges.
@@ -310,6 +313,7 @@ impl Default for Values {
             grok_enabled: None,
             claude_enabled: None,
             codex_enabled: None,
+            antigravity_enabled: None,
             alert_sounds: true,
             badge_style: BadgeVariant::Auto,
             theme: ThemeChoice::Dark,
@@ -333,6 +337,11 @@ impl Values {
         self.codex_enabled.unwrap_or(detected)
     }
 
+    /// Is Gemini (Antigravity) tracking on, given whether the `agy` CLI exists?
+    pub fn antigravity_on(&self, detected: bool) -> bool {
+        self.antigravity_enabled.unwrap_or(detected)
+    }
+
     /// Is Claude shown, given whether its tools were detected?
     pub fn claude_on(&self, detected: bool) -> bool {
         self.claude_enabled.unwrap_or(detected)
@@ -353,6 +362,7 @@ impl Values {
             "grok_enabled": self.grok_enabled,
             "claude_enabled": self.claude_enabled,
             "codex_enabled": self.codex_enabled,
+            "antigravity_enabled": self.antigravity_enabled,
             "alert_sounds": self.alert_sounds,
             "badge_style": self.badge_style.as_str(),
             "theme": self.theme.as_str(),
@@ -450,6 +460,11 @@ impl Values {
         match new.get("codex_enabled") {
             Some(Value::Bool(b)) => self.codex_enabled = Some(*b),
             Some(Value::Null) => self.codex_enabled = None,
+            _ => {}
+        }
+        match new.get("antigravity_enabled") {
+            Some(Value::Bool(b)) => self.antigravity_enabled = Some(*b),
+            Some(Value::Null) => self.antigravity_enabled = None,
             _ => {}
         }
     }
@@ -565,6 +580,10 @@ impl Settings {
     }
     pub fn set_codex_track(&self, t: Track) -> Values {
         self.update(&json!({"codex_enabled": t.to_opt()}), true)
+    }
+
+    pub fn set_antigravity_track(&self, t: Track) -> Values {
+        self.update(&json!({"antigravity_enabled": t.to_opt()}), true)
     }
     pub fn set_grok_enabled(&self, on: bool) -> Values {
         self.update(&json!({"grok_enabled": on}), true)

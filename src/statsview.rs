@@ -38,6 +38,8 @@ pub struct PlanData {
     pub grok_bot: Option<Vec<(StatsRange, Stats)>>,
     /// `None` when Codex is not tracked.
     pub codex: Option<Vec<(StatsRange, Stats)>>,
+    /// `None` when Gemini (Antigravity) is not tracked.
+    pub antigravity: Option<Vec<(StatsRange, Stats)>>,
 }
 
 impl PlanData {
@@ -47,6 +49,14 @@ impl PlanData {
 
     pub fn grok_at(&self, r: StatsRange) -> Option<&Stats> {
         self.grok
+            .as_ref()?
+            .iter()
+            .find(|(k, _)| *k == r)
+            .map(|(_, s)| s)
+    }
+
+    pub fn antigravity_at(&self, r: StatsRange) -> Option<&Stats> {
+        self.antigravity
             .as_ref()?
             .iter()
             .find(|(k, _)| *k == r)
@@ -95,6 +105,7 @@ pub struct ServiceConfig {
     pub claude: Option<Arc<History>>,
     pub grok: Option<Arc<History>>,
     pub codex: Option<Arc<History>>,
+    pub antigravity: Option<Arc<History>>,
     pub grok_bot: Option<Arc<crate::grok_bot::BotTracker>>,
     pub rescan_every: Duration,
 }
@@ -221,6 +232,7 @@ fn worker(
             grok: cfg.grok.as_ref().map(ranges),
             grok_bot: cfg.grok_bot.as_ref().map(|b| compute_all(&b.readings())),
             codex: cfg.codex.as_ref().map(ranges),
+            antigravity: cfg.antigravity.as_ref().map(ranges),
         };
         let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
         s.plan = Some(Arc::new(plan));
@@ -542,6 +554,24 @@ pub fn build_page(
                 page.plan.push(PlanBlock {
                     vendor: VendorId::Codex,
                     title: "ChatGPT weekly (7 d)".into(),
+                    rows: plan_rows(st, Kind::Weekly, now),
+                });
+            }
+            if let Some(st) = plan
+                .antigravity_at(plan_range)
+                .filter(|s| s.coverage.readings > 0)
+            {
+                // Antigravity reports weekly limits only today; a shorter window if it adds one
+                if !st.session.peaks.is_empty() || st.session.current.is_some() {
+                    page.plan.push(PlanBlock {
+                        vendor: VendorId::Antigravity,
+                        title: "Gemini session".into(),
+                        rows: plan_rows(st, Kind::Session, now),
+                    });
+                }
+                page.plan.push(PlanBlock {
+                    vendor: VendorId::Antigravity,
+                    title: "Gemini weekly (7 d)".into(),
                     rows: plan_rows(st, Kind::Weekly, now),
                 });
             }
