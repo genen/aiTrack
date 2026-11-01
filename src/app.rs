@@ -611,8 +611,8 @@ impl App {
             if g.bot.set(bot.clone()).is_ok() {
                 // same thread and schedule as Grok's own history
                 g.collector
-                    .add_pruner(bot.store_info().0, move |now, limit| {
-                        bot.prune_limited(now, limit)
+                    .add_pruner(bot.store_info().0, move |now, rule| {
+                        bot.prune_limited(now, rule)
                     });
             }
         }
@@ -780,11 +780,10 @@ impl App {
         }
     }
 
-    /// The Diagnostics line when the clock guard held a prune in this run.
-    pub fn prune_warning(&self) -> Option<&'static str> {
-        self.prune_guard
-            .held_this_run()
-            .then_some(crate::store::CLOCK_WARNING)
+    /// The Diagnostics text when the clock guard held a prune in this run (and when its state could
+    /// not be saved).
+    pub fn prune_warning(&self) -> Option<String> {
+        self.prune_guard.warning()
     }
 
     /// The clock guard (tests, and the files whose prune waits for the next launch).

@@ -15,7 +15,7 @@
 
 use crate::live::{CollectError, Poller};
 use crate::settings::Settings;
-use crate::store::{PruneGuard, PruneReport, Store};
+use crate::store::{PruneGuard, PruneReport, PruneRule, Store};
 use crate::util::parse_ts;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -28,7 +28,7 @@ type Waker = Box<dyn Fn() + Send + Sync>;
 /// Prunes one more history file (beyond the collector's own store), e.g. the Grok Bot's, with the
 /// clock guard's limit (see [`Store::prune_limited`]).
 pub type Pruner =
-    Box<dyn Fn(DateTime<Utc>, Option<usize>) -> std::io::Result<PruneReport> + Send + Sync>;
+    Box<dyn Fn(DateTime<Utc>, PruneRule) -> std::io::Result<PruneReport> + Send + Sync>;
 /// What one prune run did, by file: the report, or why it failed.
 pub type PruneResult = (String, Result<PruneReport, String>);
 /// Told what each prune run did, and whether it was asked for.
@@ -193,7 +193,7 @@ impl Collector {
     pub fn add_pruner(
         &self,
         name: impl Into<String>,
-        f: impl Fn(DateTime<Utc>, Option<usize>) -> std::io::Result<PruneReport> + Send + Sync + 'static,
+        f: impl Fn(DateTime<Utc>, PruneRule) -> std::io::Result<PruneReport> + Send + Sync + 'static,
     ) {
         lock(&self.shared.pruners).push((name.into(), Box::new(f)));
     }
@@ -397,9 +397,9 @@ impl Shared {
 
     fn prune(&self, now: DateTime<Utc>) -> Vec<PruneResult> {
         let guard = lock(&self.guard).clone();
-        let run = |name: &str, f: &dyn Fn(Option<usize>) -> std::io::Result<PruneReport>| {
-            let limit = guard.as_ref().and_then(|g| g.limit_for(name));
-            let r = f(limit);
+        let run = |name: &str, f: &dyn Fn(PruneRule) -> std::io::Result<PruneReport>| {
+            let rule = guard.as_ref().map_or(PruneRule::Free, |g| g.rule_for(name));
+            let r = f(rule);
             if let Some(g) = &guard {
                 g.record(name, &r);
             }

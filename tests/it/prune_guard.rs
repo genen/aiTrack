@@ -6,15 +6,16 @@ use aitrack::alerts::{Notification, Notifier};
 use aitrack::app::{App, PRUNE_GUARD_FILE};
 use aitrack::collector::Collector;
 use aitrack::settings::Settings;
-use aitrack::store::{
-    History, JsonlStore, PruneGuard, Store, CLOCK_WARNING, GUARD_DAYS, KEEP_DAYS,
-};
+use aitrack::store::{History, JsonlStore, PruneGuard, PruneRule, Store, CLOCK_WARNING, KEEP_DAYS};
 use chrono::{DateTime, Duration, Utc};
 use common::TempDir;
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+
+/// The guard's rule for a file pruned for the first time (no saved cutoff).
+const FIRST: PruneRule = PruneRule::Guarded { last_cutoff: None };
 
 fn now() -> DateTime<Utc> {
     "2026-10-20T12:00:00Z".parse().unwrap()
@@ -66,9 +67,7 @@ fn a_normal_daily_prune_is_not_held() {
     let path = d.join("usage.jsonl");
     // yesterday's prune left 90 days; today one more day falls out
     daily(&path, 1..=91);
-    let rep = JsonlStore::new(&path)
-        .prune_limited(now(), Some(GUARD_DAYS))
-        .unwrap();
+    let rep = JsonlStore::new(&path).prune_limited(now(), FIRST).unwrap();
     assert!(!rep.held());
     assert_eq!(rep.removed, 1);
     assert_eq!(lines(&path), 90);
@@ -91,9 +90,7 @@ fn days_are_counted_as_distinct_days_so_a_stray_old_record_does_not_hold_it() {
     }
     writeln!(f, "{}", rec(2000)).unwrap();
     drop(f);
-    let rep = JsonlStore::new(&path)
-        .prune_limited(now(), Some(GUARD_DAYS))
-        .unwrap();
+    let rep = JsonlStore::new(&path).prune_limited(now(), FIRST).unwrap();
     assert!(!rep.held());
     assert_eq!(rep.removed, 22);
 }
@@ -112,9 +109,7 @@ fn a_prune_of_40_days_is_held_and_touches_nothing() {
     let bak = sibling(&path, "bak");
     std::fs::write(&bak, "the last good backup\n").unwrap();
     let before = std::fs::read(&path).unwrap();
-    let rep = JsonlStore::new(&path)
-        .prune_limited(now(), Some(GUARD_DAYS))
-        .unwrap();
+    let rep = JsonlStore::new(&path).prune_limited(now(), FIRST).unwrap();
     assert!(rep.held());
     assert!(!rep.changed());
     assert_eq!(rep.held_days, 40);
@@ -130,9 +125,7 @@ fn a_prune_of_40_days_is_held_and_touches_nothing() {
     assert!(!sibling(&path, "corrupt").exists());
     // exactly 30 days is not more than 30
     daily(&path, 1..=(KEEP_DAYS + 30));
-    let rep = JsonlStore::new(&path)
-        .prune_limited(now(), Some(GUARD_DAYS))
-        .unwrap();
+    let rep = JsonlStore::new(&path).prune_limited(now(), FIRST).unwrap();
     assert!(!rep.held());
     assert_eq!(rep.removed, 30);
 }
@@ -156,7 +149,11 @@ fn the_flag_is_saved_read_back_after_a_restart_and_cleared_once_the_prune_ran() 
     assert!(!guard.take_first_hold());
     assert_eq!(guard.pending(), vec![name.clone()]);
     let saved: Value = serde_json::from_slice(&std::fs::read(&guard_path).unwrap()).unwrap();
-    assert_eq!(saved, json!({"prune_on_next_launch": [name.clone()]}));
+    let held_cutoff = (now() - Duration::days(KEEP_DAYS)).to_rfc3339();
+    assert_eq!(
+        saved,
+        json!({"files": {name.clone(): {"held_cutoff": held_cutoff}}})
+    );
     // a second prune in the same run (daily, or "Prune now") is held again, without a new warning
     assert!(report(&c, now()).held());
     assert!(!guard.take_first_hold());
@@ -165,20 +162,29 @@ fn the_flag_is_saved_read_back_after_a_restart_and_cleared_once_the_prune_ran() 
     // next launch, the clock still far ahead: the user was warned, the prune runs once
     let (c, guard) = launch(&path, &guard_path);
     assert!(!guard.held_this_run());
-    assert_eq!(guard.limit_for(&name), None);
+    assert_eq!(
+        guard.rule_for(&name),
+        PruneRule::Capped(now() - Duration::days(KEEP_DAYS))
+    );
     let rep = report(&c, now());
     assert!(!rep.held());
     assert_eq!(rep.removed, 40);
     assert_eq!(lines(&path), KEEP_DAYS as usize);
     assert!(sibling(&path, "bak").exists(), "the .bak is kept as before");
-    assert!(!guard_path.exists(), "the flag is cleared");
-    assert!(guard.pending().is_empty());
-    // and the guard holds again
-    assert_eq!(guard.limit_for(&name), Some(GUARD_DAYS));
+    assert!(guard.pending().is_empty(), "the flag is cleared");
+    let saved: Value = serde_json::from_slice(&std::fs::read(&guard_path).unwrap()).unwrap();
+    assert_eq!(saved["files"][&name].get("held_cutoff"), None);
+    // and the guard holds again, measured from this prune's cutoff
+    assert_eq!(
+        guard.rule_for(&name),
+        PruneRule::Guarded {
+            last_cutoff: Some(now() - Duration::days(KEEP_DAYS))
+        }
+    );
     let later = now() + Duration::days(45);
     let rep = report(&c, later);
     assert!(rep.held());
-    assert!(guard_path.exists());
+    assert_eq!(guard.pending(), vec![name.clone()]);
     drop(c);
 
     // a third launch with nothing pending is guarded from the start
@@ -214,11 +220,11 @@ fn a_clock_fixed_before_the_next_launch_prunes_only_what_is_really_old() {
     assert!(!rep.held());
     assert_eq!(rep.removed, 1, "only the reading older than 90 days goes");
     assert_eq!(lines(&path), 89);
-    assert!(!guard_path.exists());
-    assert_eq!(
-        guard.limit_for(&JsonlStore::new(&path).describe()),
-        Some(GUARD_DAYS)
-    );
+    assert!(guard.pending().is_empty());
+    assert!(matches!(
+        guard.rule_for(&JsonlStore::new(&path).describe()),
+        PruneRule::Guarded { .. }
+    ));
 }
 
 #[test]
@@ -232,7 +238,7 @@ fn extra_history_files_are_guarded_each_on_its_own() {
     let bot_before = std::fs::read(&bot).unwrap();
     let (c, guard) = launch(&main, &guard_path);
     let bot_store = JsonlStore::new(&bot);
-    c.add_pruner("bot", move |now, limit| bot_store.prune_limited(now, limit));
+    c.add_pruner("bot", move |now, rule| bot_store.prune_limited(now, rule));
     let r = c.prune_blocking(now());
     assert_eq!(r[0].1.as_ref().unwrap().removed, 1, "the main file prunes");
     assert!(r[1].1.as_ref().unwrap().held(), "the bot file is held");
@@ -248,7 +254,119 @@ fn an_unreadable_or_missing_flag_file_means_nothing_pending() {
     std::fs::write(&p, "{garbage").unwrap();
     let g = PruneGuard::load(&p);
     assert!(g.pending().is_empty());
-    assert_eq!(g.limit_for("x"), Some(GUARD_DAYS));
+    assert_eq!(g.rule_for("x"), FIRST);
+}
+
+#[test]
+fn a_sparse_file_with_the_clock_a_year_ahead_is_held() {
+    // Codex, Gemini and Grok only log on the days the tool was used
+    let d = TempDir::new();
+    let path = d.join("usage-codex.jsonl");
+    let mut f = std::fs::File::create(&path).unwrap();
+    for day in (1..=89).step_by(5) {
+        writeln!(f, "{}", rec(day)).unwrap();
+    }
+    drop(f);
+    let before = std::fs::read(&path).unwrap();
+    let ahead = now() + Duration::days(365);
+    // pruned for the first time (no saved cutoff): the span of the readings to delete
+    let rep = JsonlStore::new(&path).prune_limited(ahead, FIRST).unwrap();
+    assert!(rep.held(), "{rep:?}");
+    assert_eq!(rep.held_records, 18);
+    // with the last prune's cutoff saved: how far the cutoff moved
+    let (c, _) = launch(&path, &d.join(PRUNE_GUARD_FILE));
+    assert!(!report(&c, now()).held());
+    let rep = report(&c, ahead);
+    assert!(rep.held());
+    assert_eq!(rep.held_days, 365);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn daily_prunes_measured_from_the_saved_cutoff_go_through() {
+    let d = TempDir::new();
+    let path = d.join("usage.jsonl");
+    daily(&path, 1..=(KEEP_DAYS + 3));
+    let guard_path = d.join(PRUNE_GUARD_FILE);
+    let (c, _) = launch(&path, &guard_path);
+    assert_eq!(report(&c, now()).removed, 3);
+    for day in 1..=40 {
+        let rep = report(&c, now() + Duration::days(day));
+        assert!(!rep.held(), "day {day}: {rep:?}");
+        assert_eq!(rep.removed, 1);
+    }
+    // the cutoff is remembered across launches
+    let (c, _) = launch(&path, &guard_path);
+    assert!(!report(&c, now() + Duration::days(41)).held());
+    assert!(report(&c, now() + Duration::days(80)).held());
+}
+
+#[test]
+fn a_clock_that_went_further_wrong_deletes_no_more_than_the_warning_said() {
+    let d = TempDir::new();
+    let path = d.join("usage.jsonl");
+    let guard_path = d.join(PRUNE_GUARD_FILE);
+    daily(&path, 1..=(KEEP_DAYS + 40));
+    let (c, _) = launch(&path, &guard_path);
+    assert!(report(&c, now()).held());
+    drop(c);
+    // the next launch has the clock five years ahead
+    let (c, _) = launch(&path, &guard_path);
+    let rep = report(&c, now() + Duration::days(5 * 365));
+    assert_eq!(
+        rep.removed, 40,
+        "only the 40 days the user was warned about"
+    );
+    assert_eq!(lines(&path), KEEP_DAYS as usize);
+}
+
+#[test]
+fn a_normal_prune_later_in_the_run_clears_the_warning() {
+    let d = TempDir::new();
+    let path = d.join("usage.jsonl");
+    daily(&path, 1..=89);
+    let (c, guard) = launch(&path, &d.join(PRUNE_GUARD_FILE));
+    assert!(report(&c, now() + Duration::days(60)).held());
+    assert!(guard.warning().is_some());
+    // the clock was fixed while the window stayed open, then the daily prune (or Prune now)
+    assert!(!report(&c, now()).held());
+    assert!(!guard.held_this_run());
+    assert_eq!(guard.warning(), None);
+    assert!(guard.pending().is_empty());
+    assert_eq!(lines(&path), 89);
+}
+
+#[test]
+fn a_failed_prune_keeps_the_allowance() {
+    let d = TempDir::new();
+    let path = d.join("usage.jsonl");
+    let guard_path = d.join(PRUNE_GUARD_FILE);
+    daily(&path, 1..=(KEEP_DAYS + 40));
+    let (c, _) = launch(&path, &guard_path);
+    assert!(report(&c, now()).held());
+    drop(c);
+    let guard = PruneGuard::load(&guard_path);
+    let name = JsonlStore::new(&path).describe();
+    let cap = PruneRule::Capped(now() - Duration::days(KEEP_DAYS));
+    assert_eq!(guard.rule_for(&name), cap);
+    guard.record(&name, &Err(std::io::Error::other("disk full")));
+    assert_eq!(guard.rule_for(&name), cap);
+    assert_eq!(guard.pending(), vec![name.clone()]);
+    assert_eq!(PruneGuard::load(&guard_path).rule_for(&name), cap);
+}
+
+#[test]
+fn a_state_that_cannot_be_saved_is_told_in_diagnostics() {
+    let d = TempDir::new();
+    let path = d.join("usage.jsonl");
+    daily(&path, 1..=(KEEP_DAYS + 40));
+    // the guard's folder is a file: nothing can be written there
+    std::fs::write(d.join("blocked"), "").unwrap();
+    let (c, guard) = launch(&path, &d.join("blocked").join(PRUNE_GUARD_FILE));
+    assert!(report(&c, now()).held());
+    let w = guard.warning().unwrap();
+    assert!(w.starts_with(CLOCK_WARNING), "{w}");
+    assert!(w.contains("Could not save"), "{w}");
 }
 
 // ---- the app: toast, Diagnostics line, every history file ---------------------------------------
@@ -303,7 +421,7 @@ fn the_app_warns_once_with_a_toast_and_the_diagnostics_line() {
         CLOCK_WARNING,
         "Check Clock about to delete 30+ days of history on next launch."
     );
-    assert_eq!(app.prune_warning(), Some(CLOCK_WARNING));
+    assert_eq!(app.prune_warning().as_deref(), Some(CLOCK_WARNING));
     assert!(app.take_show_diagnostics());
     assert!(!app.take_show_diagnostics());
     assert!(app.take_raise(), "the window comes to the front");
@@ -327,7 +445,7 @@ fn every_vendor_collector_goes_through_the_guard() {
     let r = app.grok.as_ref().unwrap().collector.prune_blocking(now());
     assert!(r[0].1.as_ref().unwrap().held());
     assert_eq!(std::fs::read(d.join("usage-grok.jsonl")).unwrap(), before);
-    assert_eq!(app.prune_warning(), Some(CLOCK_WARNING));
+    assert_eq!(app.prune_warning().as_deref(), Some(CLOCK_WARNING));
 }
 
 #[cfg(feature = "gui")]
