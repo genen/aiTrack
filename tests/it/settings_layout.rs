@@ -378,7 +378,7 @@ mod view {
             c.lock().unwrap().push(u.to_owned());
             Ok(())
         });
-        for key in ["repo", "license", "donate"] {
+        for key in ["repo", "donate"] {
             let p = about_center(&w, key);
             w.click(p);
         }
@@ -386,7 +386,6 @@ mod view {
             *calls.lock().unwrap(),
             [
                 "https://github.com/genen/aiTrack",
-                "https://github.com/genen/aiTrack/blob/main/LICENSE",
                 "https://www.paypal.com/donate/?hosted_button_id=YR6YMJ953Y9CE"
             ]
         );
@@ -396,14 +395,6 @@ mod view {
         assert_eq!(
             w.ui.launch_notice().as_deref(),
             Some("Could not open the project page")
-        );
-        // the licence name is a link too (not a button) with its own notice
-        w.ui.set_launch_notice("");
-        let p = about_center(&w, "license");
-        w.click(p);
-        assert_eq!(
-            w.ui.launch_notice().as_deref(),
-            Some("Could not open the license page")
         );
         w.ui.set_launch_notice("");
         let p = about_center(&w, "donate");
@@ -415,19 +406,21 @@ mod view {
     }
 
     #[test]
-    fn the_about_section_has_a_repo_link_and_a_licence_link_and_nothing_to_copy() {
+    fn the_about_section_has_only_the_repo_and_donate_links_and_nothing_to_copy() {
         let mut w = Win::new(false, None);
         open_about(&mut w);
         let keys: Vec<&str> = w.ui.about_rects.iter().map(|r| r.0.as_str()).collect();
         assert_eq!(
             keys,
-            ["repo", "license", "donate"],
-            "three links: no buttons, Email, Copy or build-line controls"
+            ["repo", "donate"],
+            "two links: no buttons, Email, License, Copy or build-line controls"
         );
         let names: Vec<&str> = w.ui.setting_rows.iter().map(|r| r.0.as_str()).collect();
-        assert!(!names.contains(&"Contact"), "{names:?}");
+        for gone in ["Contact", "Developed by Sir Gene", "License"] {
+            assert!(!names.contains(&gone), "{gone} in {names:?}");
+        }
         // clicking around the section copies nothing
-        let p = about_center(&w, "license");
+        let p = about_center(&w, "donate");
         w.click(p);
         assert!(w.copied.is_empty(), "{:?}", w.copied);
     }
@@ -438,12 +431,7 @@ mod view {
             let mut w = Win::new(light, None);
             open_about(&mut w);
             let names: Vec<&str> = w.ui.setting_rows.iter().map(|r| r.0.as_str()).collect();
-            for want in [
-                "aiTrack",
-                "Developed by Sir Gene",
-                "License",
-                "Support aiTrack",
-            ] {
+            for want in ["aiTrack", "Support aiTrack"] {
                 assert!(names.contains(&want), "{want} in {names:?}");
             }
             for (title, label, control) in &w.ui.setting_rows {

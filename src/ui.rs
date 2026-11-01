@@ -1933,7 +1933,7 @@ impl AitrackUi {
         }
     }
 
-    /// Settings > About: project link, developer and contact, license, donation link.
+    /// Settings > About: project link and donation link (plus the display backend on Linux).
     fn about_body(&mut self, ui: &mut Ui, pal: &Palette, rects: &mut Vec<(String, Rect)>) {
         // (the build line is at the bottom of Settings; here the name links to the project)
         let mut open_repo = false;
@@ -1951,40 +1951,6 @@ impl AitrackUi {
         );
         if open_repo {
             self.open_about_link(crate::launch::REPO_URL, "Could not open the project page");
-        }
-        ui.add_space(4.0);
-        setting_row(
-            ui,
-            pal,
-            "Developed by Sir Gene",
-            crate::launch::CONTACT_EMAIL,
-            |_| {},
-        );
-        // Linux: which display backend the window runs on (empty elsewhere)
-        let backend = crate::placement::backend_report();
-        if !backend.is_empty() {
-            ui.add_space(4.0);
-            setting_row(ui, pal, "Display", &backend, |_| {});
-        }
-        ui.add_space(4.0);
-        let mut open_license = false;
-        setting_row_ui(
-            ui,
-            pal,
-            "License",
-            |ui| {
-                let r = link_label(ui, pal, "GPL-3.0-or-later", crate::launch::LICENSE_URL);
-                rects.push(("license".into(), r.rect));
-                open_license = r.clicked();
-            },
-            "",
-            |_| {},
-        );
-        if open_license {
-            self.open_about_link(
-                crate::launch::LICENSE_URL,
-                "Could not open the license page",
-            );
         }
         ui.add_space(4.0);
         let mut open_donate = false;
@@ -2005,6 +1971,12 @@ impl AitrackUi {
                 crate::launch::DONATE_URL,
                 "Could not open the donation page",
             );
+        }
+        // Linux: which display backend the window runs on (empty elsewhere)
+        let backend = crate::placement::backend_report();
+        if !backend.is_empty() {
+            ui.add_space(4.0);
+            setting_row(ui, pal, "Display", &backend, |_| {});
         }
     }
 

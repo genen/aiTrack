@@ -733,8 +733,6 @@ At the bottom: **Back**, a **Help** link (it opens this page), and the build lin
 
 - **aiTrack**, with a link to the project page (github.com/genen/aiTrack) that opens in your default browser. The
   build line is at the bottom of Settings: click it to copy.
-- **Developed by Sir Gene**, with the contact address aitrack@sirgene.com under it.
-- **License**: **GPL-3.0-or-later** is a link; clicking it opens the LICENSE file on GitHub.
 - **Support aiTrack**: **Donate** is a link to the PayPal donation page.
 
 If a link cannot be opened the status bar says so.
