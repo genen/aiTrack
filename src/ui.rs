@@ -3534,7 +3534,6 @@ fn tri_icon(p: &Painter, pal: &Palette, c: Pos2, color: Color32) {
     p.circle_filled(c + vec2(0.0, 2.7), 0.7, pal.panel);
 }
 
-/// A small underlined link; hovering shows `url`. Returns the response (check `clicked()`).
 /// PayPal's own QR code for the donation page (it encodes [`crate::launch::DONATE_URL`] plus
 /// `&source=qr`), read module by module from the image PayPal gives out: 33 x 33, `#` = dark.
 pub const DONATE_QR: [&str; 33] = [
@@ -3617,6 +3616,7 @@ fn donate_qr(ui: &mut Ui) -> Response {
         .on_hover_text(crate::launch::DONATE_URL)
 }
 
+/// A small underlined link; hovering shows `url`. Returns the response (check `clicked()`).
 fn link_label(ui: &mut Ui, pal: &Palette, text: &str, url: &str) -> Response {
     ui.add(
         egui::Label::new(

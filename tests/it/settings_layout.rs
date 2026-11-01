@@ -407,7 +407,8 @@ mod view {
     }
 
     #[test]
-    fn the_donate_qr_code_is_square_with_its_three_finder_patterns_and_sits_above_the_link() {
+    fn the_about_donate_qr_code_is_square_with_its_finder_and_timing_patterns_and_sits_above_the_link(
+    ) {
         let qr = aitrack::ui::DONATE_QR;
         assert!(qr.iter().all(|r| r.len() == qr.len()), "33 x 33");
         let finder = [
@@ -422,6 +423,12 @@ mod view {
                     "finder at ({dy}, {dx}) row {i}"
                 );
             }
+        }
+        // the timing patterns: row 6 and column 6 alternate dark / light between the finders
+        for i in 8..n - 8 {
+            let want = if i % 2 == 0 { b'#' } else { b'.' };
+            assert_eq!(qr[6].as_bytes()[i], want, "timing row 6, column {i}");
+            assert_eq!(qr[i].as_bytes()[6], want, "timing column 6, row {i}");
         }
         let mut w = Win::new(false, None);
         open_about(&mut w);
