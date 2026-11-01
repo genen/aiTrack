@@ -160,7 +160,7 @@ fn state_and_vendor_rows_from_a_live_app() {
         (claude.id, claude.name.as_str()),
         (VendorId::Claude, "Claude")
     );
-    let labels: Vec<&str> = claude.rows.iter().map(|r| r.label).collect();
+    let labels: Vec<&str> = claude.rows.iter().map(|r| r.label.as_str()).collect();
     assert_eq!(labels, ["Session", "Weekly"]);
     assert_eq!(
         (claude.rows[0].value.as_str(), claude.rows[1].value.as_str()),

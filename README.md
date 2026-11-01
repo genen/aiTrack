@@ -377,7 +377,9 @@ Since June 2026, Google's free and Google AI Pro / Ultra plans use Gemini for co
 the Antigravity desktop app and its command-line tool `agy`. Both show the same usage page, and so does the Gemini
 block: a **Weekly** bar for the **Gemini models** (Gemini Flash and Pro), and on plans that have one a **Session** bar
 for their 5-hour limit. Antigravity also offers Claude and GPT models with limits of their own, and paid plans may list
-more groups (such as Gemini 4 Argon); those are shown in the tooltips under **Other models**. Antigravity refills these
+more groups (such as Gemini 4 Argon). Each of those groups gets a bar of its own under **Session** and **Weekly**, with a
+short label (**Claude/GPT**, **Argon**) showing its weekly limit; its tooltip gives the group's full name, when it is
+full again, and the group's 5-hour limit when it has one. These extra bars have no pace estimate and no alerts. Antigravity refills these
 limits gradually, so a bar can go down as well as up between readings. There is no fixed reset: the tooltip says when
 the limit will be **full again** instead. An Antigravity Business (Google Workspace / Google Cloud) account has no weekly limits: its usage
 is billed in Google Cloud. When agy lists no limits and its own log says it signed in through Google Cloud, the block
@@ -1240,7 +1242,11 @@ When the `agy` CLI is found (`%LOCALAPPDATA%\agy\bin\agy.exe`, `~/.local/bin/agy
 **agy-usage**: `agy -p /usage --output-format json`, started with no window and no input in the home folder, at most
 60 seconds and 1 MiB of output. The reply's `command.data.groups[].buckets[]` carry `window`, `remaining_fraction`
 and `reset_time` (camelCase accepted too). The "Gemini Models" group fills the bars (a bucket shorter than a day is
-the Session row, a 6-8 day one the Weekly row); every other bucket is a per-model line (**Other models**).
+the Session row, a 6-8 day one the Weekly row). Every other bucket is stored in `limits` with its `kind`, `hours` and
+`full_at`: another group's 6-8 day bucket is a row of its own under the block's rows (labelled by
+`antigravity::row_label`, hover only, no history chart, pace or alerts), with that group's shorter bucket in the row's
+tooltip; anything else (a daily bucket, say) is a per-model line in the tooltips (**Other models**). Records saved
+before `hours` was stored still show their groups' weekly rows.
 `reset_time` is when the bucket is full again (it moves with every poll while usage refills), so it is stored as
 `raw.full_at` and never as the window's reset: windows are inferred from the readings, and alerts fire once per window.
 A reply that is not `SUCCESS` becomes the error ("not signed in" says to run agy once). A reply with no groups is

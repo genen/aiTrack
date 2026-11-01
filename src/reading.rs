@@ -28,6 +28,11 @@ pub struct ModelLimit {
     pub kind: String,
     pub pct: f64,
     pub resets_at: Option<String>,
+    /// Gemini (Antigravity): when this limit will be full again (`full_at`; absent in older
+    /// records). Its usage refills gradually, so it has no reset.
+    pub full_at: Option<String>,
+    /// Gemini: the bucket's window length in hours (`hours`; absent in older records).
+    pub hours: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -154,6 +159,14 @@ pub fn model_limits(limits: &Value) -> Vec<ModelLimit> {
                     .get("resets_at")
                     .and_then(Value::as_str)
                     .map(str::to_owned),
+                full_at: lim
+                    .get("full_at")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                hours: lim
+                    .get("hours")
+                    .and_then(Value::as_f64)
+                    .filter(|h| h.is_finite() && *h > 0.0),
             });
         }
     }

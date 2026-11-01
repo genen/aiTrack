@@ -181,7 +181,7 @@ fn tip(text: impl Into<String>, tone: Tone) -> TipLine {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
     pub kind: Kind,
-    pub label: &'static str,
+    pub label: String,
     /// `42%`, `58% left`, or `--` when not reported.
     pub value: String,
     pub cells: [Cell; SEGMENTS],
@@ -192,10 +192,13 @@ pub struct Row {
     pub dim: bool,
     /// Hover tooltip: reset time, pace, and (weekly) per-model limits and credits.
     pub tip: Vec<TipLine>,
-    /// An extra meter under the vendor's own rows (Grok Bot). It is not one of the vendor's
-    /// [`Kind`] windows: clicking it opens its own detail pane ([`build_bot_detail`]) charting its
-    /// own history, and the UI tracks it separately from `expanded`.
+    /// An extra meter under the vendor's own rows (Grok Bot, a Gemini model group). It is not one
+    /// of the vendor's [`Kind`] windows, and the UI tracks it separately from `expanded`: the Grok
+    /// Bot row opens its own detail pane ([`build_bot_detail`]) charting its own history.
     pub secondary: bool,
+    /// Gemini: the model group an extra row stands for (its full name, see [`group_rows`]). Such a
+    /// row has no history of its own, so it opens no detail pane (hover only).
+    pub group: Option<String>,
     /// Small mode's time column: the reset countdown, or the estimated time until the window runs
     /// out when the pace would empty it first. `None` when neither is known.
     pub time: Option<RowTime>,
@@ -630,7 +633,7 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
         };
         return Row {
             kind,
-            label,
+            label: label.into(),
             value: "--".into(),
             cells: [Cell::Off; SEGMENTS],
             level: Level::Normal,
@@ -645,6 +648,7 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
                 },
             )],
             secondary: false,
+            group: None,
             time: None,
         };
     };
@@ -664,7 +668,7 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
             .unwrap_or_default();
         return Row {
             kind,
-            label,
+            label: label.into(),
             value: "--".into(),
             cells: [Cell::Off; SEGMENTS],
             level: Level::Normal,
@@ -682,6 +686,7 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
                 Tone::Warn,
             )],
             secondary: false,
+            group: None,
             time: None,
         };
     }
@@ -703,7 +708,7 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
         }
         return Row {
             kind,
-            label,
+            label: label.into(),
             value: "--".into(),
             cells: [Cell::Off; SEGMENTS],
             level: Level::Normal,
@@ -711,6 +716,7 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
             dim: false,
             tip: tipv,
             secondary: false,
+            group: None,
             time: None,
         };
     }
@@ -769,6 +775,8 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
         .models
         .iter()
         .filter(|m| (m.kind == "session") == (kind == Kind::Session))
+        // a Gemini group with a row of its own is in that row's tooltip, not here
+        .filter(|m| !has_own_row(v, m))
         // a model whose own reset time has passed belongs to the window that just ended
         .filter(|m| {
             m.resets_at
@@ -845,7 +853,7 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
     }
     Row {
         kind,
-        label,
+        label: label.into(),
         value: pct_text_for(g.pct, remaining),
         cells: bar_cells(g.pct, g.projected_pct.filter(|_| !old), remaining),
         level: level(g.pct),
@@ -853,6 +861,7 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
         dim: old,
         tip: t,
         secondary: false,
+        group: None,
         time: row_time(g, old),
     }
 }
@@ -876,7 +885,7 @@ pub fn bot_row(
     if b.period_ended(now) {
         return Row {
             kind: Kind::Weekly,
-            label: BOT_LABEL,
+            label: BOT_LABEL.into(),
             value: "--".into(),
             cells: [Cell::Off; SEGMENTS],
             level: Level::Normal,
@@ -894,6 +903,7 @@ pub fn bot_row(
                 tip(from, Tone::Muted),
             ],
             secondary: true,
+            group: None,
             time: None,
         };
     }
@@ -934,7 +944,7 @@ pub fn bot_row(
     }
     Row {
         kind: Kind::Weekly,
-        label: BOT_LABEL,
+        label: BOT_LABEL.into(),
         value: pct_text_for(b.pct, remaining),
         cells: bar_cells(b.pct, pace.and_then(|g| g.projected_pct), remaining),
         level: level(b.pct),
@@ -942,8 +952,123 @@ pub fn bot_row(
         dim: stale,
         tip: t,
         secondary: true,
+        group: None,
         time: pace.and_then(|g| row_time(g, false)),
     }
+}
+
+/// Gemini: the extra model groups' weekly limits that get a row of their own, in the reply's order
+/// (the first of each name). Empty for every other vendor.
+fn row_limits(v: &Vendor) -> Vec<&crate::reading::ModelLimit> {
+    let mut out: Vec<&crate::reading::ModelLimit> = Vec::new();
+    if v.id != crate::vendor::VendorId::Antigravity {
+        return out;
+    }
+    for m in v
+        .models
+        .iter()
+        .filter(|m| crate::antigravity::is_row_limit(m))
+    {
+        if !out.iter().any(|o| o.name == m.name) {
+            out.push(m);
+        }
+    }
+    out
+}
+
+/// Is `m` shown in a Gemini group row (the row's weekly limit, or the same group's 5-hour one)?
+fn has_own_row(v: &Vendor, m: &crate::reading::ModelLimit) -> bool {
+    row_limits(v)
+        .iter()
+        .any(|r| r.name == m.name && (std::ptr::eq(*r, m) || m.kind == "session"))
+}
+
+/// Gemini: a row per extra model group's weekly limit, under the block's Session and Weekly rows
+/// (like the Grok Bot row). It follows the main rows' staleness rules (dashes without a current
+/// reading, dimmed with the caution line once old) and has no pace, projection or alerts: only
+/// the newest reading of each group is kept, not a history.
+pub fn group_rows(v: &Vendor, remaining: bool, now: DateTime<Utc>) -> Vec<Row> {
+    let old = is_old(v, now);
+    row_limits(v)
+        .into_iter()
+        .map(|m| {
+            let label = crate::antigravity::row_label(&m.name);
+            let group = Some(m.name.clone());
+            if !v.current {
+                let age = v
+                    .observed_at
+                    .map(|t| {
+                        format!(
+                            " (last reading {}: {}%)",
+                            ago((now - t).num_milliseconds() as f64 / 60000.0),
+                            js_round(m.pct) as i64
+                        )
+                    })
+                    .unwrap_or_default();
+                return Row {
+                    kind: Kind::Weekly,
+                    label,
+                    value: "--".into(),
+                    cells: [Cell::Off; SEGMENTS],
+                    level: Level::Normal,
+                    stale: true,
+                    dim: false,
+                    tip: vec![
+                        tip(m.name.clone(), Tone::Normal),
+                        tip(format!("Weekly limit: no current data{age}"), Tone::Warn),
+                    ],
+                    secondary: true,
+                    group,
+                    time: None,
+                };
+            }
+            let full = match m.full_at.as_deref().and_then(parse_ts).filter(|t| *t > now) {
+                Some(t) => {
+                    let h = (t - now).num_minutes() as f64 / 60.0;
+                    format!(
+                        "Weekly limit refills gradually: full again in {} ({})",
+                        left_long(h),
+                        clock_text(t.with_timezone(&Local), h >= 20.0)
+                    )
+                }
+                None => "Weekly limit refills gradually".into(),
+            };
+            let mut t = vec![tip(m.name.clone(), Tone::Normal), tip(full, Tone::Normal)];
+            for s in v
+                .models
+                .iter()
+                .filter(|s| s.name == m.name && s.kind == "session")
+            {
+                let h = s
+                    .hours
+                    .map(crate::reading::fmt0)
+                    .unwrap_or_else(|| "5".into());
+                t.push(tip(
+                    format!("{h}-hour limit {}", pct_text_for(s.pct, remaining)),
+                    Tone::Normal,
+                ));
+            }
+            if v.source.as_deref() == Some(crate::antigravity::SOURCE_USAGE) {
+                t.push(tip("Live from Antigravity (agy)", Tone::Muted));
+            }
+            if let Some(w) = stale_warning(v, now) {
+                t.push(tip(w, Tone::Caution));
+            }
+            Row {
+                kind: Kind::Weekly,
+                label,
+                value: pct_text_for(m.pct, remaining),
+                cells: bar_cells(m.pct, None, remaining),
+                level: level(m.pct),
+                stale: false,
+                dim: old,
+                tip: t,
+                secondary: true,
+                group,
+                time: None,
+            }
+        })
+        .collect()
 }
 
 /// The Grok Bot's pace from its saved readings, as for Grok: only for a fresh reading, and only when
@@ -1038,6 +1163,7 @@ pub fn build_home_for(s: &State, vendors: &[Vendor], now: DateTime<Utc>) -> Home
                         .as_ref()
                         .map(|b| bot_row(b, ven.bot_gauge.as_ref(), remaining, now)),
                 )
+                .chain(group_rows(ven, remaining, now))
                 .collect(),
             warn: enterprise_note(ven)
                 .or_else(|| header_warning(ven).filter(|_| ven.current && !is_old(ven, now))),

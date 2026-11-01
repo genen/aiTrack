@@ -276,31 +276,210 @@ fn tip_text(row: &aitrack::view::Row) -> String {
         .join("\n")
 }
 
+/// Records saved before limits carried their window length and full-again time still load: the
+/// other group's weekly limit is a row of its own, not a tooltip line.
 #[test]
-fn the_gemini_block_shows_a_weekly_bar_with_the_other_group_in_the_tooltip() {
+fn the_gemini_block_shows_a_weekly_bar_and_a_row_for_the_other_group() {
     let at = Utc::now();
     let v = gemini_view(&readings(at), at);
     assert_eq!(v.name, "Gemini");
     assert_eq!(
-        v.rows.iter().map(|r| r.kind).collect::<Vec<_>>(),
-        [Kind::Weekly]
+        v.rows
+            .iter()
+            .map(|r| (r.label.as_str(), r.value.as_str()))
+            .collect::<Vec<_>>(),
+        [("Weekly", "16%"), ("Claude/GPT", "5%")]
     );
-    assert_eq!(v.rows[0].value, "16%");
     let tip = tip_text(&v.rows[0]);
-    for want in [
-        "resets in",
-        "Live from Antigravity (agy)",
-        "Other models",
-        "Claude and GPT models  5%",
-    ] {
+    for want in ["Weekly refills gradually", "Live from Antigravity (agy)"] {
         assert!(tip.contains(want), "{want} missing from\n{tip}");
     }
+    assert!(!tip.contains("Other models"), "{tip}");
+    assert!(!tip.contains("Claude and GPT"), "{tip}");
+    let row = &v.rows[1];
+    assert!(row.secondary && !row.stale && !row.dim && row.time.is_none());
+    assert_eq!(row.group.as_deref(), Some("Claude and GPT models"));
+    let tip = tip_text(row);
+    assert!(
+        tip.starts_with("Claude and GPT models\nWeekly limit refills gradually\n"),
+        "no full-again time in an old record: {tip}"
+    );
+    assert!(tip.contains("Live from Antigravity (agy)"), "{tip}");
+    assert!(!tip.contains("hour limit"), "{tip}");
     let st = build_antigravity_state(&readings(at), status(), true, at);
     assert!(
         st.diagnostics[0].text.starts_with("Gemini: weekly"),
         "{}",
         st.diagnostics[0].text
     );
+}
+
+/// `paid_reply()` (or `real_reply()`) stored at `at` minus `age_min`, as the poller saves it.
+fn stored(body: &Value, at: DateTime<Utc>, age_min: i64) -> Reading {
+    let s = parse_usage(body, at - Duration::minutes(age_min)).unwrap();
+    let mut r = sample_record(&s, antigravity::SOURCE_USAGE, false);
+    r["vendor"] = json!("antigravity");
+    Reading::from_value(&r)
+}
+
+/// `paid_reply()` with its full-again times moved to `at` plus a few days (the fixture's are fixed).
+fn paid_reply_at(at: DateTime<Utc>) -> Value {
+    let mut b = paid_reply();
+    for g in b["command"]["data"]["groups"].as_array_mut().unwrap() {
+        for k in g["buckets"].as_array_mut().unwrap() {
+            k["reset_time"] = json!(t(at + Duration::days(6) + Duration::hours(23)));
+        }
+    }
+    b
+}
+
+#[test]
+fn a_paid_plan_gets_a_row_per_other_group_with_its_five_hour_limit_in_the_tooltip() {
+    let at = Utc::now();
+    let v = gemini_view(&[stored(&paid_reply_at(at), at, 1)], at);
+    // the extra groups in the reply's order, under the block's own rows
+    assert_eq!(
+        v.rows
+            .iter()
+            .map(|r| (r.label.as_str(), r.value.as_str(), r.secondary))
+            .collect::<Vec<_>>(),
+        [
+            ("Session", "0%", false),
+            ("Weekly", "0%", false),
+            ("Claude/GPT", "0%", true),
+            ("Argon", "4%", true),
+        ]
+    );
+    assert_eq!(v.rows[3].group.as_deref(), Some("Gemini 4 Argon"));
+    // 3.5% used lights the first cells like the Weekly row would
+    assert_eq!(
+        v.rows[3].cells,
+        aitrack::view::bar_cells(3.5, None, false),
+        "Argon's 3.5%"
+    );
+    let cg = tip_text(&v.rows[2]);
+    for want in [
+        "Claude and GPT models",
+        "Weekly limit refills gradually: full again in 6d 2",
+        "5-hour limit 0%",
+        "Live from Antigravity (agy)",
+    ] {
+        assert!(cg.contains(want), "{want} missing from\n{cg}");
+    }
+    let argon = tip_text(&v.rows[3]);
+    assert!(argon.starts_with("Gemini 4 Argon\nWeekly limit refills gradually: full again in"));
+    assert!(
+        !argon.contains("hour limit"),
+        "Argon has no 5-hour limit: {argon}"
+    );
+    // no group twice: neither in the Session nor the Weekly tooltip any more
+    for r in &v.rows[..2] {
+        let tip = tip_text(r);
+        assert!(!tip.contains("Other models"), "{tip}");
+        assert!(!tip.contains("Claude and GPT"), "{tip}");
+        assert!(!tip.contains("Argon"), "{tip}");
+    }
+    // the alerts and Stats only ever see the Gemini Models bars
+    let st = build_antigravity_state(&[stored(&paid_reply_at(at), at, 1)], status(), true, at);
+    let plan = st.plan.as_ref().unwrap();
+    assert_eq!(plan.weekly.as_ref().unwrap().pct, 0.0);
+    assert_eq!(plan.session.as_ref().unwrap().pct, 0.0);
+}
+
+#[test]
+fn a_free_reply_gets_one_extra_row() {
+    let at = Utc::now();
+    let v = gemini_view(&[stored(&real_reply(), at, 1)], at);
+    assert_eq!(
+        v.rows
+            .iter()
+            .map(|r| (r.label.as_str(), r.value.as_str()))
+            .collect::<Vec<_>>(),
+        [("Weekly", "17%"), ("Claude/GPT", "0%")]
+    );
+    assert!(!tip_text(&v.rows[0]).contains("Other models"));
+    let tip = tip_text(&v.rows[1]);
+    assert!(
+        tip.starts_with("Claude and GPT models\nWeekly limit refills gradually"),
+        "{tip}"
+    );
+    assert!(
+        !tip.contains("hour limit"),
+        "a free plan has no 5-hour limit: {tip}"
+    );
+}
+
+#[test]
+fn group_rows_follow_the_staleness_rules_of_the_main_rows() {
+    let at = Utc::now();
+    // over an hour old: dimmed, the same caution line, still no pace or time
+    let v = gemini_view(&[stored(&paid_reply_at(at), at, 90)], at);
+    for r in &v.rows[2..] {
+        assert!(r.dim && !r.stale && r.time.is_none(), "{r:?}");
+        assert!(
+            r.tip.iter().any(|l| l.tone == aitrack::view::Tone::Caution
+                && l.text
+                    .contains("Antigravity has not reported usage recently")),
+            "{r:?}"
+        );
+    }
+    assert!(v.age_chip.is_some());
+    // remaining mode reads like the Weekly row
+    let mut s = build_state(&[], Values::default(), status(), at);
+    s.claude_on = false;
+    s.settings.direction = aitrack::settings::Direction::Remaining;
+    s.antigravity = Some(build_antigravity_state(
+        &[stored(&paid_reply_at(at), at, 1)],
+        status(),
+        true,
+        at,
+    ));
+    let home = aitrack::view::build_home(&s, at);
+    let v = &home.vendors[0];
+    assert_eq!(v.rows[3].value, "97% left");
+    assert!(tip_text(&v.rows[2]).contains("5-hour limit 100% left"));
+}
+
+#[test]
+fn a_group_row_label_is_short() {
+    use antigravity::row_label;
+    assert_eq!(row_label("Gemini 4 Argon"), "Argon");
+    assert_eq!(row_label("gemini 2.5 Flash Lite"), "Flash Lite");
+    assert_eq!(row_label("Claude and GPT models"), "Claude/GPT");
+    assert_eq!(row_label("Claude and GPT Models"), "Claude/GPT");
+    // no version number: kept, cut to the label column
+    assert_eq!(row_label("Gemini Nano"), "Gemini Na\u{2026}");
+    assert_eq!(row_label("Imagen"), "Imagen");
+    assert_eq!(row_label("Open weights models"), "Open weig\u{2026}");
+    assert_eq!(row_label("Gemini 4 "), "Gemini 4");
+    assert_eq!(row_label("Mod\u{e8}les models"), "Mod\u{e8}les");
+    for n in [
+        "Some very long group name",
+        "\u{fc}\u{fc}\u{fc}\u{fc}\u{fc}\u{fc}\u{fc}\u{fc}\u{fc}\u{fc}\u{fc}\u{fc}",
+    ] {
+        assert!(
+            row_label(n).chars().count() <= antigravity::ROW_LABEL_MAX,
+            "{n}"
+        );
+    }
+}
+
+#[test]
+fn only_a_groups_weekly_limit_is_a_row() {
+    use aitrack::reading::model_limits;
+    let ls = model_limits(&json!([
+        {"name": "Gemini Models (daily)", "kind": "weekly", "percent": 5.0, "hours": 24.0},
+        {"name": "Gemini Models (daily)", "kind": "weekly", "percent": 5.0},
+        {"name": "Claude and GPT models", "kind": "session", "percent": 5.0, "hours": 5.0},
+        {"name": "Claude and GPT models", "kind": "weekly", "percent": 5.0, "hours": 168.0, "full_at": "2026-11-08T05:56:03Z"},
+        {"name": "Claude and GPT models", "kind": "weekly", "percent": 5.0},
+        {"name": "Monthly pool", "kind": "weekly", "percent": 5.0, "hours": 720.0},
+    ]));
+    let rows: Vec<bool> = ls.iter().map(antigravity::is_row_limit).collect();
+    assert_eq!(rows, [false, false, false, true, true, false]);
+    assert_eq!(ls[3].full_at.as_deref(), Some("2026-11-08T05:56:03Z"));
+    assert_eq!(ls[4].full_at, None);
+    assert_eq!(ls[4].hours, None);
 }
 
 #[test]
@@ -563,4 +742,168 @@ fn only_a_business_sign_in_says_likely_enterprise() {
         note(antigravity::EMPTY_REPLY).as_deref(),
         Some("Likely enterprise account")
     );
+}
+
+/// The Gemini group rows in the window: under the block's own rows in every layout, hover only.
+#[cfg(feature = "gui")]
+mod window {
+    use super::*;
+    use aitrack::app::App;
+    use aitrack::settings::Settings;
+    use aitrack::store::JsonlStore;
+    use aitrack::ui::AitrackUi;
+    use aitrack::vendor;
+    use eframe::egui::{
+        self, Context, CursorIcon, Event, PointerButton, Pos2, RawInput, Rect, ViewportCommand,
+        ViewportId,
+    };
+    use std::sync::Arc;
+
+    struct Win {
+        ctx: Context,
+        ui: AitrackUi,
+        width: f32,
+        height: f32,
+        t: f64,
+        _d: common::TempDir,
+    }
+
+    impl Win {
+        fn new(horizontal: bool, small: bool) -> Win {
+            let d = common::TempDir::new();
+            let settings = Arc::new(Settings::load(d.join("s.json")));
+            settings.set_horizontal(horizontal);
+            settings.set_small(small);
+            let app = Arc::new(App::with_poll_fn(
+                Box::new(JsonlStore::new(d.join("u.jsonl"))),
+                settings,
+                Box::new(|_| Ok(Value::Null)),
+            ));
+            let ctx = Context::default();
+            let mut ui = AitrackUi::new(&ctx, app);
+            ui.sandbox();
+            ui.mock = Some(vendor::demo_vendors(Utc::now()));
+            let mut w = Win {
+                ctx,
+                ui,
+                width: 310.0,
+                height: 900.0,
+                t: 0.0,
+                _d: d,
+            };
+            for _ in 0..6 {
+                w.frame(vec![]);
+            }
+            w
+        }
+
+        fn frame(&mut self, events: Vec<Event>) -> CursorIcon {
+            self.t += 0.2;
+            let raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    Pos2::ZERO,
+                    egui::vec2(self.width, self.height),
+                )),
+                time: Some(self.t),
+                events,
+                ..Default::default()
+            };
+            let ui = &mut self.ui;
+            let out = self.ctx.run(raw, |c| ui.draw(c));
+            if let Some(v) = out.viewport_output.get(&ViewportId::ROOT) {
+                for c in &v.commands {
+                    if let ViewportCommand::InnerSize(s) = c {
+                        // like the OS: the last request of the frame wins
+                        self.width = s.x;
+                        self.height = s.y;
+                    }
+                }
+            }
+            out.platform_output.cursor_icon
+        }
+
+        fn groups(&self) -> Vec<(String, Rect)> {
+            self.ui
+                .group_row_rects
+                .iter()
+                .filter(|(id, _, _)| *id == VendorId::Antigravity)
+                .map(|(_, g, r)| (g.clone(), *r))
+                .collect()
+        }
+
+        fn row(&self, id: VendorId, kind: Kind) -> Rect {
+            self.ui
+                .row_rects
+                .iter()
+                .find(|(v, k, _)| *v == id && *k == kind)
+                .map(|(_, _, r)| *r)
+                .unwrap()
+        }
+    }
+
+    fn names(g: &[(String, Rect)]) -> Vec<&str> {
+        g.iter().map(|(n, _)| n.as_str()).collect()
+    }
+
+    #[test]
+    fn the_group_rows_grow_the_gemini_block_and_open_nothing() {
+        let mut w = Win::new(false, false);
+        let g = w.groups();
+        assert_eq!(names(&g), ["Claude and GPT models", "Gemini 4 Argon"]);
+        let weekly = w.row(VendorId::Antigravity, Kind::Weekly);
+        let grok = w.row(VendorId::Grok, Kind::Weekly);
+        // stacked under Gemini's Weekly row, one row each, and the Grok block starts below them
+        assert!(g[0].1.top() >= weekly.bottom() - 0.5, "{g:?} {weekly:?}");
+        assert!(g[1].1.top() >= g[0].1.bottom() - 0.5, "{g:?}");
+        assert!(grok.top() > g[1].1.bottom() + 20.0, "{g:?} {grok:?}");
+        assert!(w.height >= grok.bottom(), "the window fits every row");
+        // hover only: no pointing hand, and a click opens no detail pane
+        let p = g[0].1.center();
+        w.frame(vec![Event::PointerMoved(p)]);
+        assert_ne!(w.frame(vec![]), CursorIcon::PointingHand);
+        let btn = |pressed| Event::PointerButton {
+            pos: p,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        w.frame(vec![btn(true)]);
+        w.frame(vec![btn(false)]);
+        w.frame(vec![]);
+        assert!(w.ui.expanded.is_none() && !w.ui.bot_expanded);
+        // Gemini's Weekly row still opens its pane, and the group rows do not look open with it
+        let p = w.row(VendorId::Antigravity, Kind::Weekly).center();
+        w.frame(vec![Event::PointerMoved(p)]);
+        let btn = |pressed| Event::PointerButton {
+            pos: p,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        w.frame(vec![btn(true)]);
+        w.frame(vec![btn(false)]);
+        w.frame(vec![]);
+        assert_eq!(w.ui.expanded, Some((VendorId::Antigravity, Kind::Weekly)));
+    }
+
+    #[test]
+    fn the_group_rows_show_side_by_side_and_in_the_small_window() {
+        for (horizontal, small) in [(true, false), (false, true), (true, true)] {
+            let w = Win::new(horizontal, small);
+            let g = w.groups();
+            assert_eq!(
+                names(&g),
+                ["Claude and GPT models", "Gemini 4 Argon"],
+                "horizontal {horizontal}, small {small}"
+            );
+            for (_, r) in &g {
+                assert!(
+                    r.bottom() <= w.height + 0.5 && r.right() <= w.width + 0.5,
+                    "horizontal {horizontal}, small {small}: {r:?} in {}x{}",
+                    w.width,
+                    w.height
+                );
+            }
+        }
+    }
 }

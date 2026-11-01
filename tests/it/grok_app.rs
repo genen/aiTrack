@@ -229,7 +229,11 @@ fn grok_only_from_the_cli_log_shows_a_weekly_only_block() {
     let rows = &home.vendors[0].rows;
     assert_eq!(rows.len(), 1, "Grok has no Session row");
     assert_eq!(
-        (rows[0].label, rows[0].value.as_str(), rows[0].stale),
+        (
+            rows[0].label.as_str(),
+            rows[0].value.as_str(),
+            rows[0].stale
+        ),
         ("Weekly", "7%", false)
     );
     assert_eq!(rows[0].cells.iter().filter(|c| **c == Cell::Lit).count(), 1); // 7%: only the segment centred at 2.5% is below it

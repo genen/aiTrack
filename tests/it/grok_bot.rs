@@ -582,7 +582,7 @@ fn the_bot_bar_sits_under_weekly_with_a_tooltip() {
     assert_eq!(vv.rows.len(), 2);
     assert_eq!(vv.rows[0].label, "Weekly");
     let b = &vv.rows[1];
-    assert_eq!((b.label, b.value.as_str()), ("Grok Bot", "59%"));
+    assert_eq!((b.label.as_str(), b.value.as_str()), ("Grok Bot", "59%"));
     assert!(b.secondary && !b.stale && !b.dim);
     assert_eq!(b.cells.iter().filter(|c| **c == Cell::Lit).count(), 12);
     let t = lines(b);
@@ -729,7 +729,10 @@ fn the_app_reads_the_cache_after_a_grok_poll_and_the_view_gets_the_row() {
             let home = view::build_home(&st, Utc::now());
             let rows = &home.vendors[0].rows;
             assert_eq!(rows.len(), 2);
-            assert_eq!((rows[0].label, rows[1].label), ("Weekly", "Grok Bot"));
+            assert_eq!(
+                (rows[0].label.as_str(), rows[1].label.as_str()),
+                ("Weekly", "Grok Bot")
+            );
             // the billing log names no tier, so the Grok Bot app's plan label fills in
             assert!(
                 lines(&rows[0]).contains(&"Plan: SuperGrok"),

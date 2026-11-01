@@ -15,9 +15,10 @@
 //! author's PC, 2026-11-01). aiTrack never reads Antigravity's login (it stays in the system's
 //! credential store) and makes no network call of its own for Gemini.
 //!
-//! The "Gemini Models" group fills the block's bars (its weekly bucket, and a shorter one as the
-//! Session row should Antigravity add one); every other group is a per-model line in the
-//! tooltips, like Claude's per-model limits. Readings are stored in `usage-antigravity.jsonl`
+//! The "Gemini Models" group fills the block's bars (its weekly bucket, and its 5-hour one as the
+//! Session row on a paid plan); every other group's weekly limit is a row of its own under them
+//! ([`row_label`], [`is_row_limit`]), with that group's 5-hour limit in the row's tooltip. Other
+//! buckets (a daily one, say) are per-model lines in the tooltips, like Claude's per-model limits. Readings are stored in `usage-antigravity.jsonl`
 //! (record field `vendor: "antigravity"`).
 
 use crate::live::CollectError;
@@ -275,6 +276,65 @@ fn limits_of(data: &Value) -> Vec<Limit> {
     out
 }
 
+/// The row label of an extra model group: "Gemini 4 Argon" -> "Argon", "Claude and GPT models"
+/// -> "Claude/GPT"; anything else at most [`ROW_LABEL_MAX`] characters (cut with an ellipsis).
+pub fn row_label(group: &str) -> String {
+    let mut s = group.trim();
+    // "Gemini <version> <name>": the name alone ("Gemini 4 Argon", "Gemini 2.5 Flash")
+    if let Some(rest) = s
+        .get(..7)
+        .filter(|h| h.eq_ignore_ascii_case("gemini "))
+        .map(|_| &s[7..])
+    {
+        if let Some((ver, name)) = rest.split_once(' ') {
+            let name = name.trim();
+            if ver.starts_with(|c: char| c.is_ascii_digit())
+                && ver.chars().all(|c| c.is_ascii_digit() || c == '.')
+                && !name.is_empty()
+            {
+                s = name;
+            }
+        }
+    }
+    // "X and Y models" -> "X/Y"
+    if let Some(head) = s
+        .len()
+        .checked_sub(7)
+        .filter(|i| {
+            *i > 0
+                && s.get(*i..)
+                    .is_some_and(|t| t.eq_ignore_ascii_case(" models"))
+        })
+        .map(|i| &s[..i])
+    {
+        s = head.trim_end();
+    }
+    let joined = s.replace(" and ", "/");
+    let n = joined.chars().count();
+    if n <= ROW_LABEL_MAX {
+        joined
+    } else {
+        let mut cut: String = joined.chars().take(ROW_LABEL_MAX - 1).collect();
+        cut.truncate(cut.trim_end().len());
+        cut.push('\u{2026}');
+        cut
+    }
+}
+
+/// The longest extra-row label in characters ("Claude/GPT" fits the label column).
+pub const ROW_LABEL_MAX: usize = 10;
+
+/// Does this stored extra limit get a row of its own (a group's weekly limit)? Records saved
+/// before the window length was stored: a weekly limit whose name has no window note
+/// ("Gemini Models (daily)").
+pub fn is_row_limit(m: &crate::reading::ModelLimit) -> bool {
+    m.kind == "weekly"
+        && match m.hours {
+            Some(h) => WEEKLY_RANGE_H.contains(&h),
+            None => !m.name.trim_end().ends_with(')'),
+        }
+}
+
 fn is_main(group: &str) -> bool {
     group.eq_ignore_ascii_case(MAIN_GROUP) || group.to_ascii_lowercase().starts_with("gemini")
 }
@@ -417,12 +477,17 @@ pub fn parse_usage(body: &Value, now: DateTime<Utc>) -> Result<Sample, String> {
                 } else {
                     l.group.clone()
                 };
-                json!({
+                let mut o = json!({
                     "name": name,
                     "kind": if l.hours < WEEKLY_FROM_H { "session" } else { "weekly" },
                     "percent": l.pct,
+                    "hours": l.hours,
                     // (no reset: see bucket_of)
-                })
+                });
+                if let Some(t) = l.resets_at {
+                    o["full_at"] = json!(iso(t));
+                }
+                o
             })
             .collect();
         raw.insert("limits".into(), Value::Array(arr));

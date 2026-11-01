@@ -197,12 +197,20 @@ fn run_frames(
     texs: &mut HashMap<TextureId, Tex>,
     h: f32,
     hover: Option<(VendorId, Kind)>,
+    hover_group: Option<&str>,
 ) -> Vec<egui::ClippedPrimitive> {
     let mut last = None;
     for i in 0..6 {
         let mut events = vec![];
         if let Some((v, k)) = hover.filter(|_| i >= 1) {
             if let Some((_, _, r)) = ui.row_rects.iter().find(|(a, b, _)| *a == v && *b == k) {
+                events.push(egui::Event::PointerMoved(
+                    r.center() + egui::vec2(20.0, 0.0),
+                ));
+            }
+        }
+        if let Some(g) = hover_group.filter(|_| i >= 1) {
+            if let Some((_, _, r)) = ui.group_row_rects.iter().find(|(_, n, _)| n == g) {
                 events.push(egui::Event::PointerMoved(
                     r.center() + egui::vec2(20.0, 0.0),
                 ));
@@ -353,6 +361,8 @@ struct Scene {
     setup: Setup,
     light: bool,
     hover: Option<(VendorId, Kind)>,
+    /// Hover the Gemini model-group row of this name instead (its tooltip).
+    hover_group: Option<&'static str>,
     /// Window width in points (`0` = the standard 310).
     width: f32,
 }
@@ -364,6 +374,7 @@ fn scene(name: &'static str, app: Arc<App>, setup: Setup) -> Scene {
         setup,
         light: false,
         hover: None,
+        hover_group: None,
         width: 0.0,
     }
 }
@@ -1000,6 +1011,23 @@ fn main() {
     );
     sc.light = true;
     scenes.push(sc);
+    // Gemini on a paid plan: a row per other model group under its own rows, with its tooltip,
+    // and the same rows in the small window
+    let mut t = scene(
+        "gemini_group_tooltip",
+        all4(),
+        Box::new(move |_, ui, _| mock(ui)),
+    );
+    t.hover_group = Some("Claude and GPT models");
+    scenes.push(t);
+    scenes.push(scene(
+        "small_4vendors",
+        all4(),
+        Box::new(move |_, ui, app| {
+            mock(ui);
+            app.settings.set_small(true);
+        }),
+    ));
     let mut t = scene(
         "grok_tooltip",
         make_app_grok(&out, "gk3", cache_rec(42.0, 8.0, 200), grok_history()),
@@ -1117,9 +1145,9 @@ fn main() {
         WIDTH_BITS.store(sc.width.to_bits(), std::sync::atomic::Ordering::Relaxed);
         let mut texs = HashMap::new();
         // pass 1 on a tall screen measures the content height the window would auto-size to
-        run_frames(&ctx, &mut ui, &mut texs, 900.0, None);
+        run_frames(&ctx, &mut ui, &mut texs, 900.0, None, None);
         let h = ui.desired_height().ceil();
-        let prims = run_frames(&ctx, &mut ui, &mut texs, h, sc.hover);
+        let prims = run_frames(&ctx, &mut ui, &mut texs, h, sc.hover, sc.hover_group);
         if sc.name.starts_with("badges_") {
             for (v, r) in &ui.badge_rects {
                 println!("badgerect {} {} {} {}", sc.name, v.name(), r.min.x, r.min.y);

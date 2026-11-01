@@ -111,6 +111,9 @@ pub struct AitrackUi {
     pub bot_expanded: bool,
     /// Where the Grok Bot row was drawn last frame (tests and the render tool click it).
     pub bot_row_rect: Option<Rect>,
+    /// Where each Gemini model-group row was drawn last frame, with the group's full name (tests
+    /// and the render tool hover them).
+    pub group_row_rects: Vec<(VendorId, String, Rect)>,
     /// Draw these vendors instead of the real data (screenshots of the multi-vendor look).
     pub mock: Option<Vec<Vendor>>,
     /// Screen rect of each vendor row from the last frame (used by `examples/render` to hover).
@@ -237,6 +240,7 @@ impl AitrackUi {
             expanded: None,
             bot_expanded: false,
             bot_row_rect: None,
+            group_row_rects: vec![],
             mock: None,
             row_rects: vec![],
             badge_rects: vec![],
@@ -578,6 +582,8 @@ impl AitrackUi {
                 content_h = ui.cursor().top() - top;
             });
         let h = (content_h + 2.0 * SMALL_BORDER).ceil();
+        // (the render tool sizes its small-window scenes by it)
+        self.desired_height = h;
         if self.small_h_sent.is_none_or(|s| (s - h).abs() > 1.0) {
             self.small_h_sent = Some(h);
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(
@@ -962,7 +968,7 @@ impl AitrackUi {
             && !home
                 .vendors
                 .iter()
-                .any(|v| v.rows.iter().any(|r| r.secondary))
+                .any(|v| v.rows.iter().any(|r| r.secondary && r.group.is_none()))
         {
             self.bot_expanded = false;
         }
@@ -992,6 +998,7 @@ impl AitrackUi {
         let mut stack: Option<Rect> = None;
         self.row_rects.clear();
         self.bot_row_rect = None;
+        self.group_row_rects.clear();
         self.badge_rects.clear();
         self.refresh_rect = None;
         self.strip_n = n;
@@ -1151,25 +1158,30 @@ impl AitrackUi {
                     };
                     launcher(ui.ctx(), &self.launch_msg);
                 }
-                // a longer label ("Grok Bot") pushes every bar of the block right, so they line up
-                let strip_x = if vv.rows.iter().any(|r| r.label.len() > 7) {
-                    60.0
-                } else {
-                    50.0
-                };
+                // a longer label ("Grok Bot", "Claude/GPT") pushes every bar of the block right,
+                // so they line up
+                let strip_x = strip_x_for(ui, &vv.rows);
                 for row in &vv.rows {
                     if small {
                         let resp = small_row_widget(ui, pal, row, vv.id, value_w, strip_x);
+                        if let Some(g) = &row.group {
+                            self.group_row_rects.push((vv.id, g.clone(), resp.rect));
+                        }
                         resp.on_hover_ui(|ui| tooltip(ui, pal, row));
                         continue;
                     }
-                    let open = if row.secondary {
+                    let open = if row.group.is_some() {
+                        false
+                    } else if row.secondary {
                         self.bot_expanded
                     } else {
                         self.expanded == Some((vv.id, row.kind))
                     };
                     let resp = row_widget(ui, pal, row, vv.id, open, value_w, strip_x);
-                    if row.secondary {
+                    if let Some(g) = &row.group {
+                        // a Gemini group row: hover only, no detail pane
+                        self.group_row_rects.push((vv.id, g.clone(), resp.rect));
+                    } else if row.secondary {
                         self.bot_row_rect = Some(resp.rect);
                         if resp.clicked() {
                             self.bot_expanded = !open;
@@ -3438,6 +3450,26 @@ fn info_icon(p: &Painter, color: Color32, c: Pos2) {
 }
 
 /// "Session" / "Weekly": muted label, LED strip, percentage. Click toggles the detail pane.
+/// Where a block's bars start: 50 points in from the label, further when a label is longer
+/// than the usual "Session" / "Weekly" (at least 60, as for "Grok Bot", and room for the
+/// widest label, "Claude/GPT").
+fn strip_x_for(ui: &Ui, rows: &[view::Row]) -> f32 {
+    if rows.iter().all(|r| r.label.chars().count() <= 7) {
+        return 50.0;
+    }
+    let widest = rows
+        .iter()
+        .map(|r| {
+            ui.fonts(|f| {
+                f.layout_no_wrap(r.label.clone(), prop(11.5), Color32::WHITE)
+                    .size()
+                    .x
+            })
+        })
+        .fold(0.0_f32, f32::max);
+    (widest + 2.0 + 8.0).ceil().max(60.0)
+}
+
 fn row_widget(
     ui: &mut Ui,
     pal: &Palette,
@@ -3447,10 +3479,21 @@ fn row_widget(
     value_w: f32,
     strip_x: f32,
 ) -> Response {
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
-    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    // a Gemini group row opens nothing: hover only, no pointing hand
+    let clickable = row.group.is_none();
+    let sense = if clickable {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), sense);
+    let resp = if clickable {
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        resp
+    };
     let p = ui.painter();
-    if resp.hovered() || open {
+    if (clickable && resp.hovered()) || open {
         p.rect_filled(
             rect.expand2(vec2(4.0, 0.0)),
             4.0,
@@ -3462,7 +3505,7 @@ fn row_widget(
     p.text(
         Pos2::new(rect.left() + 2.0, cy),
         Align2::LEFT_CENTER,
-        row.label,
+        &row.label,
         prop(11.5),
         pal.muted,
     );
@@ -3515,7 +3558,7 @@ fn small_row_widget(
     p.text(
         Pos2::new(rect.left() + 2.0, cy),
         Align2::LEFT_CENTER,
-        row.label,
+        &row.label,
         prop(11.5),
         pal.muted,
     );

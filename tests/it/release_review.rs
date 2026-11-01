@@ -542,12 +542,16 @@ fn by_model_limits_from_the_previous_weekly_window_or_a_past_model_reset_are_not
             kind: "weekly_scoped".into(),
             pct: 43.0,
             resets_at: Some((now() - Duration::minutes(1)).to_rfc3339()),
+            full_at: None,
+            hours: None,
         },
         ModelLimit {
             name: "Opus".into(),
             kind: "weekly_scoped".into(),
             pct: 12.0,
             resets_at: Some((now() + Duration::days(2)).to_rfc3339()),
+            full_at: None,
+            hours: None,
         },
     ];
     let vs = aitrack::vendor::from_state_at(&st, now());

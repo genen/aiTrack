@@ -287,16 +287,31 @@ pub fn demo_vendors(now: DateTime<Utc>) -> Vec<Vendor> {
         }
         v.weekly = Some(demo_gauge(now, Kind::Weekly, w, wh, wr));
         if id == VendorId::Antigravity {
-            v.weekly_only = true;
-            v.session = None;
+            // a paid plan: Gemini's 5-hour and weekly bars, and a row per other model group.
+            // Antigravity refills gradually, so no reset time, only when it is full again.
+            for g in [&mut v.session, &mut v.weekly].into_iter().flatten() {
+                g.resets_at = None;
+                g.hours_left = None;
+                g.hours_to_limit = None;
+                g.projected_pct = None;
+            }
+            v.full_at = Some(now + Duration::hours(40));
             v.source = Some("agy-usage".into());
             v.observed_at = Some(now);
-            v.models = vec![ModelLimit {
-                name: "Claude and GPT models".into(),
-                kind: "weekly".into(),
-                pct: 12.0,
-                resets_at: v.weekly.as_ref().and_then(|g| g.resets_at.clone()),
-            }];
+            let full = Some(iso(now + Duration::hours(52)));
+            let limit = |name: &str, kind: &str, pct: f64, hours: f64| ModelLimit {
+                name: name.into(),
+                kind: kind.into(),
+                pct,
+                resets_at: None,
+                full_at: full.clone(),
+                hours: Some(hours),
+            };
+            v.models = vec![
+                limit("Claude and GPT models", "weekly", 12.0, 168.0),
+                limit("Claude and GPT models", "session", 4.0, 5.0),
+                limit("Gemini 4 Argon", "weekly", 35.0, 168.0),
+            ];
         }
         if id == VendorId::Codex {
             v.tier = Some("Plus".into());
@@ -316,12 +331,16 @@ pub fn demo_vendors(now: DateTime<Utc>) -> Vec<Vendor> {
                     kind: "weekly_scoped".into(),
                     pct: 43.0,
                     resets_at: v.weekly.as_ref().and_then(|g| g.resets_at.clone()),
+                    full_at: None,
+                    hours: None,
                 },
                 ModelLimit {
                     name: "Opus".into(),
                     kind: "weekly_scoped".into(),
                     pct: 12.0,
                     resets_at: None,
+                    full_at: None,
+                    hours: None,
                 },
             ];
             v.credits = Some(Credits {
