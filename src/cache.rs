@@ -154,6 +154,10 @@ fn mtime(path: &Path, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
 
 // ---------------------------------------------------------------- byte helpers
 
+/// How much later than its Date header an entry's creation time may be and still count as when
+/// the reading was taken.
+const MAX_CREATED_AFTER_DATE: chrono::Duration = chrono::Duration::minutes(30);
+
 /// Chromium's `base::Time` internal value: microseconds since 1601-01-01 UTC. Anything outside a
 /// believable range (never set, garbage) is `None`.
 fn filetime_micros(v: i64, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
@@ -413,10 +417,12 @@ fn finish(
         Ok(h) if h.truncated => None, // an in-flight or incomplete write
         Ok(h) if !h.ok_json => None,  // an error page or something else that is not usage JSON
         Ok(h) => {
-            // a creation time later than the Date header is a revalidated entry, but it was
-            // already capped to a few minutes after `now`, so a wrong clock cannot win for long
+            // a creation time a little later than the Date header is a write after the response
+            // (revalidation updates Date itself); one far later means the clock was ahead when the
+            // entry was stored, and would make an old reading look fresh once `now` catches up
             let observed = match (h.date, found.created) {
-                (Some(d), Some(c)) => Some(d.max(c)),
+                (Some(d), Some(c)) if c - d <= MAX_CREATED_AFTER_DATE => Some(d.max(c)),
+                (Some(d), Some(_)) => Some(d),
                 (d, c) => d.or(c).or(found.file_time),
             };
             let parsed = body.and_then(|raw| decode_json(&raw, h.encoding.as_deref()));

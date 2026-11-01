@@ -495,7 +495,16 @@ impl Settings {
         // Only a missing file means "fresh defaults". Any other read error, text that is not
         // UTF-8 (for example a UTF-16 file saved by PowerShell) or JSON that is not an object is
         // an unreadable file: it is kept as `.bak` before anything is written over it.
-        let (parsed, unreadable) = match std::fs::read(&path) {
+        // A read error other than "missing" may be a short lock (antivirus scanning at start-up):
+        // try once more before treating the file as unreadable.
+        let read = match std::fs::read(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                std::fs::read(&path)
+            }
+            r => r,
+        };
+        let (parsed, unreadable) = match read {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (None, false),
             Err(_) => (None, true),
             Ok(bytes) => {

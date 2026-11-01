@@ -414,6 +414,8 @@ impl BotTracker {
             .read_each(&mut |v| out.push(crate::reading::Reading::from_value(&v)));
         *self.cached.lock().unwrap_or_else(|e| e.into_inner()) = std::sync::Arc::new(out);
         self.built.store(true, Ordering::SeqCst);
+        // a chart cached before the first build (empty list) must see the history now
+        self.version.fetch_add(1, Ordering::SeqCst);
     }
 
     /// After an append: the list plus the new record, swapped in without reading the file.

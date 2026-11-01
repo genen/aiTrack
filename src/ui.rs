@@ -1834,10 +1834,10 @@ impl AitrackUi {
                             .wrap(),
                         );
                         ui.add_space(2.0);
-                        for (file, size) in self.app.data_files() {
+                        for (name, size) in self.app.data_files() {
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    RichText::new(file).font(mono(11.5)).color(pal.foreground),
+                                    RichText::new(name).font(mono(11.5)).color(pal.foreground),
                                 );
                                 ui.label(
                                     RichText::new(
