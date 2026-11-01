@@ -803,6 +803,9 @@ readings (also when the window stays open for weeks), and **Settings > Data > Pr
 it was before each cleanup is kept as `.bak` until the next one, and a line that cannot be read is moved to `.corrupt`,
 never dropped.
 
+> **Note:** the 90-day cleanup relies on a correct system clock (date and time). If the clock is wrong, for example
+> set months ahead, the cleanup may delete past usage history that is less than 90 days old.
+
 What a reading holds: the percentages, reset times, spend and per-model limits from the Claude usage answer, plus
 the whole answer from the Claude usage service. It does **not** hold your sign-in token, your organization id,
 your email or anything you wrote. The Grok record holds only the percentage, the reset time and your plan name. The Codex record holds the
