@@ -78,7 +78,6 @@ jobs:
           channel=stable
           if printf '%s\n' "$version" | grep -Eq '(^|[.-])beta($|[.-])'; then channel=beta; fi
           {
-            echo "<!-- aitrack-notes:macos:begin -->"
             echo "version=$version"
             echo "tag=$tag"
             echo "publish=$publish"
@@ -235,6 +234,7 @@ jobs:
             *) trust="These builds are ad-hoc signed, not notarized, so macOS asks you to approve the app once: open the dmg, drag aiTrack to Applications, then right-click it and choose Open (or System Settings > Privacy & Security > Open Anyway)." ;;
           esac
           {
+            echo "<!-- aitrack-notes:macos:begin -->"
             echo "macOS 12 or newer, Apple Silicon (M1 and later) only."
             echo "$trust"
             echo

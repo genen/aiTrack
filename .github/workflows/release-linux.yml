@@ -75,7 +75,6 @@ jobs:
           channel=stable
           if printf '%s\n' "$version" | grep -Eq '(^|[.-])beta($|[.-])'; then channel=beta; fi
           {
-            echo "<!-- aitrack-notes:linux:begin -->"
             echo "version=$version"
             echo "tag=$tag"
             echo "publish=$publish"
@@ -184,6 +183,7 @@ jobs:
           test -s "$deb" || { echo "::error::$deb was not downloaded from the build."; exit 1; }
 
           {
+            echo "<!-- aitrack-notes:linux:begin -->"
             echo "Linux: Ubuntu 22.04 and newer, x86_64 (.deb). Install with: \`sudo apt install ./$asset\`. GNOME on Wayland runs through XWayland by default."
             echo
             echo "Linux SHA256:"

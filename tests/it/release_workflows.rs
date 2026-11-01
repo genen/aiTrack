@@ -175,3 +175,37 @@ fn a_section_from_before_the_markers_is_cut_from_its_prose_to_the_closing_fence(
         assert!(out.starts_with("aiTrack 0.5\n"), "{wf}");
     }
 }
+
+#[test]
+fn each_workflow_writes_both_notes_markers_into_its_own_notes_section() {
+    for (wf, key, notes) in [
+        ("release-linux.yml", "linux", "linux-notes.md"),
+        ("release-macos.yml", "macos", "mac-notes.md"),
+        ("release-msi.yml", "windows", "win-notes.md"),
+    ] {
+        let text = read(&format!(".github/workflows/{wf}"));
+        let begin = format!("echo \"<!-- aitrack-notes:{key}:begin -->\"");
+        let end = format!("echo \"<!-- aitrack-notes:{key}:end -->\"");
+        assert_eq!(text.matches(&begin).count(), 1, "{wf}: one begin marker");
+        assert_eq!(text.matches(&end).count(), 1, "{wf}: one end marker");
+        let b = text.find(&begin).unwrap();
+        let e = text.find(&end).unwrap();
+        assert!(b < e, "{wf}: begin before end");
+        let section = &text[b..e];
+        // Both markers belong to the block that writes the notes, never to step outputs.
+        assert!(
+            !section.contains("GITHUB_OUTPUT"),
+            "{wf}: begin marker outside the notes block"
+        );
+        assert!(
+            !section.contains("\n      - name:"),
+            "{wf}: markers span more than one step"
+        );
+        let after = &text[e..];
+        let close = after.find("} >").expect("notes block closes");
+        assert!(
+            after[close..].starts_with(&format!("}} > {notes}")),
+            "{wf}: end marker writes to {notes}"
+        );
+    }
+}
