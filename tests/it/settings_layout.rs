@@ -378,7 +378,7 @@ mod view {
             c.lock().unwrap().push(u.to_owned());
             Ok(())
         });
-        for key in ["repo", "donate"] {
+        for key in ["repo", "donate_qr", "donate"] {
             let p = about_center(&w, key);
             w.click(p);
         }
@@ -386,6 +386,7 @@ mod view {
             *calls.lock().unwrap(),
             [
                 "https://github.com/genen/aiTrack",
+                "https://www.paypal.com/donate/?hosted_button_id=YR6YMJ953Y9CE",
                 "https://www.paypal.com/donate/?hosted_button_id=YR6YMJ953Y9CE"
             ]
         );
@@ -406,14 +407,46 @@ mod view {
     }
 
     #[test]
-    fn the_about_section_has_only_the_repo_and_donate_links_and_nothing_to_copy() {
+    fn the_donate_qr_code_is_square_with_its_three_finder_patterns_and_sits_above_the_link() {
+        let qr = aitrack::ui::DONATE_QR;
+        assert!(qr.iter().all(|r| r.len() == qr.len()), "33 x 33");
+        let finder = [
+            "#######", "#.....#", "#.###.#", "#.###.#", "#.###.#", "#.....#", "#######",
+        ];
+        let n = qr.len();
+        for (dy, dx) in [(0, 0), (0, n - 7), (n - 7, 0)] {
+            for (i, want) in finder.iter().enumerate() {
+                assert_eq!(
+                    &qr[dy + i][dx..dx + 7],
+                    *want,
+                    "finder at ({dy}, {dx}) row {i}"
+                );
+            }
+        }
+        let mut w = Win::new(false, None);
+        open_about(&mut w);
+        let rect = |k: &str| w.ui.about_rects.iter().find(|r| r.0 == k).unwrap().1;
+        let (code, link) = (rect("donate_qr"), rect("donate"));
+        assert!(
+            code.bottom() <= link.top(),
+            "the word Donate is under the code"
+        );
+        assert!(
+            (code.center().x - link.center().x).abs() < 1.0,
+            "both centered"
+        );
+        assert!(code.width() >= 100.0, "big enough to scan: {code:?}");
+    }
+
+    #[test]
+    fn the_about_section_has_only_the_repo_link_and_the_donate_qr_and_link_and_nothing_to_copy() {
         let mut w = Win::new(false, None);
         open_about(&mut w);
         let keys: Vec<&str> = w.ui.about_rects.iter().map(|r| r.0.as_str()).collect();
         assert_eq!(
             keys,
-            ["repo", "donate"],
-            "two links: no buttons, Email, License, Copy or build-line controls"
+            ["repo", "donate_qr", "donate"],
+            "repo link, donate QR code and link: no buttons, Email, License, Copy or build-line controls"
         );
         let names: Vec<&str> = w.ui.setting_rows.iter().map(|r| r.0.as_str()).collect();
         for gone in ["Contact", "Developed by Sir Gene", "License"] {

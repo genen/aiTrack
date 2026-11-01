@@ -3,6 +3,12 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.16] - 2026-11-01
+
+### Added
+- Settings > About shows PayPal's QR code for the donation page, to scan with a phone, with the Donate link under it.
+  Clicking the code also opens the page. The code is drawn black on white in both themes.
+
 ## [0.5.15] - 2026-11-01
 
 ### Added

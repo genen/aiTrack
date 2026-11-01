@@ -646,9 +646,12 @@ fn main() {
         scenes.push(sc);
     }
     // only the Notifications section open (the long "Persistent warnings" description)
-    for (name, is_light) in [
-        ("settings_notifications", false),
-        ("settings_notifications_light", true),
+    for (name, section, is_light) in [
+        ("settings_notifications", "notifications", false),
+        ("settings_notifications_light", "notifications", true),
+        // only About open (the donation QR code and link)
+        ("settings_about", "about", false),
+        ("settings_about_light", "about", true),
     ] {
         let app = make_app(&out, name, synth(now, 42.0, 58.0, true), None);
         let mut sc = scene(
@@ -656,7 +659,7 @@ fn main() {
             app,
             Box::new(move |c, ui, app| {
                 for sec in aitrack::settings::Sections::NAMES {
-                    app.settings.set_section(sec, sec == "notifications");
+                    app.settings.set_section(sec, sec == section);
                 }
                 ui.screen = Screen::Settings;
                 if is_light {

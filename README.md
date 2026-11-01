@@ -733,7 +733,8 @@ At the bottom: **Back**, a **Help** link (it opens this page), and the build lin
 
 - **aiTrack**, with a link to the project page (github.com/genen/aiTrack) that opens in your default browser. The
   build line is at the bottom of Settings: click it to copy.
-- **Support aiTrack**: **Donate** is a link to the PayPal donation page.
+- **Support aiTrack**: PayPal's QR code for the donation page (scan it with your phone) with a **Donate** link under
+  it. Clicking the code or the link opens the donation page in your browser.
 
 If a link cannot be opened the status bar says so.
 
