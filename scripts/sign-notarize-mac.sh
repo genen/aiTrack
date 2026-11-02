@@ -126,6 +126,20 @@ notarize() {
   return 1
 }
 
+# `stapler validate` looks the ticket up on Apple's CloudKit service; that lookup sometimes drops the
+# connection on CI runners ("The network connection was lost", error 68) right after a staple that
+# worked. Try it up to 3 times, 15 s apart; a real validation failure still fails the build.
+validate_staple() {
+  local target="$1" attempt
+  for attempt in 1 2 3; do
+    if xcrun stapler validate "$target"; then
+      return 0
+    fi
+    [ "$attempt" -lt 3 ] && { echo "stapler validate failed (attempt $attempt of 3), retrying in 15 s."; sleep 15; }
+  done
+  return 1
+}
+
 sign_app() {
   local app="$1" mode zipf
   [ -d "$app" ] || { echo "$app not found." >&2; return 1; }
@@ -141,7 +155,7 @@ sign_app() {
   ditto -c -k --keepParent "$app" "$zipf"
   notarize "$zipf"
   xcrun stapler staple "$app"
-  xcrun stapler validate "$app"
+  validate_staple "$app"
   spctl -a -t exec -vv "$app"
   echo "App signed, notarized and stapled."
 }
@@ -159,7 +173,7 @@ sign_dmg() {
   fi
   notarize "$dmg"
   xcrun stapler staple "$dmg"
-  xcrun stapler validate "$dmg"
+  validate_staple "$dmg"
   spctl -a -t open --context context:primary-signature -vv "$dmg"
   echo "dmg signed, notarized and stapled."
 }
