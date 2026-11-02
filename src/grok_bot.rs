@@ -190,6 +190,22 @@ pub fn parse_plan(bytes: &[u8]) -> Option<String> {
     (!label.is_empty() && label.chars().count() <= 32).then(|| label.to_owned())
 }
 
+/// The app names a unified plan (`value.reading.usage.unifiedPlanName`): the account is on The X
+/// Subscription, where Grok Bot draws from the same weekly pool as Grok.
+pub fn parse_shared(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(bytes)
+        .ok()
+        .and_then(|v| {
+            v.get("value")?
+                .get("reading")?
+                .get("usage")?
+                .get("unifiedPlanName")?
+                .as_str()
+                .map(|s| !s.trim().is_empty())
+        })
+        .unwrap_or(false)
+}
+
 impl BotReading {
     pub fn age_min(&self, now: DateTime<Utc>) -> f64 {
         (now - self.read_at).num_milliseconds() as f64 / 60000.0
@@ -218,6 +234,8 @@ pub struct Scan {
     pub reading: Option<BotReading>,
     /// The plan label stored with that reading.
     pub plan: Option<String>,
+    /// That reading names a unified plan (see [`parse_shared`]).
+    pub shared: bool,
 }
 
 /// List `dir` and open only the files whose decoded name matches. Never reads anything else.
@@ -248,6 +266,7 @@ pub fn scan_dir(dir: &Path) -> Scan {
                 if out.reading.is_none_or(|b| r.read_at > b.read_at) {
                     out.reading = Some(r);
                     out.plan = parsed.as_deref().and_then(parse_plan);
+                    out.shared = parsed.as_deref().is_some_and(parse_shared);
                 }
             }
             None => out.unusable += 1,
@@ -301,8 +320,12 @@ pub fn diagnose(env: &Env, now: DateTime<Utc>) -> String {
     };
     o.push_str(&format!("   {SOURCE}: {state}\n"));
     if let Some(dir) = persistence_dir(env) {
-        if let Some(plan) = scan_dir(&dir).plan {
+        let scan = scan_dir(&dir);
+        if let Some(plan) = scan.plan {
             o.push_str(&format!("   plan label: {plan}\n"));
+        }
+        if scan.shared {
+            o.push_str("   unified plan: yes (one weekly pool with Grok)\n");
         }
     }
     if env.os == Os::Linux {
@@ -344,6 +367,7 @@ pub struct BotTracker {
     store: Box<dyn Store>,
     latest: Mutex<Option<BotReading>>,
     plan: Mutex<Option<String>>,
+    shared: std::sync::atomic::AtomicBool,
     saved: Mutex<Option<Saved>>,
     seeded: Mutex<bool>,
     version: AtomicU64,
@@ -368,6 +392,7 @@ impl BotTracker {
             store,
             latest: Mutex::new(None),
             plan: Mutex::new(None),
+            shared: std::sync::atomic::AtomicBool::new(false),
             saved: Mutex::new(None),
             seeded: Mutex::new(false),
             version: AtomicU64::new(0),
@@ -450,6 +475,11 @@ impl BotTracker {
         self.plan.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// The newest reading names a unified plan: Grok Bot shares Grok's weekly pool.
+    pub fn shared_pool(&self) -> bool {
+        self.shared.load(Ordering::SeqCst)
+    }
+
     /// Read the file now. `now` stamps the history record.
     pub fn refresh(&self, now: DateTime<Utc>) {
         if !self.built.load(Ordering::SeqCst) {
@@ -457,6 +487,8 @@ impl BotTracker {
         }
         let scan = persistence_dir(&self.env).map(|d| scan_dir(&d));
         let new = scan.as_ref().and_then(|s| s.reading);
+        self.shared
+            .store(scan.as_ref().is_some_and(|s| s.shared), Ordering::SeqCst);
         *self.plan.lock().unwrap_or_else(|e| e.into_inner()) = scan.and_then(|s| s.plan);
         let changed = {
             let mut l = self.latest.lock().unwrap_or_else(|e| e.into_inner());

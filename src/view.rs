@@ -746,6 +746,12 @@ fn row_for(v: &Vendor, kind: Kind, remaining: bool, now: DateTime<Utc>) -> Row {
     if let Some(tier) = &v.tier {
         t.push(tip(format!("Plan: {tier}"), Tone::Muted));
     }
+    if v.shared_pool {
+        t.push(tip(
+            "One weekly pool shared by Grok, Grok Bot and Cursor",
+            Tone::Muted,
+        ));
+    }
     if v.source.as_deref() == Some("grok-billing") {
         t.push(tip("Live from Grok billing", Tone::Muted));
     } else if v.source.as_deref() == Some("codex-usage") {

@@ -77,6 +77,8 @@ pub struct Snapshot {
     pub fetched_at: DateTime<Utc>,
     pub pct: f64,
     pub period_end: DateTime<Utc>,
+    /// `config.isUnifiedBillingUser`: one shared weekly pool for Grok, Grok Bot and Cursor.
+    pub unified: bool,
     pub tier: Option<String>,
 }
 
@@ -121,6 +123,7 @@ pub fn parse_snapshot(line: &[u8]) -> Option<Snapshot> {
         pct,
         period_end,
         tier,
+        unified: is_unified(config.get("isUnifiedBillingUser")),
     })
 }
 
@@ -178,7 +181,7 @@ fn sample_of(s: &Snapshot) -> Sample {
             pct: s.pct,
             resets_at: Some(iso(s.period_end)),
         }),
-        raw: s.tier.as_ref().map(|t| json!({"tier": t})),
+        raw: raw_of(s.tier.as_deref(), s.unified),
     }
 }
 
@@ -339,7 +342,25 @@ pub fn select_session(
 
 // ---------------------------------------------------------------- the live endpoint
 
-/// Parse the billing response into a sample (percent, period end, tier).
+/// `isUnifiedBillingUser` is true: the account is on The X Subscription, where Grok, Grok Bot and
+/// Cursor draw from one weekly pool (so the Grok Bot meter is the same pool, not a second one).
+fn is_unified(v: Option<&Value>) -> bool {
+    v.and_then(Value::as_bool) == Some(true)
+}
+
+/// The `raw` part of a stored Grok record: the tier, and `unified` only when set.
+fn raw_of(tier: Option<&str>, unified: bool) -> Option<Value> {
+    let mut m = serde_json::Map::new();
+    if let Some(t) = tier {
+        m.insert("tier".into(), json!(t));
+    }
+    if unified {
+        m.insert("unified".into(), json!(true));
+    }
+    (!m.is_empty()).then_some(Value::Object(m))
+}
+
+/// Parse the billing response into a sample (percent, period end, tier, shared pool).
 pub fn parse_billing(body: &Value, now: DateTime<Utc>) -> Result<Sample, String> {
     let config = body
         .get("config")
@@ -368,7 +389,7 @@ pub fn parse_billing(body: &Value, now: DateTime<Utc>) -> Result<Sample, String>
             pct: pct.clamp(0.0, 100.0),
             resets_at: end.map(iso),
         }),
-        raw: tier.map(|t| json!({"tier": t})),
+        raw: raw_of(tier, is_unified(config.get("isUnifiedBillingUser"))),
     })
 }
 

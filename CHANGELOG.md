@@ -3,6 +3,14 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.6.3] - 2026-11-02
+
+### Changed
+- Grok on The X Subscription shows one Weekly row. On that plan Grok, Grok Bot and Cursor share one weekly pool, so
+  the separate Grok Bot row is hidden; the Weekly tooltip says the pool is shared. aiTrack knows this from the Grok
+  billing reply (`isUnifiedBillingUser`) or the Grok Bot app's cache (a unified plan name). SuperGrok accounts keep
+  both rows. Grok has no 5-hour window on either plan.
+
 ## [0.6.2] - 2026-11-02
 
 ### Fixed

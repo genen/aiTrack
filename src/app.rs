@@ -1529,6 +1529,8 @@ impl App {
         let bot = g.bot.get().and_then(|b| b.latest());
         // the Grok Bot app's plan label stands in when the billing reply names no tier
         let bot_tier = g.bot.get().and_then(|b| b.plan());
+        // the Grok Bot app says the account is on one shared pool (The X Subscription)
+        let bot_shared = g.bot.get().is_some_and(|b| b.shared_pool());
         // the Grok Bot's saved readings get the same analysis as Grok's: window stats and a pace
         let bot_plan = g
             .bot
@@ -1541,6 +1543,7 @@ impl App {
                 let mut s = build_grok_state(&r, status, enabled, now);
                 s.bot = bot;
                 s.tier = s.tier.or_else(|| bot_tier.clone());
+                s.shared_pool |= bot_shared;
                 s.bot_stats = bot_stats.clone();
                 s.bot_gauge = bot_gauge.clone();
                 Some((s, true))
@@ -1552,6 +1555,7 @@ impl App {
                     p.enabled = enabled;
                     p.bot = bot;
                     p.tier = p.tier.or_else(|| bot_tier.clone());
+                    p.shared_pool |= bot_shared;
                     p.bot_stats = bot_stats.clone();
                     p.bot_gauge = bot_gauge.clone();
                     (p, false)
@@ -1560,6 +1564,7 @@ impl App {
                     let mut s = build_grok_state(&[], status, enabled, now);
                     s.bot = bot;
                     s.tier = s.tier.or_else(|| bot_tier.clone());
+                    s.shared_pool |= bot_shared;
                     s.bot_stats = bot_stats.clone();
                     s.bot_gauge = bot_gauge.clone();
                     (s, false)

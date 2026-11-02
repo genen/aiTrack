@@ -86,6 +86,9 @@ pub struct GrokState {
     pub bot_stats: Option<crate::analysis::WindowStats>,
     /// The Grok Bot's weekly gauge worked out from its saved readings (its pace), like Grok's own.
     pub bot_gauge: Option<crate::analysis::Gauge>,
+    /// The Weekly pool is shared with Grok Bot (The X Subscription), from the newest Grok reading
+    /// or the Grok Bot app's cache: the Grok Bot row is then not a second meter and is hidden.
+    pub shared_pool: bool,
 }
 
 /// When the current weekly window began (its reset time minus 7 days; the last 7 days without one).
@@ -310,6 +313,11 @@ pub fn build_grok_state(
         .filter(|r| r.ok)
         .max_by_key(|r| r.t)
         .and_then(|r| r.tier.clone());
+    let shared_pool = readings
+        .iter()
+        .filter(|r| r.ok)
+        .max_by_key(|r| r.t)
+        .is_some_and(|r| r.unified);
     let diagnostics = readings
         .iter()
         .rev()
@@ -346,6 +354,7 @@ pub fn build_grok_state(
         bot: None,
         bot_stats: None,
         bot_gauge: None,
+        shared_pool,
     }
 }
 

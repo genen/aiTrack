@@ -1013,3 +1013,82 @@ fn readings_come_from_memory_after_an_append_and_match_the_file_after_a_prune() 
         "the 51 % record and the 52 % one"
     );
 }
+
+// ---------------------------------------------------------------- one shared pool (X Subscription)
+
+#[test]
+fn a_unified_billing_user_is_one_shared_pool() {
+    use aitrack::grok::{parse_billing, parse_snapshot};
+    use aitrack::reading::Reading;
+    let end = now() + Duration::days(6);
+    let end_s = end.to_rfc3339();
+    let body = json!({"config": {"creditUsagePercent": 3.0, "currentPeriod": {"end": end_s},
+        "isUnifiedBillingUser": true}, "subscriptionTier": "SuperGrok Plus"});
+    let s = parse_billing(&body, now()).unwrap();
+    let raw = s.raw.clone().unwrap();
+    assert_eq!(raw["unified"], json!(true));
+    assert_eq!(raw["tier"], json!("SuperGrok Plus"));
+    let rec = json!({"ok": true, "ts": now().to_rfc3339(), "weekly": {"pct": 3.0}, "raw": raw});
+    assert!(Reading::from_value(&rec).unified);
+    // not unified: no flag stored, and a record without it reads as not shared
+    let body = json!({"config": {"creditUsagePercent": 3.0, "currentPeriod": {"end": end_s},
+        "isUnifiedBillingUser": false}});
+    assert!(parse_billing(&body, now()).unwrap().raw.is_none());
+    assert!(!Reading::from_value(&json!({"ok": true, "ts": now().to_rfc3339()})).unified);
+    // the CLI log carries the same flag in ctx.config
+    let line = json!({"ts": now().to_rfc3339(), "msg": "billing: fetched credits config",
+        "ctx": {"config": {"creditUsagePercent": 3.0, "currentPeriod": {"end": end_s},
+        "isUnifiedBillingUser": true}}});
+    assert!(parse_snapshot(line.to_string().as_bytes()).unwrap().unified);
+}
+
+#[test]
+fn the_grok_bot_cache_names_a_unified_plan() {
+    let mut v: serde_json::Value =
+        serde_json::from_str(&cache_json(5.0, now(), now(), now())).unwrap();
+    assert!(!grok_bot::parse_shared(v.to_string().as_bytes()));
+    v["value"]["reading"]["usage"]["unifiedPlanName"] = json!("");
+    assert!(!grok_bot::parse_shared(v.to_string().as_bytes()));
+    v["value"]["reading"]["usage"]["unifiedPlanName"] = json!("X Premium+");
+    assert!(grok_bot::parse_shared(v.to_string().as_bytes()));
+    assert!(!grok_bot::parse_shared(b"junk"));
+}
+
+#[test]
+fn a_shared_pool_shows_one_weekly_row() {
+    use aitrack::reading::Reading;
+    use aitrack::state::build_grok_state;
+    let end = (now() + Duration::days(6)).to_rfc3339();
+    let rec = |unified: bool| {
+        Reading::from_value(
+            &json!({"ok": true, "ts": now().to_rfc3339(), "source": "grok-billing",
+            "weekly": {"pct": 3.0, "resets_at": end}, "raw": {"unified": unified}}),
+        )
+    };
+    let vendor_for = |unified: bool, bot_shared: bool| {
+        let mut st = State::loading(Values::default(), status());
+        let mut g = build_grok_state(&[rec(unified)], status(), true, now());
+        g.bot = Some(reading(5.0, 2));
+        g.shared_pool |= bot_shared;
+        st.grok = Some(g);
+        aitrack::vendor::from_state_at(&st, now())
+            .into_iter()
+            .find(|v| v.id == VendorId::Grok)
+            .unwrap()
+    };
+    // SuperGrok: two meters, two rows
+    let v = vendor_for(false, false);
+    assert!(!v.shared_pool && v.bot.is_some());
+    assert_eq!(home(v, false).rows.len(), 2);
+    // X Subscription, from the billing flag or from the Grok Bot cache: one Weekly row
+    for (unified, bot_shared) in [(true, false), (false, true)] {
+        let v = vendor_for(unified, bot_shared);
+        assert!(v.shared_pool && v.bot.is_none());
+        let vv = home(v, false);
+        assert_eq!(vv.rows.len(), 1);
+        assert_eq!(vv.rows[0].label, "Weekly");
+        assert!(lines(&vv.rows[0])
+            .iter()
+            .any(|l| l.contains("shared by Grok, Grok Bot and Cursor")));
+    }
+}

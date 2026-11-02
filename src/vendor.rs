@@ -72,6 +72,8 @@ pub struct Vendor {
     pub placeholder: bool,
     /// Why there is no current data (the collector's last error), for the tooltip.
     pub error: Option<String>,
+    /// Grok only: the Weekly pool is shared with Grok Bot (The X Subscription).
+    pub shared_pool: bool,
     /// Grok only: the Grok Bot app's "Weekly Grok Bot Limit", shown as a second bar.
     pub bot: Option<crate::grok_bot::BotReading>,
     /// Window statistics of the Grok Bot's own saved weekly readings.
@@ -109,6 +111,7 @@ impl Vendor {
             tier: None,
             placeholder: false,
             error: None,
+            shared_pool: false,
             bot: None,
             bot_stats: None,
             bot_gauge: None,
@@ -195,6 +198,15 @@ pub fn from_state_at(s: &State, now: DateTime<Utc>) -> Vec<Vendor> {
                 v.source = p.last_source.clone();
                 v.observed_at = crate::util::parse_ts(&p.last);
                 v.tier = g.tier.clone();
+                // one shared pool (The X Subscription): the Grok Bot meter is the same pool, so
+                // the Weekly row stands alone, like the other vendors; with no Grok reading yet the
+                // Grok Bot row stays as the only number there is
+                if g.shared_pool {
+                    v.shared_pool = true;
+                    v.bot = None;
+                    v.bot_stats = None;
+                    v.bot_gauge = None;
+                }
                 // the last known value stays visible however old (dimmed, with the chip)
                 v.current = crate::state::grok_reading_is_shown(p, now);
             }
