@@ -150,8 +150,6 @@ pub struct AitrackUi {
     pub antigravity_launcher: Launcher,
     /// Screen rect of the Grok block's Refresh control from the last frame, when shown.
     pub refresh_rect: Option<Rect>,
-    /// Screen rect of the "Refresh Grok now" button in Settings, when shown.
-    pub settings_refresh_rect: Option<Rect>,
     /// Draw this refresh state for Grok instead of the real one (screenshots, tests).
     pub mock_refresh: Option<crate::app::RefreshMode>,
     launch_msg: LaunchMsg,
@@ -195,6 +193,8 @@ pub struct AitrackUi {
     pub shrink_rect: Option<Rect>,
     /// Screen rect of the header's heart (Donate) button from the last frame (for tests).
     pub heart_rect: Option<Rect>,
+    /// Screen rect of the header's Refresh button from the last frame (for tests).
+    pub header_refresh_rect: Option<Rect>,
     /// Where Back (or the heart, clicked again) goes from the donation page: the screen it was
     /// opened from.
     pub donate_from: Screen,
@@ -283,7 +283,6 @@ impl AitrackUi {
             codex_launcher: real_codex_launcher(),
             antigravity_launcher: real_antigravity_launcher(),
             refresh_rect: None,
-            settings_refresh_rect: None,
             mock_refresh: None,
             launch_msg: Arc::default(),
             desired_height: 0.0,
@@ -311,6 +310,7 @@ impl AitrackUi {
             stats_rects: vec![],
             shrink_rect: None,
             heart_rect: None,
+            header_refresh_rect: None,
             donate_from: Screen::Home,
             donate_rects: vec![],
             back_rect: None,
@@ -614,7 +614,6 @@ impl AitrackUi {
     pub fn draw(&mut self, ctx: &Context) {
         self.track_window(ctx);
         self.help_rect = None;
-        self.settings_refresh_rect = None;
         let st = self.app.state();
         let pal = *Palette::of(ctx.theme());
         let now = Utc::now();
@@ -929,12 +928,12 @@ impl AitrackUi {
                         Screen::Stats
                     };
                 }
-                let spin = st.collector.polling;
-                if icon_button(ui, pal, Icon::Refresh, false, spin)
-                    .on_hover_text("Refresh now")
-                    .clicked()
-                {
-                    self.app.refresh();
+                let spin = st.collector.polling || self.app.grok_refreshing();
+                let refresh = icon_button(ui, pal, Icon::Refresh, false, spin);
+                self.header_refresh_rect = Some(refresh.rect);
+                if refresh.on_hover_text("Refresh now").clicked() {
+                    let ctx = ui.ctx().clone();
+                    self.app.refresh_all(move || ctx.request_repaint());
                 }
                 let shrink = icon_button(ui, pal, Icon::Shrink, false, false);
                 self.shrink_rect = Some(shrink.rect);
@@ -1811,33 +1810,6 @@ impl AitrackUi {
                                         }
                                     }
                                 });
-                            });
-                        }
-                        if self.app.grok.is_some() && self.app.grok_cli_present() {
-                            divider(ui, pal);
-                            let running = self.app.grok_refreshing();
-                            // the outcome stays here until the next click (the window is covered)
-                            let offset = chrono::Local::now().offset().local_minus_utc();
-                            let subtitle = self
-                                .app
-                                .grok_refresh_status()
-                                .text(offset)
-                                .unwrap_or_else(|| {
-                                    "Starts the Grok CLI briefly to fetch usage".into()
-                                });
-                            let subtitle = subtitle.as_str();
-                            setting_row(ui, pal, "Refresh Grok now", subtitle, |ui| {
-                                let r = pill(
-                                    ui,
-                                    pal,
-                                    if running { "Refreshing" } else { "Refresh" },
-                                    false,
-                                );
-                                self.settings_refresh_rect = Some(r.rect);
-                                if r.clicked() && !running {
-                                    let ctx = ui.ctx().clone();
-                                    self.app.refresh_grok(move || ctx.request_repaint());
-                                }
                             });
                         }
                     },

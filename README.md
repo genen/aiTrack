@@ -56,7 +56,7 @@ when that tool is installed.
 > **Keep the tool running for fresh numbers.** Claude's numbers come from the Claude desktop app's cache, which
 > only updates while the Claude app is running and talking to Claude. With the app closed, aiTrack keeps showing
 > the last value with the amber age chip (dimmed after 60 minutes), and the status bar says the app is not running.
-> Grok's numbers update when the Grok CLI runs (**Refresh Grok now** starts it briefly). To keep Claude live without
+> Grok's numbers update when the Grok CLI runs (the **Refresh** button in the header starts it briefly). To keep Claude live without
 > the desktop app, sign in to Claude Code (run `claude`, then `/login`) so the usage-service fallback can work.
 
 Release status: you can download an installer, a portable zip, a Mac disk image or a Linux `.deb` (see
@@ -450,10 +450,10 @@ header to ask at once.
 ### If Grok shows old data or "login expired"
 
 - The CLI writes the log line aiTrack needs only when it runs. If Grok shows an old value with an amber age
-  label, press **Refresh** under the Grok row (or **Refresh Grok now** in Settings). aiTrack then starts the CLI
+  label, press **Refresh** under the Grok row (or the **Refresh now** button in the header). aiTrack then starts the CLI
   in the background for a moment, with no window, and closes it again. It never sends a prompt, so it uses no
   credits, and it does nothing while you have `grok` open yourself.
-- If the message says **Grok login expired**, run `grok` once yourself, or use **Refresh Grok now**. The CLI
+- If the message says **Grok login expired**, run `grok` once yourself, or press the **Refresh now** button in the header. The CLI
   renews its sign-in when it starts.
 - If a refresh says `no new data (Grok did not fetch billing)`, run `grok` yourself, check that you are signed
   in, and try again.
@@ -471,7 +471,8 @@ The window has a header with five buttons, one block per tool, and a status line
 
 - The aiTrack logo at the top left opens the project page on GitHub.
 - Header buttons: **Small window** (two arrows pointing in, see
-  [Small window](#small-window)), **Refresh now** (the circular arrow, polls at once), **Stats** (the bars
+  [Small window](#small-window)), **Refresh now** (the circular arrow: polls every tool at once and, when the Grok CLI is found, starts it briefly so
+  its login is renewed), **Stats** (the bars
   icon), **Donate** (the heart: a page with PayPal's donation QR code and a Donate link; Back or the heart
   again returns) and **Settings** (the sliders icon).
 - Each tool block has a logo, the tool's name and one bar per limit. Clicking the logo opens the tool
@@ -708,9 +709,6 @@ At the bottom: **Back**, a **Help** link (it opens this page), and the build lin
   "Not available on native Wayland" (see [Install on Linux](#install-on-linux-new)).
 - **Show Claude**, **Show Grok**, **Show ChatGPT** and **Show Gemini**: **Auto** (show it when the tool is found on this PC; the line under the name says
   "Found on this PC", on a Mac "Found on this Mac", or "Not found"), **On** (always show it) or **Off** (never).
-- **Refresh Grok now**: starts the Grok CLI in the background to fetch fresh Grok usage. This row only appears when
-  the Grok CLI is found. Under the button it shows the result, for example "Refreshed 19:42: weekly 8%", and it
-  keeps it until the next click.
 
 **Notifications**
 
@@ -847,7 +845,7 @@ the row shows dashes. The most common reason is that the Claude desktop app is c
 Code), then press **Refresh now**. Hover the status line for the full reason.
 
 **"login expired" or "login rejected".**
-For Claude: open Claude Code once so it renews its sign-in. For Grok: run `grok` once, or use **Refresh Grok now**.
+For Claude: open Claude Code once so it renews its sign-in. For Grok: run `grok` once, or press the **Refresh now** button in the header.
 
 **There is no Grok block.**
 Grok needs the Grok CLI (see [section 5](#5-grok-needs-the-grok-cli)). Check that the folder `C:\Users\<you>\.grok`

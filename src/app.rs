@@ -942,6 +942,16 @@ impl App {
         })
     }
 
+    /// The header's Refresh button: polls every tracked AI now, and, when Grok is tracked and the
+    /// Grok CLI is found, also starts the CLI briefly (see [`App::refresh_grok`]) so its login is
+    /// renewed and a fresh billing line is written. `wake` repaints the window when that ends.
+    pub fn refresh_all(self: &Arc<Self>, wake: impl Fn() + Send + 'static) {
+        self.refresh();
+        if self.grok_on() && self.grok_cli_present() {
+            self.refresh_grok(wake);
+        }
+    }
+
     /// Run a Grok refresh on a background thread (ignored while one is running), then poll Grok
     /// again. `wake` repaints the window when it ends.
     pub fn refresh_grok(self: &Arc<Self>, wake: impl Fn() + Send + 'static) {
