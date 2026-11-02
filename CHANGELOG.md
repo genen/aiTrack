@@ -3,6 +3,12 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.6.2] - 2026-11-02
+
+### Fixed
+- macOS release build: the check after stapling the notarization ticket now retries up to 3 times, because Apple's
+  ticket lookup sometimes drops the connection on the build machine and failed the release.
+
 ## [0.6.1] - 2026-11-02
 
 ### Changed
