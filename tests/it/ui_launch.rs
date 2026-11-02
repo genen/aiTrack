@@ -251,7 +251,7 @@ fn the_grok_refresh_line_offers_runs_once_and_shows_progress() {
 }
 
 #[test]
-fn settings_has_a_refresh_grok_now_button_only_when_the_cli_is_found() {
+fn the_header_refresh_button_also_runs_the_grok_cli_refresh_only_when_the_cli_is_found() {
     use aitrack::ui::Screen;
     let mut w = Win::build(true, None, true);
     let runs = Arc::new(AtomicUsize::new(0));
@@ -263,26 +263,38 @@ fn settings_has_a_refresh_grok_now_button_only_when_the_cli_is_found() {
         }),
         Arc::new(|| true),
     );
-    w.ui.screen = Screen::Settings;
-    w.ui.app().settings.set_section("display", true);
     w.frame(vec![]);
     w.frame(vec![]);
-    let r = w.ui.settings_refresh_rect.expect("Refresh Grok now button");
+    let r = w.ui.header_refresh_rect.expect("header Refresh button");
     w.click(r.center());
     let t0 = std::time::Instant::now();
     while runs.load(Ordering::SeqCst) == 0 && t0.elapsed().as_secs() < 5 {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     assert_eq!(runs.load(Ordering::SeqCst), 1);
-    // no CLI: no button
-    let mut w = Win::build(true, None, true);
-    w.ui.app()
-        .set_grok_refresh(Arc::new(|| Ok(None)), Arc::new(|| false));
+    // Settings no longer has a "Refresh Grok now" row
     w.ui.screen = Screen::Settings;
     w.ui.app().settings.set_section("display", true);
     w.frame(vec![]);
     w.frame(vec![]);
-    assert!(w.ui.settings_refresh_rect.is_none());
+    assert!(!w.ui.track_rects.is_empty(), "Display section drawn");
+    // no CLI: the header Refresh polls but never starts the CLI
+    let mut w = Win::build(true, None, true);
+    let runs = Arc::new(AtomicUsize::new(0));
+    let r2 = runs.clone();
+    w.ui.app().set_grok_refresh(
+        Arc::new(move || {
+            r2.fetch_add(1, Ordering::SeqCst);
+            Ok(None)
+        }),
+        Arc::new(|| false),
+    );
+    w.frame(vec![]);
+    w.frame(vec![]);
+    let r = w.ui.header_refresh_rect.expect("header Refresh button");
+    w.click(r.center());
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
 }
 
 /// Every test that builds a UI must call `sandbox()`: a click on a link or a logo would otherwise
