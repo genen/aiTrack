@@ -6,8 +6,8 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
 ## [0.6.2] - 2026-11-02
 
 ### Fixed
-- macOS release build: the check after stapling the notarization ticket now retries up to 3 times, because Apple's
-  ticket lookup sometimes drops the connection on the build machine and failed the release.
+- macOS release build: stapling the notarization ticket and checking it now retry up to 5 times, 20 s apart,
+  because Apple's ticket lookup sometimes drops the connection on the build machine and failed the release.
 
 ## [0.6.1] - 2026-11-02
 
