@@ -126,16 +126,17 @@ notarize() {
   return 1
 }
 
-# `stapler validate` looks the ticket up on Apple's CloudKit service; that lookup sometimes drops the
-# connection on CI runners ("The network connection was lost", error 68) right after a staple that
-# worked. Try it up to 3 times, 15 s apart; a real validation failure still fails the build.
-validate_staple() {
-  local target="$1" attempt
-  for attempt in 1 2 3; do
-    if xcrun stapler validate "$target"; then
+# `stapler staple` and `stapler validate` look the ticket up on Apple's CloudKit service; that lookup
+# sometimes drops the connection on CI runners ("The network connection was lost", error 68), even
+# right after a lookup that worked. Try each up to 5 times, 20 s apart; a real failure (a ticket that
+# is not there or does not match) still fails the build after the last try.
+staple_retry() {
+  local action="$1" target="$2" attempt
+  for attempt in 1 2 3 4 5; do
+    if xcrun stapler "$action" "$target"; then
       return 0
     fi
-    [ "$attempt" -lt 3 ] && { echo "stapler validate failed (attempt $attempt of 3), retrying in 15 s."; sleep 15; }
+    [ "$attempt" -lt 5 ] && { echo "stapler $action failed (attempt $attempt of 5), retrying in 20 s."; sleep 20; }
   done
   return 1
 }
@@ -154,8 +155,8 @@ sign_app() {
   zipf="$work/app-for-notary.zip"
   ditto -c -k --keepParent "$app" "$zipf"
   notarize "$zipf"
-  xcrun stapler staple "$app"
-  validate_staple "$app"
+  staple_retry staple "$app"
+  staple_retry validate "$app"
   spctl -a -t exec -vv "$app"
   echo "App signed, notarized and stapled."
 }
@@ -172,8 +173,8 @@ sign_dmg() {
     return 0
   fi
   notarize "$dmg"
-  xcrun stapler staple "$dmg"
-  validate_staple "$dmg"
+  staple_retry staple "$dmg"
+  staple_retry validate "$dmg"
   spctl -a -t open --context context:primary-signature -vv "$dmg"
   echo "dmg signed, notarized and stapled."
 }
