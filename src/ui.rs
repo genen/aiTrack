@@ -25,6 +25,8 @@ pub enum Screen {
     Home,
     Settings,
     Stats,
+    /// The donation page: PayPal's QR code with a Donate link under it (the heart button).
+    Donate,
 }
 
 /// Opens a URL (https or mailto) with its registered handler.
@@ -191,6 +193,15 @@ pub struct AitrackUi {
     pub logo_rect: Option<Rect>,
     /// Screen rect of the header's shrink button from the last frame (tests / the render tool).
     pub shrink_rect: Option<Rect>,
+    /// Screen rect of the header's heart (Donate) button from the last frame (for tests).
+    pub heart_rect: Option<Rect>,
+    /// Where Back (or the heart, clicked again) goes from the donation page: the screen it was
+    /// opened from.
+    pub donate_from: Screen,
+    /// Screen rect of each control on the donation page (`donate_qr`, `donate`), for tests.
+    pub donate_rects: Vec<(String, Rect)>,
+    /// Screen rect of the Back button under Settings, Stats and the donation page (for tests).
+    pub back_rect: Option<Rect>,
     /// The window shape last set up: small or full, horizontal or vertical, and the number of
     /// vendor blocks in a row (0 when vertical, where the count does not change the width).
     layout_sent: Option<(bool, bool, usize)>,
@@ -299,6 +310,10 @@ impl AitrackUi {
             plan_versions: None,
             stats_rects: vec![],
             shrink_rect: None,
+            heart_rect: None,
+            donate_from: Screen::Home,
+            donate_rects: vec![],
+            back_rect: None,
             logo_rect: None,
             // the window was built for the saved mode (see `run`); the first frame sets the width
             layout_sent: None,
@@ -709,17 +724,19 @@ impl AitrackUi {
                 .show(ctx, |ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     ui.horizontal(|ui| {
-                        if pill(ui, &pal, "Back", false).clicked() {
-                            self.screen = Screen::Home;
+                        let back = pill(ui, &pal, "Back", false);
+                        self.back_rect = Some(back.rect);
+                        if back.clicked() {
+                            self.screen = self.back_target();
                         }
-                        if self.screen == Screen::Settings {
+                        if matches!(self.screen, Screen::Settings | Screen::Donate) {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 self.help_link(ui, &pal);
                             });
                         }
                     });
                     // which build is this? (click to copy)
-                    if self.screen == Screen::Settings {
+                    if matches!(self.screen, Screen::Settings | Screen::Donate) {
                         self.build_line(ui, &pal);
                     }
                 })
@@ -744,6 +761,7 @@ impl AitrackUi {
                     Screen::Home => self.home(ui, &pal, &st, &home, &vendors),
                     Screen::Settings => self.settings(ui, &pal, &st),
                     Screen::Stats => self.stats_view(ui, &pal, now),
+                    Screen::Donate => self.donate_view(ui, &pal),
                 };
             });
 
@@ -886,11 +904,22 @@ impl AitrackUi {
                     false,
                 );
                 if gear.on_hover_text("Settings").clicked() {
-                    self.screen = if self.screen == Screen::Home {
-                        Screen::Settings
-                    } else {
+                    self.screen = if self.screen == Screen::Settings {
                         Screen::Home
+                    } else {
+                        Screen::Settings
                     };
+                }
+                let heart = icon_button(ui, pal, Icon::Heart, self.screen == Screen::Donate, false);
+                self.heart_rect = Some(heart.rect);
+                if heart.on_hover_text("Donate").clicked() {
+                    // open from where the user is; open already: close like Back does
+                    if self.screen == Screen::Donate {
+                        self.screen = self.back_target();
+                    } else {
+                        self.donate_from = self.screen;
+                        self.screen = Screen::Donate;
+                    }
                 }
                 let bars = icon_button(ui, pal, Icon::Bars, self.screen == Screen::Stats, false);
                 if bars.on_hover_text("Stats").clicked() {
@@ -918,6 +947,57 @@ impl AitrackUi {
                 }
             });
         });
+    }
+
+    /// Where Back goes: from the donation page to the screen it was opened from, otherwise Home.
+    fn back_target(&self) -> Screen {
+        if self.screen == Screen::Donate {
+            self.donate_from
+        } else {
+            Screen::Home
+        }
+    }
+
+    /// The donation page (the header's heart): PayPal's QR code, larger than in Settings > About,
+    /// with the word Donate as a link under it. Both open the donation page in the browser.
+    /// Returns the bottom of the content (for auto-sizing).
+    fn donate_view(&mut self, ui: &mut Ui, pal: &Palette) -> f32 {
+        let mut rects: Vec<(String, Rect)> = Vec::new();
+        let mut open_donate = false;
+        let out = egui::ScrollArea::vertical()
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(10.0);
+                    let r = donate_qr(ui, DONATE_PAGE_MODULE);
+                    rects.push(("donate_qr".into(), r.rect));
+                    open_donate |= r.clicked();
+                    ui.add_space(10.0);
+                    let r = ui
+                        .add(
+                            egui::Label::new(
+                                RichText::new("Donate")
+                                    .font(prop(15.0))
+                                    .color(pal.blue)
+                                    .underline(),
+                            )
+                            .sense(Sense::click()),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text(crate::launch::DONATE_URL);
+                    rects.push(("donate".into(), r.rect));
+                    open_donate |= r.clicked();
+                    ui.add_space(4.0);
+                });
+            });
+        if open_donate {
+            self.open_about_link(
+                crate::launch::DONATE_URL,
+                "Could not open the donation page",
+            );
+        }
+        self.donate_rects = rects;
+        out.inner_rect.top() + out.content_size.y
     }
 
     // ------------------------------------------------------------ home
@@ -2023,7 +2103,7 @@ impl AitrackUi {
         // PayPal's QR code for the donation page, with the Donate link under it; both open the page
         let mut open_donate = false;
         ui.vertical_centered(|ui| {
-            let r = donate_qr(ui);
+            let r = donate_qr(ui, ABOUT_MODULE);
             rects.push(("donate_qr".into(), r.rect));
             open_donate |= r.clicked();
             ui.add_space(2.0);
@@ -2886,6 +2966,7 @@ enum Icon {
     Sliders,
     Bars,
     Shrink,
+    Heart,
 }
 
 fn icon_button(ui: &mut Ui, pal: &Palette, icon: Icon, active: bool, spin: bool) -> Response {
@@ -2956,6 +3037,35 @@ fn icon_button(ui: &mut Ui, pal: &Palette, icon: Icon, active: bool, spin: bool)
             }
             p.circle_stroke(q(16.0, 7.0), 1.6, st);
             p.circle_stroke(q(8.0, 17.0), 1.6, st);
+        }
+        Icon::Heart => {
+            // the classic heart curve, 16 sin^3 t by 13 cos t - 5 cos 2t - 2 cos 3t - cos 4t,
+            // about 13 pt wide; filled while the donation page is open
+            let outline: Vec<Pos2> = (0..32)
+                .map(|i| {
+                    let t = std::f32::consts::TAU * i as f32 / 32.0;
+                    let x = 16.0 * t.sin().powi(3);
+                    let y = 13.0 * t.cos()
+                        - 5.0 * (2.0 * t).cos()
+                        - 2.0 * (3.0 * t).cos()
+                        - (4.0 * t).cos();
+                    c + vec2(x, -y) * 0.40 + vec2(0.0, -1.0)
+                })
+                .collect();
+            if active {
+                // a fan of triangles from the middle (the shape is not convex)
+                let mut mesh = egui::Mesh::default();
+                mesh.colored_vertex(c + vec2(0.0, -1.0), col);
+                for pt in &outline {
+                    mesh.colored_vertex(*pt, col);
+                }
+                let n = outline.len() as u32;
+                for i in 0..n {
+                    mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+                }
+                p.add(Shape::mesh(mesh));
+            }
+            p.add(Shape::closed_line(outline, st));
         }
         Icon::Shrink => {
             // two arrows pointing in from opposite corners, each with an L-shaped head
@@ -3650,13 +3760,18 @@ pub const DONATE_QR: [&str; 33] = [
     "#######.#.#.###.#.....#####..#.#.",
 ];
 
+/// One QR module in Settings > About (points).
+const ABOUT_MODULE: f32 = 3.0;
+/// One QR module on the donation page (points): 33 modules plus the quiet zone = 205 pt, which
+/// fits the narrowest window (270 pt).
+pub const DONATE_PAGE_MODULE: f32 = 5.0;
+
 /// Draws [`DONATE_QR`] black on white with the standard 4-module quiet zone, in both themes (phones
 /// read dark-on-light codes most reliably). Clickable, with a pointing hand and the URL on hover.
-fn donate_qr(ui: &mut Ui) -> Response {
-    const MODULE: f32 = 3.0;
-    const QUIET: f32 = 4.0 * MODULE;
+fn donate_qr(ui: &mut Ui, module: f32) -> Response {
+    let quiet = 4.0 * module;
     let n = DONATE_QR.len() as f32;
-    let side = n * MODULE + 2.0 * QUIET;
+    let side = n * module + 2.0 * quiet;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(side, side), Sense::click());
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
@@ -3665,9 +3780,9 @@ fn donate_qr(ui: &mut Ui) -> Response {
         // grey hairline seams appear between neighbouring modules at any display scale
         let ppp = ui.ctx().pixels_per_point();
         let snap = |v: f32| (v * ppp).round() / ppp;
-        let origin = rect.min + egui::vec2(QUIET, QUIET);
-        let edge_x = |i: usize| snap(origin.x + i as f32 * MODULE);
-        let edge_y = |i: usize| snap(origin.y + i as f32 * MODULE);
+        let origin = rect.min + egui::vec2(quiet, quiet);
+        let edge_x = |i: usize| snap(origin.x + i as f32 * module);
+        let edge_y = |i: usize| snap(origin.y + i as f32 * module);
         let mut mesh = egui::Mesh::default();
         for (y, row) in DONATE_QR.iter().enumerate() {
             let bytes = row.as_bytes();

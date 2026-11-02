@@ -467,12 +467,13 @@ somewhere else, the **Refresh** button is hidden (the live billing and the log s
 
 ## 6. Reading the window
 
-The window has a header with three buttons, one block per tool, and a status line at the bottom.
+The window has a header with five buttons, one block per tool, and a status line at the bottom.
 
 - The aiTrack logo at the top left opens the project page on GitHub.
 - Header buttons: **Small window** (two arrows pointing in, see
   [Small window](#small-window)), **Refresh now** (the circular arrow, polls at once), **Stats** (the bars
-  icon) and **Settings** (the sliders icon).
+  icon), **Donate** (the heart: a page with PayPal's donation QR code and a Donate link; Back or the heart
+  again returns) and **Settings** (the sliders icon).
 - Each tool block has a logo, the tool's name and one bar per limit. Clicking the logo opens the tool
   (see [Clicking the logos](#11-clicking-the-logos)).
 

@@ -3,6 +3,16 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.5.21] - 2026-11-02
+
+### Added
+- A heart (Donate) button in the header, between Stats and Settings. It opens a page with PayPal's donation QR code
+  and a Donate link under it (both open the donation page), with Back and Help at the bottom. The heart stays
+  highlighted while the page is open; Back or the heart again returns to where it was opened from.
+
+### Changed
+- The Settings button now opens Settings from the Stats page too (it used to go back to the main view).
+
 ## [0.5.20] - 2026-11-01
 
 ### Changed
