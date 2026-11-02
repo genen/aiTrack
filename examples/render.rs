@@ -709,6 +709,22 @@ fn main() {
         sc.light = light;
         scenes.push(sc);
     }
+    // the donation page (the header's heart), dark and light
+    for (name, light) in [("donate", false), ("donate_light", true)] {
+        let app = make_app(&out, name, synth(now, 42.0, 58.0, true), None);
+        let mut sc = scene(
+            name,
+            app,
+            Box::new(move |c, ui, _| {
+                ui.screen = Screen::Donate;
+                if light {
+                    c.set_theme(egui::ThemePreference::Light);
+                }
+            }),
+        );
+        sc.light = light;
+        scenes.push(sc);
+    }
     // the data-age chip and the stale-data tooltip line (mock vendors with old samples)
     let aged =
         |claude: Option<(&'static str, i64)>, grok: Option<(&'static str, i64)>, calm: bool| {

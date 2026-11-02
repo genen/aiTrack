@@ -55,6 +55,7 @@ mod store;
 mod theme;
 mod toast;
 mod transcripts;
+mod ui_donate;
 mod ui_empty;
 mod ui_launch;
 mod ui_stats;
