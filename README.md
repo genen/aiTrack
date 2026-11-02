@@ -327,6 +327,8 @@ Both need the Grok CLI. See the next section.
 
 If the **Grok Bot** app is installed, a second bar labelled **Grok Bot** appears under **Weekly**. It is the app's
 own "Weekly Grok Bot Limit", a separate meter from the SuperGrok weekly pool (the Grok CLI's log has no field for it).
+On **The X Subscription**, Grok, Grok Bot and Cursor share one weekly pool, so there is no second meter: the
+Grok Bot bar is hidden and **Weekly** shows the shared pool (its tooltip says so).
 aiTrack reads the small cache file the app keeps in its data folder: `~/Library/Application Support/Grok Bot/` on a
 Mac, `%APPDATA%\Grok Bot\` on Windows (the subfolder `sand-client-persistence`). It opens only the one file that holds
 the weekly usage, never the app's login or secrets files, and it records no account id or file name anywhere.

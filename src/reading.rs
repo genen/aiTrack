@@ -52,6 +52,8 @@ pub struct Reading {
     pub note: Option<String>,
     /// Subscription tier when the source reported one (`raw.tier`, Grok and Codex).
     pub tier: Option<String>,
+    /// Grok: the account has one shared weekly pool for Grok and Grok Bot (`raw.unified`).
+    pub unified: bool,
     /// Codex: the credits balance (`raw.credits`).
     pub credits: Option<CreditBalance>,
     /// Codex: banked early resets still available (`raw.banked_resets`).
@@ -199,6 +201,11 @@ impl Reading {
                 .and_then(|r| r.get("tier"))
                 .and_then(Value::as_str)
                 .map(str::to_owned),
+            unified: v
+                .get("raw")
+                .and_then(|r| r.get("unified"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             credits: v
                 .get("raw")
                 .and_then(|r| r.get("credits"))
