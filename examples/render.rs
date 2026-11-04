@@ -794,9 +794,9 @@ fn main() {
         sc.hover = hover;
         scenes.push(sc);
     }
-    // Grok: a nine-hour-old last value (dimmed, chip) with the Refresh control in each state
+    // Grok: a nine-hour-old last value (dimmed, chip), alone and with each refresh status line
     for (name, mode) in [
-        ("grok_stale_refresh", aitrack::app::RefreshMode::Offer),
+        ("grok_stale_refresh", aitrack::app::RefreshMode::Hidden),
         ("grok_refreshing", aitrack::app::RefreshMode::Running),
         (
             "grok_refresh_failed",

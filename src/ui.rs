@@ -1320,8 +1320,8 @@ impl AitrackUi {
         rect
     }
 
-    /// The small line under Grok's rows: "Refresh" when its data is missing or old (starts the Grok
-    /// CLI in the background so it fetches usage), "Refreshing..." while that runs, or why it failed.
+    /// The small line under Grok's rows while the header Refresh runs the Grok CLI: "Refreshing..."
+    /// while that runs, or why it failed (e.g. signed out). Not clickable.
     fn grok_refresh_line(&mut self, ui: &mut Ui, pal: &Palette, st: &State) {
         use crate::app::RefreshMode;
         let mode = self
@@ -1331,34 +1331,11 @@ impl AitrackUi {
         if mode == RefreshMode::Hidden {
             return;
         }
-        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 18.0), Sense::click());
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 18.0), Sense::hover());
         let cy = rect.center().y;
         let font = prop(10.5);
         let p = ui.painter();
         match &mode {
-            RefreshMode::Offer => {
-                let hovered = resp.hovered();
-                let col = if hovered { pal.foreground } else { pal.muted };
-                p.text(
-                    Pos2::new(rect.right() - 2.0, cy),
-                    Align2::RIGHT_CENTER,
-                    "Refresh",
-                    font.clone(),
-                    col,
-                );
-                let w = p.layout_no_wrap("Refresh".into(), font, col).size().x;
-                refresh_icon(p, Pos2::new(rect.right() - w - 12.0, cy), col);
-                self.refresh_rect = Some(rect);
-                let resp = resp
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .on_hover_text(
-                        "Starts the Grok CLI in the background for a moment so it fetches your usage, then closes it. Nothing is sent to Grok and no credits are used.",
-                    );
-                if resp.clicked() {
-                    let ctx = ui.ctx().clone();
-                    self.app.refresh_grok(move || ctx.request_repaint());
-                }
-            }
             RefreshMode::Running => {
                 p.text(
                     Pos2::new(rect.right() - 2.0, cy),
@@ -3516,29 +3493,6 @@ fn vendor_header(
             .on_hover_text(&c.tooltip);
     }
     clicked
-}
-
-/// Two arrows chasing each other (a refresh symbol), drawn from shapes.
-fn refresh_icon(p: &Painter, c: Pos2, col: Color32) {
-    let r = 4.0_f32;
-    let stroke = Stroke::new(1.2_f32, col);
-    let pts: Vec<Pos2> = (0..=14)
-        .map(|i| {
-            let a = (i as f32 / 14.0) * std::f32::consts::TAU * 0.78 + 0.6;
-            c + vec2(a.cos(), a.sin()) * r
-        })
-        .collect();
-    p.add(Shape::line(pts.clone(), stroke));
-    // arrow head at the end of the arc
-    let end = pts[pts.len() - 1];
-    let prev = pts[pts.len() - 2];
-    let dir = (end - prev).normalized();
-    let nrm = vec2(-dir.y, dir.x);
-    p.add(Shape::convex_polygon(
-        vec![end + dir * 2.8, end + nrm * 2.2, end - nrm * 2.2],
-        col,
-        Stroke::NONE,
-    ));
 }
 
 /// A circled "i" drawn from shapes (no font glyph needed).

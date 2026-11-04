@@ -212,7 +212,7 @@ fn clicking_the_codex_badge_opens_codex_not_claude() {
 }
 
 #[test]
-fn the_grok_refresh_line_offers_runs_once_and_shows_progress() {
+fn the_grok_refresh_line_only_shows_status_and_is_not_a_button() {
     use aitrack::app::RefreshMode;
     let mut w = Win::build(true, None, true);
     let runs = Arc::new(AtomicUsize::new(0));
@@ -224,30 +224,22 @@ fn the_grok_refresh_line_offers_runs_once_and_shows_progress() {
         }),
         Arc::new(|| true),
     );
-    // hidden by default (mock vendors, no real Grok data and mode not forced -> real mode decides)
     w.ui.mock_refresh = Some(RefreshMode::Hidden);
     w.frame(vec![]);
     assert!(w.ui.refresh_rect.is_none());
-    // offered: a click starts exactly one refresh
-    w.ui.mock_refresh = Some(RefreshMode::Offer);
-    w.frame(vec![]);
-    let r = w.ui.refresh_rect.expect("refresh control");
-    assert_eq!(w.hover(r.center()), CursorIcon::PointingHand);
-    w.click(r.center());
-    let t0 = std::time::Instant::now();
-    while runs.load(Ordering::SeqCst) == 0 && t0.elapsed().as_secs() < 5 {
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-    assert_eq!(runs.load(Ordering::SeqCst), 1);
-    // progress and failure texts take the same place
+    // progress and failure texts show under Grok; clicking them starts nothing
     for m in [
         RefreshMode::Running,
         RefreshMode::Failed("Grok did not fetch billing within 10 s (signed out?)".into()),
     ] {
         w.ui.mock_refresh = Some(m);
         w.frame(vec![]);
-        assert!(w.ui.refresh_rect.is_some());
+        let r = w.ui.refresh_rect.expect("status line");
+        assert_ne!(w.hover(r.center()), CursorIcon::PointingHand);
+        w.click(r.center());
     }
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
 }
 
 #[test]

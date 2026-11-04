@@ -15,7 +15,6 @@
 
 use crate::grok::{log_path, read_snapshots, Snapshot};
 use crate::sources::{Env, Os};
-use chrono::{DateTime, Duration, Utc};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -23,8 +22,6 @@ use std::time::{Duration as StdDuration, Instant};
 
 /// `CREATE_NO_WINDOW`: a console program runs without a console window.
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-/// Offer the refresh when the newest Grok reading is older than this (minutes), or absent.
-pub const REFRESH_AFTER_MIN: f64 = 60.0;
 /// After the billing line shows up, let the CLI run this much longer (it refreshes its login after
 /// fetching billing) before it is ended.
 pub const REFRESH_GRACE: StdDuration = StdDuration::from_secs(5);
@@ -107,7 +104,7 @@ pub fn extra_dirs(env: &Env) -> Vec<PathBuf> {
 }
 
 /// Find the CLI: `$AITRACK_GROK_CMD`, then PATH, then [`extra_dirs`] (Store-app aliases in `WindowsApps` are skipped). `None` when it is not there
-/// (the Refresh control is then hidden).
+/// (the header Refresh then only polls).
 pub fn find_cli(
     env: &Env,
     path_var: Option<&OsStr>,
@@ -164,15 +161,6 @@ pub fn find_cli_here(env: &Env) -> Option<PathBuf> {
 pub fn refresh_args(over: Option<&str>) -> Vec<OsString> {
     over.map(|s| s.split_whitespace().map(OsString::from).collect())
         .unwrap_or_default()
-}
-
-/// Should the Refresh control be offered? When Grok data is absent or older than
-/// [`REFRESH_AFTER_MIN`].
-pub fn needs_refresh(newest: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
-    match newest {
-        None => true,
-        Some(t) => (now - t) > Duration::seconds((REFRESH_AFTER_MIN * 60.0) as i64),
-    }
 }
 
 // ---------------------------------------------------------------- running it

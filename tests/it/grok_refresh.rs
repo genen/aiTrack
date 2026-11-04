@@ -272,23 +272,6 @@ fn the_cli_is_found_on_path_then_in_the_usual_folders_and_not_otherwise() {
 }
 
 #[test]
-fn the_refresh_is_offered_only_when_grok_data_is_missing_or_older_than_an_hour() {
-    assert!(grok_cli::needs_refresh(None, now()));
-    assert!(!grok_cli::needs_refresh(
-        Some(now() - Duration::minutes(59)),
-        now()
-    ));
-    assert!(!grok_cli::needs_refresh(
-        Some(now() - Duration::minutes(60)),
-        now()
-    ));
-    assert!(grok_cli::needs_refresh(
-        Some(now() - Duration::minutes(61)),
-        now()
-    ));
-}
-
-#[test]
 fn the_refresh_command_has_no_arguments_by_default_and_null_stdio() {
     assert!(grok_cli::refresh_args(None).is_empty());
     assert_eq!(
@@ -555,38 +538,20 @@ fn grok_reading(age: Duration) -> Reading {
 }
 
 #[test]
-fn the_refresh_control_is_gated_on_data_age_and_on_the_cli_being_installed() {
+fn the_grok_panel_never_offers_its_own_refresh_button() {
     let t = TempDir::new();
     let app = app_with_grok(&t);
-    let present = Arc::new(Mutex::new(true));
-    let p2 = present.clone();
-    app.set_grok_refresh(Arc::new(|| Ok(None)), Arc::new(move || *p2.lock().unwrap()));
-    // absent data: offered
+    app.set_grok_refresh(Arc::new(|| Ok(None)), Arc::new(|| true));
+    // missing or nine-hour-old data with the CLI installed: no button (the header Refresh does it)
     assert_eq!(
         app.grok_refresh_mode(&state_with(&[], now()), now()),
-        RefreshMode::Offer
+        RefreshMode::Hidden
     );
-    // 9 h old: offered; 10 min old: hidden
     let old = state_with(&[grok_reading(Duration::hours(9))], now());
-    assert_eq!(app.grok_refresh_mode(&old, now()), RefreshMode::Offer);
-    let fresh = state_with(&[grok_reading(Duration::minutes(10))], now());
-    assert_eq!(app.grok_refresh_mode(&fresh, now()), RefreshMode::Hidden);
-    // CLI not installed: hidden even when the data is old (the answer is cached, so reset it)
-    *present.lock().unwrap() = false;
-    app.set_grok_refresh(
-        Arc::new(|| Ok(None)),
-        Arc::new({
-            let p = present.clone();
-            move || *p.lock().unwrap()
-        }),
-    );
     assert_eq!(app.grok_refresh_mode(&old, now()), RefreshMode::Hidden);
-    assert!(!app.grok_cli_present());
     // Grok switched off: hidden
     let mut off = state_with(&[], now());
     off.grok.as_mut().unwrap().enabled = false;
-    *present.lock().unwrap() = true;
-    app.set_grok_refresh(Arc::new(|| Ok(None)), Arc::new(|| true));
     assert_eq!(app.grok_refresh_mode(&off, now()), RefreshMode::Hidden);
 }
 
