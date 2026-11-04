@@ -3,7 +3,6 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
-
 ## [0.6.7] - 2026-11-04
 
 ### Added
@@ -12,6 +11,7 @@ Versions are in `Cargo.toml`; a release tag is `v<version>`.
   at a limit, when it is available again, and what the plan still allows past it) and `get_ai_usage` (plan, windows,
   reset times, pace, per-model limits, data age). It talks over stdin/stdout only, reads the window's saved readings,
   makes no network calls and writes nothing. Setup is in README section 15.
+
 ## [0.6.5] - 2026-11-04
 
 ### Changed
