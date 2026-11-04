@@ -39,7 +39,7 @@ dependencies = [
 
 [[package]]
 name = "aitrack"
-version = "0.6.3"
+version = "0.6.5"
 dependencies = [
  "aitrack",
  "block2 0.6.2",

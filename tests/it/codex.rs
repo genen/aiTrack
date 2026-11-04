@@ -109,6 +109,22 @@ fn win(pct: f64, minutes: u64, resets: DateTime<Utc>) -> Value {
     json!({"used_percent": pct, "window_minutes": minutes, "resets_at": resets.timestamp()})
 }
 
+/// The day folder Codex writes a session started at `at` into (it names them by the local date).
+/// Tests whose lines are timed from `Utc::now()` must use this, not a fixed date.
+fn day(at: DateTime<Utc>) -> String {
+    at.with_timezone(&chrono::Local)
+        .format("%Y/%m/%d")
+        .to_string()
+}
+
+/// A session file name like Codex's for a session started at `at`.
+fn rollout(at: DateTime<Utc>, id: &str) -> String {
+    format!(
+        "rollout-{}-{id}.jsonl",
+        at.with_timezone(&chrono::Local).format("%Y-%m-%dT%H-%M-%S")
+    )
+}
+
 fn write_session(h: &Home, day: &str, name: &str, lines: &[String]) -> std::path::PathBuf {
     let d = h.dir.join(&format!("codexhome/sessions/{day}"));
     std::fs::create_dir_all(&d).unwrap();
@@ -272,8 +288,8 @@ fn the_newest_session_file_wins_and_history_is_imported() {
     let reset7 = at + Duration::days(4);
     write_session(
         &h,
-        "2026/10/22",
-        "rollout-2026-10-22T10-00-00-a.jsonl",
+        &day(at - Duration::hours(30)),
+        &rollout(at - Duration::hours(30), "a"),
         &[rl_line(
             at - Duration::hours(30),
             "codex",
@@ -283,8 +299,8 @@ fn the_newest_session_file_wins_and_history_is_imported() {
     );
     write_session(
         &h,
-        "2026/10/24",
-        "rollout-2026-10-24T10-00-00-b.jsonl",
+        &day(at - Duration::minutes(20)),
+        &rollout(at - Duration::minutes(20), "b"),
         &[
             r#"{"type":"session_meta","payload":{"id":"s1","cwd":"/home/me/proj"}}"#.to_string(),
             rl_line(
@@ -339,7 +355,7 @@ fn stale_ended_and_missing_logs_fail_with_clear_messages() {
     // a folder without usage lines
     write_session(
         &h,
-        "2026/10/24",
+        &day(Utc::now()),
         "rollout-x.jsonl",
         &[r#"{"type":"session_meta"}"#.into()],
     );
@@ -349,7 +365,7 @@ fn stale_ended_and_missing_logs_fail_with_clear_messages() {
     let at = Utc::now() - Duration::hours(3);
     write_session(
         &h,
-        "2026/10/24",
+        &day(at),
         "rollout-y.jsonl",
         &[rl_line(
             at,
@@ -365,7 +381,7 @@ fn stale_ended_and_missing_logs_fail_with_clear_messages() {
     let at = Utc::now() - Duration::minutes(5);
     write_session(
         &h,
-        "2026/10/24",
+        &day(at),
         "rollout-z.jsonl",
         &[rl_line(
             at,
@@ -405,6 +421,47 @@ fn compressed_and_archived_sessions_are_read() {
         .poll_once(&JsonlStore::new(h.dir.join("u.jsonl")))
         .unwrap();
     assert_eq!(rec["weekly"]["pct"], 35.0);
+}
+
+#[test]
+fn a_compressed_session_is_read_line_by_line_past_an_oversized_line() {
+    let h = home();
+    let at = Utc::now() - Duration::minutes(3);
+    let old = rl_line(
+        at - Duration::minutes(30),
+        "codex",
+        win(10.0, 300, at + Duration::hours(1)),
+        win(30.0, 10080, at + Duration::days(2)),
+    );
+    // a 2 MB tool output (longer than any usage line is looked at) between two usage reports
+    let huge = format!(
+        r#"{{"type":"response_item","payload":{{"output":"{}"}}}}"#,
+        "x".repeat(2 << 20)
+    );
+    let new = rl_line(
+        at,
+        "codex",
+        win(15.0, 300, at + Duration::hours(1)),
+        win(35.0, 10080, at + Duration::days(2)),
+    );
+    let text = [old, huge, new].join("\n") + "\n";
+    let bytes = ruzstd::encoding::compress_to_vec(
+        text.as_bytes(),
+        ruzstd::encoding::CompressionLevel::Fastest,
+    );
+    let dir = h.dir.join(&format!("codexhome/sessions/{}", day(at)));
+    std::fs::create_dir_all(&dir).unwrap();
+    let p = dir.join("rollout-big.jsonl.zst");
+    std::fs::write(&p, bytes).unwrap();
+    let entries = codex::read_log_file(&p).unwrap();
+    assert_eq!(
+        entries.len(),
+        2,
+        "both usage reports, the long line skipped"
+    );
+    // a damaged file is an error, not an empty success
+    std::fs::write(&p, b"not zstd").unwrap();
+    assert!(codex::read_log_file(&p).is_err());
 }
 
 // ------------------------------------------------------------ the live endpoint (mock server)
@@ -549,7 +606,7 @@ fn an_expired_or_refused_login_says_open_codex_and_the_log_takes_over() {
     let at = Utc::now() - Duration::minutes(2);
     write_session(
         &h,
-        "2026/10/24",
+        &day(at),
         "rollout-a.jsonl",
         &[rl_line(
             at,
@@ -844,7 +901,7 @@ fn the_diagnostics_text_has_no_secrets() {
     let at = Utc::now() - Duration::minutes(2);
     write_session(
         &h,
-        "2026/10/24",
+        &day(at),
         "rollout-a.jsonl",
         &[rl_line(
             at,
@@ -874,7 +931,7 @@ fn codex_sessions_feed_the_projects_view_without_double_counting() {
     };
     write_session(
         &h,
-        "2026/10/24",
+        &day(at),
         "rollout-p.jsonl",
         &[
             json!({"timestamp": t(at), "type": "session_meta", "payload": {"id": "sess-1", "cwd": "C:\\Users\\me\\aiTrack"}}).to_string(),
