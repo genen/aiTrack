@@ -452,20 +452,21 @@ header to ask at once.
 ### If Grok shows old data or "login expired"
 
 - The CLI writes the log line aiTrack needs only when it runs. If Grok shows an old value with an amber age
-  label, press **Refresh** under the Grok row (or the **Refresh now** button in the header). aiTrack then starts the CLI
+  label, press the **Refresh now** button in the header. aiTrack then starts the CLI
   in the background for a moment, with no window, and closes it again. It never sends a prompt, so it uses no
   credits, and it does nothing while you have `grok` open yourself.
 - If the message says **Grok login expired**, run `grok` once yourself, or press the **Refresh now** button in the header. The CLI
   renews its sign-in when it starts.
-- If a refresh says `no new data (Grok did not fetch billing)`, run `grok` yourself, check that you are signed
-  in, and try again.
+- If a refresh says `no new data (Grok did not fetch billing)`, or Grok shows only dashes, run `grok` yourself, check
+  that you are signed in and that the CLI is up to date (an old Grok CLI may not fetch billing), and try again.
 
 ### `grok` is not found
 
 The installer adds the CLI to your user PATH, but a PowerShell window opened before the install does not see it
 yet. aiTrack does not depend on PATH. It looks for `grok.exe` on PATH and also in `~\.grok\bin`,
 `~\.grok\versions\*`, `~\.local\bin`, `%LOCALAPPDATA%\Programs\grok` and a few other usual places. If your copy is
-somewhere else, the **Refresh** button is hidden (the live billing and the log still work if `~\.grok` exists).
+somewhere else, the header **Refresh now** button only polls and does not start it (the live billing and the log still
+work if `~\.grok` exists).
 
 ## 6. Reading the window
 
@@ -854,7 +855,7 @@ Grok needs the Grok CLI (see [section 5](#5-grok-needs-the-grok-cli)). Check tha
 exists. In Settings > Display, **Show Grok** can be set to **On** to show it even when it is not found.
 
 **The Grok number is old.**
-The CLI only updates its log when it runs. Press **Refresh** under the Grok row.
+The CLI only updates its log when it runs. Press the **Refresh now** button in the header.
 
 **The numbers look a little old or one source seems to lag.**
 That is normal for the desktop app files. The amber age label says how old. **Refresh now** polls at once.
@@ -1194,15 +1195,14 @@ first:
    known value (dimmed, with the data-age chip and an "only updates when you use the CLI" tooltip line); only
    a snapshot from a billing period that has ended is shown as "no current data", never as the present.
 
-**Refresh.** When Grok data is missing or more than an hour old and the `grok` CLI is found (PATH, then
-`~/.grok/bin`, `~/.grok/versions/*`, `~/.local/bin`, `%LOCALAPPDATA%\Programs\grok`, `%APPDATA%\npm`, ...), a small "Refresh" appears under Grok's row (and Settings > Display has "Refresh Grok
-now"). Starting the CLI makes it fetch billing and renew its login, so aiTrack starts it with no window, no
+**Refresh.** When the `grok` CLI is found (PATH, then `~/.grok/bin`, `~/.grok/versions/*`, `~/.local/bin`,
+`%LOCALAPPDATA%\Programs\grok`, `%APPDATA%\npm`, ...), the header's Refresh button also starts it. Starting the CLI makes it fetch billing and renew its login, so aiTrack starts it with no window, no
 arguments and stdin/stdout/stderr on the null device, waits up to
 25 s for a newer `billing: fetched credits config` line, then ends the process (the whole tree on Windows).
 It never sends a prompt, so no credits are used, and it does nothing while a `grok` process is running. While
 it runs the line says "Refreshing...", afterwards Grok is polled again; a failure shows a one-line reason
-(`no new data (Grok did not fetch billing)` when the CLI ran but wrote no billing line). The Settings row keeps
-the outcome ("Refreshed 19:42: weekly 8%" or the reason) until the next click, and every attempt is a row in
+under Grok's rows for 20 s (`no new data (Grok did not fetch billing)` when the CLI ran but wrote no billing line).
+Every attempt is a row in
 Settings > Diagnostics and Copy log (`Grok refresh: ok, weekly 8% · grok-log` / `Grok refresh: failed, <reason>`).
 
 **Opening Grok.** Clicking the Grok badge (Windows) opens, in this order: the "Grok Bot" Start-menu app

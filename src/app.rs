@@ -343,7 +343,7 @@ impl CliProbe {
     }
 }
 
-/// State of the "Refresh Grok" control.
+/// State of the Grok CLI refresh (run by the header's Refresh button).
 struct GrokRefresh {
     progress: Arc<Mutex<(Progress, Instant)>>,
     probe: Arc<CliProbe>,
@@ -388,10 +388,8 @@ impl GrokRefresh {
 /// What the Grok block shows for the refresh control.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RefreshMode {
-    /// Nothing: data is recent, the CLI is not installed, or Grok is off.
+    /// Nothing: no refresh is running or has just failed, or Grok is off.
     Hidden,
-    /// "Refresh" (data is missing or old).
-    Offer,
     /// "Refreshing\u{2026}"
     Running,
     /// One-line reason.
@@ -873,11 +871,10 @@ impl App {
         }
     }
 
-    /// What the Grok block's refresh control shows now: offered when Grok is tracked, the CLI is
-    /// installed and the newest Grok reading is missing or older than
-    /// [`crate::grok_cli::REFRESH_AFTER_MIN`]; always visible while running and for a few seconds
-    /// after a failure.
-    pub fn grok_refresh_mode(&self, st: &State, now: chrono::DateTime<Utc>) -> RefreshMode {
+    /// What the line under Grok's rows shows now: "Refreshing..." while a refresh (started by the
+    /// header's Refresh button) runs, and why it failed for a few seconds after a failure. There is
+    /// no button there any more: the header Refresh starts the Grok CLI refresh.
+    pub fn grok_refresh_mode(&self, st: &State, _now: chrono::DateTime<Utc>) -> RefreshMode {
         let Some(g) = &self.grok else {
             return RefreshMode::Hidden;
         };
@@ -891,25 +888,9 @@ impl App {
             .unwrap_or_else(|e| e.into_inner())
             .clone();
         match prog {
-            Progress::Running => return RefreshMode::Running,
-            Progress::Failed(m) if at.elapsed() < REFRESH_FAIL_SHOWN => {
-                return RefreshMode::Failed(m)
-            }
-            _ => {}
-        }
-        let newest = st
-            .grok
-            .as_ref()
-            .and_then(|x| x.plan.as_ref())
-            .and_then(|p| crate::util::parse_ts(&p.last));
-        if !crate::grok_cli::needs_refresh(newest, now) {
-            return RefreshMode::Hidden;
-        }
-        let present = self.grok_cli_present();
-        if present {
-            RefreshMode::Offer
-        } else {
-            RefreshMode::Hidden
+            Progress::Running => RefreshMode::Running,
+            Progress::Failed(m) if at.elapsed() < REFRESH_FAIL_SHOWN => RefreshMode::Failed(m),
+            _ => RefreshMode::Hidden,
         }
     }
 

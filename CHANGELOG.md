@@ -3,6 +3,13 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.6.6] - 2026-11-04
+
+### Removed
+- The small "Refresh" link under the Grok rows. The **Refresh now** button in the header already starts the Grok CLI
+  refresh (since 0.6.1), so the second button did the same thing. The line under Grok still says "Refreshing..." while
+  that runs and shows why it failed (for example a signed-out CLI).
+
 ## [0.6.5] - 2026-11-04
 
 ### Changed
