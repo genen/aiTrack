@@ -31,7 +31,8 @@ This guide is for people who just want to run it. Deeper technical notes are at 
 12. [Files and privacy](#12-files-and-privacy)
 13. [Troubleshooting](#13-troubleshooting)
 14. [Command-line flags](#14-command-line-flags)
-15. [Known limits and roadmap](#15-known-limits-and-roadmap)
+15. [Let other AIs ask aiTrack (MCP)](#15-let-other-ais-ask-aitrack-mcp)
+16. [Known limits and roadmap](#16-known-limits-and-roadmap)
 
 ## 1. What aiTrack is
 
@@ -929,11 +930,73 @@ before them, for example `cargo run --release -- --sources`.
 | `--interval MIN` | collector poll interval in minutes (default 15; headless only) |
 | `--data PATH` | the usage file to use (default `~/.aitrack/usage.jsonl`) |
 | `--projects [7\|30\|all]` | print per-project token and cost usage from local transcripts (default 7), no message content |
+| `--mcp` | MCP server for AI tools on stdin/stdout (section 15); read-only |
 | `--sources` | explain where usage data is found: paths, file structure and ages, no ids or tokens (on Linux: the folders checked, existence and entry counts only) |
 | `-V`, `--version` | print the version, build number, commit and date |
 | `-h`, `--help` | show the short help |
 
-## 15. Known limits and roadmap
+## 15. Let other AIs ask aiTrack (MCP)
+
+aiTrack can answer other AI tools (Claude Code, Claude Desktop, Codex, Gemini, Cursor and others that support the
+Model Context Protocol, MCP) about the usage of every AI it tracks: how much of each limit is used, which AI is at its
+limit and when it is available again. An AI can then, for example, hand work to another AI before it runs out.
+
+The AI tool starts `aitrack --mcp` itself and talks to it over standard input and output. There is no port, no
+network and no second window. It only reads the readings the aiTrack window saved (and the Grok Bot app's cache), so
+keep the window running for fresh numbers; every answer says how old its numbers are (`data_age_minutes`). It sends
+no sign-in, account id, email or path.
+
+Two tools:
+
+| Tool | What it returns |
+|---|---|
+| `check_ai_availability` | per AI: `available` (false when a limit is at 100%), `limited_by`, `available_again_at`, percent used, data age |
+| `get_ai_usage` | per AI: plan, each window (5-hour, weekly) with percent used and left, reset time, pace per hour, projected percent at reset, per-model limits, credits, source and data age |
+
+Both take an optional `ai` argument (`claude`, `chatgpt`, `gemini` or `grok`); without it they list every AI tracked
+on this computer. Times are UTC.
+
+The program's path: Windows `C:\Program Files\aiTrack\aitrack.exe`, Mac `/Applications/aiTrack.app/Contents/MacOS/aitrack`,
+Linux `/usr/bin/aitrack`. With the portable zip or a build you made, use the full path of that `aitrack.exe`. Add it
+to your AI tool like this (Windows path shown).
+
+Claude Code:
+
+```
+claude mcp add --scope user aitrack -- "C:\Program Files\aiTrack\aitrack.exe" --mcp
+```
+
+Codex (`config.toml` in the Codex folder, `C:\Users\<you>\.codex\config.toml` on Windows):
+
+```
+[mcp_servers.aitrack]
+command = 'C:\Program Files\aiTrack\aitrack.exe'
+args = ["--mcp"]
+```
+
+Claude Desktop (`claude_desktop_config.json`), Gemini (`settings.json` in the `.gemini` folder) and most other tools:
+
+```
+{
+  "mcpServers": {
+    "aitrack": {
+      "command": "C:\\Program Files\\aiTrack\\aitrack.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+Then ask the AI, for example, "Which of my AIs can I use right now?".
+
+Started by hand in a terminal, `aitrack --mcp` waits silently for messages (on Windows it shows nothing at all); that
+is expected. Only the AI tool talks to it.
+
+When a limit is at 100%, `available` is false. `can_continue_with` then lists what the plan still allows past the
+limit (Claude extra usage, ChatGPT credits or banked resets). Gemini refills gradually, so it has no fixed "available
+again" time; `full_again_at` says when its weekly limit is full again.
+
+## 16. Known limits and roadmap
 
 Limits you should know about:
 

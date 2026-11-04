@@ -34,6 +34,7 @@ mod launch;
 mod linux_sources;
 mod live;
 mod macos_bundle;
+mod mcp;
 mod pace;
 mod placement;
 mod plan_windows;
