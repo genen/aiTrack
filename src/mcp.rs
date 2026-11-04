@@ -203,7 +203,11 @@ pub struct Availability {
     /// `None` when there is no number to judge by (tracked, but no reading yet).
     pub available: Option<bool>,
     pub limited_by: Vec<&'static str>,
+    /// `None` while blocked when a blocking window has no known reset (Gemini refills gradually).
     pub available_again_at: Option<DateTime<Utc>>,
+    /// While blocked: what the plan says can still be used past the limit (extra usage, credits,
+    /// banked resets), so the AI may keep working.
+    pub can_continue_with: Vec<&'static str>,
 }
 
 pub fn availability(v: &Vendor, now: DateTime<Utc>) -> Availability {
@@ -211,31 +215,64 @@ pub fn availability(v: &Vendor, now: DateTime<Utc>) -> Availability {
         available: None,
         limited_by: vec![],
         available_again_at: None,
+        can_continue_with: vec![],
     };
     if v.placeholder {
         return out;
     }
     let mut any = false;
+    let mut unknown_time = false;
     for &k in v.kinds() {
         let Some(g) = v.gauge(k) else { continue };
         any = true;
         if window_ended(g, v.observed_at, now) || g.pct < 100.0 {
             continue;
         }
+        // Gemini's weekly limit is full again by `full_at` (it refills gradually before that)
+        if k == Kind::Weekly && v.full_at.is_some_and(|f| f <= now) {
+            continue;
+        }
         out.limited_by.push(window_name(k));
-        let at = g.resets_at.as_deref().and_then(crate::util::parse_ts);
-        // Gemini refills gradually: its "full again" time stands in for a missing reset time
-        let at = at.or(v.full_at);
-        out.available_again_at = match (out.available_again_at, at) {
-            (Some(a), Some(b)) => Some(a.max(b)),
-            (a, b) => a.or(b),
-        };
+        match g.resets_at.as_deref().and_then(crate::util::parse_ts) {
+            Some(at) => {
+                out.available_again_at = Some(out.available_again_at.map_or(at, |a| a.max(at)))
+            }
+            None => unknown_time = true,
+        }
     }
-    // the shared Grok pool, or a separate Grok Bot meter, is reported by its own fields
+    if unknown_time {
+        out.available_again_at = None;
+    }
     if any {
         out.available = Some(out.limited_by.is_empty());
     }
+    if !out.limited_by.is_empty() {
+        if v.credits
+            .as_ref()
+            .is_some_and(|c| c.limit.is_none_or(|l| c.used < l))
+        {
+            out.can_continue_with.push("extra usage");
+        }
+        if v.credit_note.is_some() {
+            out.can_continue_with.push("credits");
+        }
+        if v.banked_resets.is_some() {
+            out.can_continue_with.push("banked resets");
+        }
+    }
     out
+}
+
+fn insert_availability(m: &mut Map<String, Value>, a: &Availability) {
+    m.insert("available".into(), json!(a.available));
+    m.insert("limited_by".into(), json!(a.limited_by));
+    m.insert(
+        "available_again_at".into(),
+        json!(a.available_again_at.map(iso)),
+    );
+    if !a.can_continue_with.is_empty() {
+        m.insert("can_continue_with".into(), json!(a.can_continue_with));
+    }
 }
 
 /// Full detail of one AI.
@@ -244,13 +281,7 @@ pub fn vendor_json(v: &Vendor, now: DateTime<Utc>) -> Value {
     m.insert("ai".into(), json!(v.name));
     m.insert("id".into(), json!(vendor_key(v.id)));
     m.insert("plan".into(), json!(v.tier));
-    let a = availability(v, now);
-    m.insert("available".into(), json!(a.available));
-    m.insert("limited_by".into(), json!(a.limited_by));
-    m.insert(
-        "available_again_at".into(),
-        json!(a.available_again_at.map(iso)),
-    );
+    insert_availability(&mut m, &availability(v, now));
     let age = age_min(v, now);
     m.insert("observed_at".into(), json!(v.observed_at.map(iso)));
     m.insert("data_age_minutes".into(), num(age, 0));
@@ -303,6 +334,7 @@ pub fn vendor_json(v: &Vendor, now: DateTime<Utc>) -> Value {
                 "resets_at": iso(b.resets_at),
                 "observed_at": iso(b.read_at),
                 "data_age_minutes": num(Some(b.age_min(now)), 0),
+                "at_limit": b.pct >= 100.0,
             });
             if let Some(g) = v.bot_gauge.as_ref().filter(|_| !b.stale(now)) {
                 bot["pace_percent_per_hour"] = num(g.rate_per_hour, 2);
@@ -333,18 +365,20 @@ pub fn availability_json(v: &Vendor, now: DateTime<Utc>) -> Value {
     let mut m = Map::new();
     m.insert("ai".into(), json!(v.name));
     m.insert("id".into(), json!(vendor_key(v.id)));
-    m.insert("available".into(), json!(a.available));
-    m.insert("limited_by".into(), json!(a.limited_by));
-    m.insert(
-        "available_again_at".into(),
-        json!(a.available_again_at.map(iso)),
-    );
+    insert_availability(&mut m, &a);
     for &k in v.kinds() {
         let key = match k {
             Kind::Session => "five_hour_used_percent",
             Kind::Weekly => "weekly_used_percent",
         };
         m.insert(key.into(), json!(used(k)));
+    }
+    if let Some(b) = v.bot.filter(|b| !b.period_ended(now)) {
+        // a separate Grok Bot meter (SuperGrok); on a shared pool it is the weekly row itself
+        m.insert(
+            "grok_bot_weekly_used_percent".into(),
+            num(Some(b.pct.clamp(0.0, 100.0)), 1),
+        );
     }
     m.insert("data_age_minutes".into(), num(age_min(v, now), 0));
     Value::Object(m)
@@ -369,8 +403,10 @@ fn tools() -> Value {
             "title": "Check AI availability",
             "description": "Which AI assistants tracked by aiTrack on this computer (Claude, \
                 ChatGPT/Codex, Gemini, Grok) can be used right now. Per AI: available (false = a \
-                usage limit is at 100%), which limit blocks it, when it is available again, the \
-                used percentages and how old the numbers are.",
+                usage limit is at 100%), which limit blocks it, when it is available again (null \
+                for Gemini, which refills gradually), can_continue_with (extra usage, credits or \
+                banked resets the plan still has past the limit), the used percentages and how \
+                old the numbers are.",
             "inputSchema": input,
             "annotations": {"readOnlyHint": true, "openWorldHint": false}
         },
@@ -413,7 +449,11 @@ fn tool_result(payload: Value, is_error: bool) -> Value {
 
 fn call_tool(params: &Value, src: &Sources, now: DateTime<Utc>) -> Result<Value, (i64, String)> {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-    let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    let args = match params.get("arguments") {
+        None | Some(Value::Null) => Value::Null,
+        Some(a @ Value::Object(_)) => a.clone(),
+        Some(_) => return Err((-32602, "arguments must be an object".into())),
+    };
     let full = match name {
         "get_ai_usage" => true,
         "check_ai_availability" => false,
@@ -474,7 +514,17 @@ pub fn handle(msg: &Value, src: &Sources, now: DateTime<Utc>) -> Option<Value> {
         // notifications (initialized, cancelled, ...) and stray replies get no answer
         return None;
     };
+    if !(id.is_string() || id.is_number()) {
+        return Some(rpc_error(
+            Value::Null,
+            -32600,
+            "id must be a string or a number",
+        ));
+    }
     let Some(method) = method else {
+        if obj.contains_key("method") {
+            return Some(rpc_error(id, -32600, "method must be a string"));
+        }
         // a reply to a request we never sent
         return None;
     };

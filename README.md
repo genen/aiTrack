@@ -957,7 +957,8 @@ Both take an optional `ai` argument (`claude`, `chatgpt`, `gemini` or `grok`); w
 on this computer. Times are UTC.
 
 The program's path: Windows `C:\Program Files\aiTrack\aitrack.exe`, Mac `/Applications/aiTrack.app/Contents/MacOS/aitrack`,
-Linux `/usr/bin/aitrack`. Add it to your AI tool like this (Windows path shown; use your own for a build you made).
+Linux `/usr/bin/aitrack`. With the portable zip or a build you made, use the full path of that `aitrack.exe`. Add it
+to your AI tool like this (Windows path shown).
 
 Claude Code:
 
@@ -987,6 +988,13 @@ Claude Desktop (`claude_desktop_config.json`), Gemini (`settings.json` in the `.
 ```
 
 Then ask the AI, for example, "Which of my AIs can I use right now?".
+
+Started by hand in a terminal, `aitrack --mcp` waits silently for messages (on Windows it shows nothing at all); that
+is expected. Only the AI tool talks to it.
+
+When a limit is at 100%, `available` is false. `can_continue_with` then lists what the plan still allows past the
+limit (Claude extra usage, ChatGPT credits or banked resets). Gemini refills gradually, so it has no fixed "available
+again" time; `full_again_at` says when its weekly limit is full again.
 
 ## 16. Known limits and roadmap
 

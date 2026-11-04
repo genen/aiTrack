@@ -115,6 +115,9 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Cli, String> {
             other => return Err(format!("unknown option: {other}")),
         }
     }
+    if cli.mcp && (cli.collect || cli.sources || cli.projects.is_some() || cli.interval.is_some()) {
+        return Err("--mcp takes only --data".into());
+    }
     Ok(cli)
 }
 

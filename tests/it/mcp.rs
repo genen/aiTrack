@@ -366,3 +366,103 @@ fn the_binary_speaks_mcp_on_stdout_only() {
     assert_eq!(p["ais"][0]["id"], "claude");
     assert_eq!(p["ais"][0]["available"], false);
 }
+
+#[test]
+fn mcp_refuses_other_mode_flags() {
+    let out = Command::new(env!("CARGO_BIN_EXE_aitrack"))
+        .args(["--mcp", "--collect"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--mcp takes only --data"));
+}
+
+#[test]
+fn malformed_requests_get_an_error_reply() {
+    let dir = TempDir::new();
+    let src = setup(&dir);
+    let r = handle(
+        &json!({"jsonrpc": "2.0", "id": 4, "method": 5}),
+        &src,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(r["id"], 4);
+    assert_eq!(r["error"]["code"], -32600);
+    let r = handle(
+        &json!({"jsonrpc": "2.0", "id": {"x": 1}, "method": "ping"}),
+        &src,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(r["id"], Value::Null);
+    assert_eq!(r["error"]["code"], -32600);
+    let r = handle(
+        &json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+                "params": {"name": "get_ai_usage", "arguments": ["claude"]}}),
+        &src,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(r["error"]["code"], -32602);
+    // a reply to a request the server never sent: no answer
+    assert!(handle(
+        &json!({"jsonrpc": "2.0", "id": 6, "result": {}}),
+        &src,
+        now()
+    )
+    .is_none());
+}
+
+#[test]
+fn extra_capacity_is_listed_and_gemini_has_no_fixed_time() {
+    let dir = TempDir::new();
+    let src = setup(&dir);
+    let n = now();
+    let data = src.data.parent().unwrap().to_path_buf();
+    // Claude at its weekly limit with extra usage left
+    write_lines(
+        &src.data,
+        &[json!({
+            "ts": ts(n - Duration::minutes(5)), "ok": true, "source": "oauth",
+            "session": {"pct": 10.0, "resets_at": ts(n + Duration::hours(2))},
+            "weekly": {"pct": 100.0, "resets_at": ts(n + Duration::days(3))},
+            "spend": {"enabled": true, "used": 13.5, "limit": 50.0},
+        })],
+    );
+    // Gemini weekly at 100%, full again in 30 hours; then a reading whose full time has passed
+    write_lines(
+        &data.join("usage-antigravity.jsonl"),
+        &[json!({
+            "ts": ts(n - Duration::minutes(3)), "ok": true, "source": "agy-usage",
+            "weekly": {"pct": 100.0},
+            "raw": {"full_at": {"weekly": ts(n + Duration::hours(30))}},
+        })],
+    );
+    let r = call(&src, "check_ai_availability", json!({}));
+    let p = &r["structuredContent"];
+    let c = ai(p, "claude");
+    assert_eq!(c["available"], false);
+    assert_eq!(c["can_continue_with"], json!(["extra usage"]));
+    let g = ai(p, "gemini");
+    assert_eq!(g["available"], false);
+    assert_eq!(g["available_again_at"], Value::Null);
+    assert!(ai(
+        &call(&src, "check_ai_availability", json!({"ai": "grok"}))["structuredContent"],
+        "grok"
+    )
+    .get("can_continue_with")
+    .is_none());
+
+    write_lines(
+        &data.join("usage-antigravity.jsonl"),
+        &[json!({
+            "ts": ts(n - Duration::hours(3)), "ok": true, "source": "agy-usage",
+            "weekly": {"pct": 100.0},
+            "raw": {"full_at": {"weekly": ts(n - Duration::hours(1))}},
+        })],
+    );
+    let r = call(&src, "check_ai_availability", json!({"ai": "gemini"}));
+    assert_eq!(ai(&r["structuredContent"], "gemini")["available"], true);
+}
