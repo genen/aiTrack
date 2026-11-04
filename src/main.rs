@@ -8,6 +8,7 @@
 //! * only the window and `--collect` take the single-instance lock; `--once`, `--sources` and
 //!   `--help` never do
 //! * `--sources`: print where usage data is (or is not) found, structure only, and exit
+//! * `--mcp`: MCP server on stdin/stdout for other AI tools (read-only, see `aitrack::mcp`)
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
@@ -36,6 +37,8 @@ OPTIONS:
     --data PATH        usage snapshot file (default ~/.aitrack/usage.jsonl or $AITRACK_DATA)
     --projects [R]     per-project token / cost usage from local transcripts (R = 7, 30 or all; default 7);
                        prints project names, tokens, cost, sessions and the folders checked, no message content
+    --mcp              MCP server on stdin/stdout: AI tools (Claude Code, Codex, ...) ask it for every
+                       tracked AI's usage and availability; read-only, uses the window's saved readings
     --sources          diagnose the usage sources (paths, file structure, ages); prints no ids or tokens
     -V, --version      print the build (version, build number, commit, date) and exit
     -h, --help         show this help
@@ -53,6 +56,7 @@ struct Cli {
     interval: Option<f64>,
     data: Option<PathBuf>,
     sources: bool,
+    mcp: bool,
     projects: Option<aitrack::transcripts::ProjRange>,
     help: bool,
     version: bool,
@@ -80,6 +84,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Cli, String> {
             }
             "--app" => {}
             "--sources" => cli.sources = true,
+            "--mcp" => cli.mcp = true,
             "--projects" => {
                 use aitrack::transcripts::ProjRange;
                 let given = match &inline {
@@ -157,6 +162,21 @@ fn main() {
             std::process::exit(2);
         }
     };
+    if cli.mcp && !cli.help && !cli.version {
+        // stdout carries the protocol only: no console attach, no lock, no other output
+        let data = cli.data.clone().unwrap_or_else(default_data_path);
+        let src = aitrack::mcp::Sources::from_process(data);
+        let code = match aitrack::mcp::serve(
+            std::io::stdin().lock(),
+            std::io::stdout().lock(),
+            &src,
+            chrono::Utc::now,
+        ) {
+            Ok(()) => 0,
+            Err(_) => 1,
+        };
+        std::process::exit(code);
+    }
     if cli.help || cli.version || cli.collect || cli.sources || cli.projects.is_some() {
         attach_console();
     }

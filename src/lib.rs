@@ -24,6 +24,7 @@ pub mod grok_cli;
 pub mod instance;
 pub mod launch;
 pub mod live;
+pub mod mcp;
 pub mod placement;
 pub mod pricing;
 pub mod reading;
