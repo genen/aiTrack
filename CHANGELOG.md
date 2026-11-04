@@ -3,6 +3,14 @@
 All notable changes to aiTrack. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are in `Cargo.toml`; a release tag is `v<version>`.
 
+## [0.6.5] - 2026-11-04
+
+### Changed
+- Compressed Codex session files (`.jsonl.zst`) are decoded line by line instead of whole into memory. Memory use
+  stays small for any file size, and a file larger than 64 MB no longer loses its newest usage lines. The
+  Projects view reads compressed Codex sessions the same way.
+- Codex tests put their session files in the day folder of the times they write, not a fixed date.
+
 ## [0.6.3] - 2026-11-02
 
 ### Changed

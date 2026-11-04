@@ -208,6 +208,32 @@ fn next_line<R: BufRead>(r: &mut R, buf: &mut Vec<u8>, max: usize) -> std::io::R
     }
 }
 
+/// Call `f` for every line of the zstd-compressed file `path`, decoding as a stream: at most
+/// `max_line` bytes of one line are held in memory (longer lines are skipped), and decoding stops
+/// after `max_total` decompressed bytes. An unreadable or invalid file is an error; lines seen
+/// before a decoding error have already been passed to `f`.
+pub(crate) fn for_each_zst_line(
+    path: &Path,
+    max_total: u64,
+    max_line: usize,
+    mut f: impl FnMut(&[u8]),
+) -> std::io::Result<()> {
+    let d = ruzstd::decoding::StreamingDecoder::new_with_max_window_size(
+        BufReader::new(File::open(path)?),
+        8 * 1024 * 1024,
+    )
+    .map_err(|e| std::io::Error::other(format!("invalid zstd file: {e}")))?;
+    let mut r = BufReader::with_capacity(256 * 1024, d.take(max_total));
+    let mut buf = Vec::new();
+    loop {
+        match next_line(&mut r, &mut buf, max_line)? {
+            Line::Eof => return Ok(()),
+            Line::TooLong => {}
+            Line::Ok => f(&buf),
+        }
+    }
+}
+
 fn text_of(line: &[u8]) -> std::borrow::Cow<'_, str> {
     String::from_utf8_lossy(line)
 }
@@ -775,26 +801,10 @@ fn parse_codex_file(path: &Path) -> Vec<Request> {
         .trim_end_matches(".jsonl")
         .to_owned();
     if name.ends_with(".zst") {
-        let Ok(f) = File::open(path) else {
-            return Vec::new();
-        };
-        let Ok(mut d) = ruzstd::decoding::StreamingDecoder::new_with_max_window_size(
-            BufReader::new(f),
-            8 * 1024 * 1024,
-        ) else {
-            return Vec::new();
-        };
-        let mut buf = Vec::new();
-        if (&mut d).take(MAX_FILE_BYTES).read_to_end(&mut buf).is_err() {
-            return Vec::new();
-        }
         return parse_codex_lines(
             &mut |f| {
-                for l in buf.split(|b| *b == b'\n') {
-                    if l.len() <= MAX_LINE_BYTES {
-                        f(l);
-                    }
-                }
+                // an unreadable or damaged file keeps the lines decoded before the damage
+                let _ = for_each_zst_line(path, MAX_FILE_BYTES, MAX_LINE_BYTES, f);
             },
             &stem,
         );

@@ -31,7 +31,6 @@ use crate::sources::{Env, Observation, Sample, UsageSource};
 use crate::util::{iso, parse_ts};
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use serde_json::{json, Value};
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration as StdDuration;
 
@@ -47,8 +46,11 @@ pub const MAX_LOG_FILES: usize = 12;
 /// A window this long or longer is the weekly one (shorter ones are the 5-hour session).
 const WEEKLY_FROM_MIN: f64 = 24.0 * 60.0;
 const MAX_AUTH_BYTES: u64 = 1024 * 1024;
-/// Largest decompressed `.jsonl.zst` session file read.
-const MAX_ZST_BYTES: u64 = 64 * 1024 * 1024;
+/// Decoding of a `.jsonl.zst` session file stops after this many decompressed bytes (a guard
+/// against a damaged or hostile file; the file is decoded as a stream, never held in memory).
+const MAX_ZST_BYTES: u64 = crate::transcripts::MAX_FILE_BYTES;
+/// Longest session-log line looked at in a `.jsonl.zst` file; usage reports are a few KB.
+const MAX_ZST_LINE: usize = 1024 * 1024;
 /// Log samples older than this are not imported as history.
 const HISTORY_DAYS: i64 = 30;
 
@@ -689,7 +691,8 @@ pub fn newest_log_files_at(env: &Env, max: usize, today: chrono::NaiveDate) -> V
     out
 }
 
-/// The usage reports of one session file (a plain file's last 4 MB, or a whole `.zst` one).
+/// The usage reports of one session file (a plain file's last 4 MB, or a whole `.zst` one,
+/// decoded line by line).
 pub fn read_log_file(path: &Path) -> std::io::Result<Vec<LogEntry>> {
     let zst = path
         .extension()
@@ -700,18 +703,11 @@ pub fn read_log_file(path: &Path) -> std::io::Result<Vec<LogEntry>> {
             .filter_map(|l| parse_log_line(l))
             .collect());
     }
-    let f = std::fs::File::open(path)?;
-    let mut d = ruzstd::decoding::StreamingDecoder::new_with_max_window_size(
-        std::io::BufReader::new(f),
-        8 * 1024 * 1024,
-    )
-    .map_err(|e| std::io::Error::other(format!("invalid zstd file: {e}")))?;
-    let mut buf = Vec::new();
-    (&mut d).take(MAX_ZST_BYTES).read_to_end(&mut buf)?;
-    Ok(buf
-        .split(|b| *b == b'\n')
-        .filter_map(parse_log_line)
-        .collect())
+    let mut out = Vec::new();
+    crate::transcripts::for_each_zst_line(path, MAX_ZST_BYTES, MAX_ZST_LINE, |l| {
+        out.extend(parse_log_line(l))
+    })?;
+    Ok(out)
 }
 
 /// Every usage report in the newest session files, oldest first (one per time and bucket).
